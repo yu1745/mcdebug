@@ -1,0 +1,89 @@
+plugins {
+	id 'net.fabricmc.fabric-loom-remap' version "${loom_version}" apply false
+	id 'org.jetbrains.kotlin.jvm' version "${kotlin_version}" apply false
+}
+
+allprojects {
+	repositories {
+		mavenLocal()
+		mavenCentral()
+		maven { url "https://maven.fabricmc.net/" }
+		maven { url "https://maven.blamejared.com/" }
+		maven { url "https://api.modrinth.com/maven" }
+		maven { url "https://maven.ftb.dev/releases" }
+		maven { url "https://maven.architectury.dev/" }
+		maven { url "https://maven.shedaniel.me/" }
+		maven { url "https://maven.terraformersmc.com/releases/" }
+		maven { url "https://jitpack.io" }
+	}
+}
+
+apply plugin: 'net.fabricmc.fabric-loom-remap'
+apply plugin: 'maven-publish'
+apply plugin: 'org.jetbrains.kotlin.jvm'
+
+version = project.mod_version
+group = project.maven_group
+
+base {
+	archivesName = project.archives_base_name
+}
+
+loom {
+	splitEnvironmentSourceSets()
+
+	mods {
+		"mcdebug" {
+			sourceSet sourceSets.main
+		}
+	}
+}
+
+dependencies {
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	mappings "net.fabricmc:yarn:${project.yarn_mappings}:v2"
+	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+	modImplementation "net.fabricmc:fabric-language-kotlin:${project.fabric_kotlin_version}"
+}
+
+processResources {
+	def version = project.version
+	inputs.property "version", version
+
+	filesMatching("fabric.mod.json") {
+		expand "version": version
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 17
+}
+
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).all {
+	kotlinOptions {
+		jvmTarget = 17
+		freeCompilerArgs += [
+			"-Xemit-jvm-type-annotations"
+		]
+	}
+}
+
+java {
+	withSourcesJar()
+	sourceCompatibility = JavaVersion.VERSION_17
+	targetCompatibility = JavaVersion.VERSION_17
+}
+
+jar {
+	def projectName = project.archives_base_name
+	inputs.property "projectName", projectName
+	from("LICENSE") { rename { "${it}_$projectName" } }
+}
+
+publishing {
+	publications {
+		create("mavenJava", MavenPublication) { from components.java }
+	}
+	repositories { }
+}
