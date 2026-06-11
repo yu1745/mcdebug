@@ -1,0 +1,18 @@
+{
+  "name": "@yu1745/mcdebug",
+  "version": "0.1.0",
+  "description": "TypeScript CLI for the mcdebug Minecraft debug server mod",
+  "type": "module",
+  "bin": {
+    "mcdebug": "./mcdebug-client/dist/cli.js"
+  },
+  "files": [
+    "mcdebug-client/dist/"
+  ],
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "commander": "^12.1.0"
+  }
+}
