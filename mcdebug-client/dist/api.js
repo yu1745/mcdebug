@@ -68,6 +68,12 @@ export class DebugApi {
     };
     /** tick is intentionally not exposed: server drives ticks, client never advances them. */
     tick = undefined;
+    fluid = {
+        info: (p, opts) => this.rpc.call('fluid.info', { pos: p, side: opts?.side, dim: opts?.dim }),
+        get: (p, opts) => this.rpc.call('fluid.get', { pos: p, side: opts?.side, index: opts?.index, dim: opts?.dim }),
+        insert: (p, fluid, amount, opts) => this.rpc.call('fluid.insert', { pos: p, side: opts?.side, index: opts?.index, fluid, amount, dim: opts?.dim }),
+        extract: (p, amount, opts) => this.rpc.call('fluid.extract', { pos: p, side: opts?.side, index: opts?.index, amount, dim: opts?.dim }),
+    };
     wait = {
         /**
          * Passive wait for a condition to become true. Does NOT advance server ticks.
@@ -92,6 +98,7 @@ export class DebugApi {
     server = {
         status: () => this.rpc.call('server.status'),
         listDimensions: () => this.rpc.call('server.listDimensions'),
+        runCommand: (command, opts) => this.rpc.call('server.runCommand', { command, dim: opts?.dim }),
     };
     async close() {
         await this.rpc.close();

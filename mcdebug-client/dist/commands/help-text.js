@@ -167,6 +167,70 @@ Output:
 export const INV_GROUP_HELP = `
 Slot indexing is 0-based. All inv commands require --x --y --z to identify the block entity.
 Use "mcdebug inv <command> --help" for command-specific examples and output format.`;
+export const FLUID_GROUP_HELP = `
+Fluid operations target the Fabric Transfer API Storage<FluidVariant> of a block.
+All fluid commands require --x --y --z to identify the block position.
+Use --side to query a specific face (default null = "complete inventory" path).
+--index targets a specific tank when a storage has multiple parts (rare).
+
+ALL fluid amounts are in DROPLETS (Fabric Transfer API native unit).
+  81000 droplets = 1 bucket
+  Example: --amount 81000 (one bucket), --amount 162000 (two buckets)
+
+Use "mcdebug fluid <command> --help" for command-specific examples.`;
+export const FLUID_INFO_HELP = `
+Examples:
+  mcdebug fluid info --x 0 --y 64 --z 0
+  mcdebug fluid info --x 0 --y 64 --z 0 --side north
+
+Output:
+  {
+    "side": "null",
+    "type": "SingleVariantStorage",
+    "supportsInsertion": true,
+    "supportsExtraction": false,
+    "parts": [
+      {"fluid": null, "amount": 0, "capacity": 648000}
+    ]
+  }
+
+amount and capacity are in DROPLETS (81000 = 1 bucket).
+type: SingleVariantStorage | CombinedStorage | Other
+parts: always 1 for SingleVariantStorage (even if empty); N for CombinedStorage.`;
+export const FLUID_GET_HELP = `
+Examples:
+  mcdebug fluid get --x 0 --y 64 --z 0                    # single tank → default index 0
+  mcdebug fluid get --x 0 --y 64 --z 0 --index 1          # multi-tank storage → must specify
+
+Output:
+  { "index": 0, "fluid": "ic2_120:biofuel", "amount": 81000, "capacity": 648000 }
+
+amount and capacity are in DROPLETS (81000 = 1 bucket).
+If the storage has multiple tanks and --index is omitted, an error is raised.`;
+export const FLUID_INSERT_HELP = `
+Examples:
+  mcdebug fluid insert --x 0 --y 64 --z 0 --fluid ic2_120:biofuel --amount 81000
+  mcdebug fluid insert --x 0 --y 64 --z 0 --fluid minecraft:water --amount 162000 --index 0
+
+--amount is in DROPLETS (81000 = 1 bucket). Inserting 81000 fills one bucket of fluid.
+
+Output:
+  { "index": 0, "requested": 81000, "inserted": 81000, "remaining": 0 }
+
+Insert goes through the storage's canInsert/insert (validates fluid type, capacity).
+Precise insert: --index 0 goes to parts[0] directly, bypassing auto-distribution.`;
+export const FLUID_EXTRACT_HELP = `
+Examples:
+  mcdebug fluid extract --x 0 --y 64 --z 0 --amount 81000
+  mcdebug fluid extract --x 0 --y 64 --z 0 --amount 81000 --index 0
+
+--amount is in DROPLETS (81000 = 1 bucket). Extracting 81000 removes one bucket.
+
+Output:
+  { "index": 0, "fluid": "ic2_120:biofuel", "requested": 81000, "extracted": 81000, "remaining": 0 }
+
+Extract uses the tank's current fluid variant (cannot extract a different fluid type than what's stored).
+If the tank is empty or extraction is disabled (canExtract=false), extracted will be 0.`;
 export const WAIT_UNTIL_HELP = `
 Predicate grammar:
   tick                          <op> <value>
@@ -199,6 +263,7 @@ The REPL exposes a DebugApi instance as the global variable 'dbg'.
 
 Available methods:
   dbg.server.status()              dbg.server.listDimensions()
+  dbg.server.runCommand(cmd, opts?)
   dbg.world.getBlock(pos, opts?)   dbg.world.setBlock(pos, block, state?, opts?)
   dbg.world.setBlocks(ops, opts?)  dbg.world.getRegion(box, opts?)
   dbg.world.selectBlocks(box, pred, opts?)
@@ -208,6 +273,8 @@ Available methods:
   dbg.inv.getSize(pos, dim?)        dbg.inv.getSlot(pos, slot, dim?)
   dbg.inv.setSlot(pos, slot, item, count, nbt?, dim?)
   dbg.inv.insert(pos, item, count, opts?)   dbg.inv.extract(pos, item, count, opts?)
+  dbg.fluid.info(pos, opts?)       dbg.fluid.get(pos, opts?)
+  dbg.fluid.insert(pos, fluid, amount, opts?)   dbg.fluid.extract(pos, amount, opts?)
   dbg.wait.until(predicate, opts?)
   dbg.scan.findBlocks(box, block, opts?)     dbg.scan.countByBlock(box, dim?)
 
@@ -228,6 +295,9 @@ Available RPC methods (namespace.method):
   inv.insert                  inv.extract
   scan.findBlocks             scan.countByBlock
   wait.until
+  fluid.info                  fluid.get                    fluid.insert
+  fluid.extract
+  server.runCommand
 
 Methods with no dedicated CLI command (use raw to call):
   world.setBlocks   world.getRegion   world.selectBlocks   inv.getSize
@@ -238,6 +308,26 @@ Examples:
   mcdebug raw world.setBlocks '{"ops":[{"pos":[0,64,0],"block":"minecraft:stone"}]}'
 
 jsonParams is a JSON object string or @file.json reference.`;
+export const CMD_HELP = `
+Run a Minecraft server command as the console.
+
+The command string can be passed as a single argument or split into multiple words:
+  mcdebug cmd time set day        # equivalent to /time set day
+  mcdebug cmd "/time set day"    # quoted if you prefer
+
+A leading "/" is added automatically if missing.
+
+Output:
+  { "success": true, "result": 1, "output": "Set the time to 1000" }
+
+--dim lets you root the executor in a specific dimension (default overworld).
+Note: commands like /time set operate globally regardless of --dim.
+
+Examples:
+  mcdebug cmd time set day
+  mcdebug cmd weather clear
+  mcdebug cmd "give @p minecraft:diamond 1"
+  mcdebug cmd setblock 0 100 0 minecraft:stone`;
 export const JAR_HELP = `
 Download the mcdebug Fabric mod JAR from GitHub Releases.
 
@@ -246,7 +336,7 @@ The downloaded JAR can be placed in your Minecraft instance's mods/ folder.
 By default, downloads the JAR matching this CLI's version (use --version for other versions).
 
 Examples:
-  mcdebug jar                      download mcdebug-0.1.0.jar (CLI version)
+  mcdebug jar                      download mcdebug-0.2.0.jar (CLI version)
   mcdebug jar --version 0.2.0      download mcdebug-0.2.0.jar
   mcdebug jar --latest             download the latest release
   mcdebug jar --output mods/mcdebug.jar  save to a custom path`;

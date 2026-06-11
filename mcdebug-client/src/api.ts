@@ -121,6 +121,47 @@ export class DebugApi {
   /** tick is intentionally not exposed: server drives ticks, client never advances them. */
   tick = undefined as never;
 
+  fluid = {
+    info: (
+      p: Pos,
+      opts?: { side?: string; dim?: string },
+    ) =>
+      this.rpc.call<{
+        side: string;
+        type: string;
+        supportsInsertion: boolean;
+        supportsExtraction: boolean;
+        parts: Array<{ fluid: string | null; amount: number; capacity: number }>;
+      }>('fluid.info', { pos: p, side: opts?.side, dim: opts?.dim }),
+    get: (
+      p: Pos,
+      opts?: { side?: string; index?: number; dim?: string },
+    ) =>
+      this.rpc.call<{ index: number; fluid: string | null; amount: number; capacity: number }>(
+        'fluid.get',
+        { pos: p, side: opts?.side, index: opts?.index, dim: opts?.dim },
+      ),
+    insert: (
+      p: Pos,
+      fluid: string,
+      amount: number,
+      opts?: { side?: string; index?: number; dim?: string },
+    ) =>
+      this.rpc.call<{ index: number; requested: number; inserted: number; remaining: number }>(
+        'fluid.insert',
+        { pos: p, side: opts?.side, index: opts?.index, fluid, amount, dim: opts?.dim },
+      ),
+    extract: (
+      p: Pos,
+      amount: number,
+      opts?: { side?: string; index?: number; dim?: string },
+    ) =>
+      this.rpc.call<{ index: number; fluid: string; requested: number; extracted: number; remaining: number }>(
+        'fluid.extract',
+        { pos: p, side: opts?.side, index: opts?.index, amount, dim: opts?.dim },
+      ),
+  };
+
   wait = {
     /**
      * Passive wait for a condition to become true. Does NOT advance server ticks.
@@ -150,6 +191,14 @@ export class DebugApi {
   server = {
     status: () => this.rpc.call<ServerStatus>('server.status'),
     listDimensions: () => this.rpc.call<{ dims: string[] }>('server.listDimensions'),
+    runCommand: (
+      command: string,
+      opts?: { dim?: string },
+    ) =>
+      this.rpc.call<{ success: boolean; result: number; output: string }>(
+        'server.runCommand',
+        { command, dim: opts?.dim },
+      ),
   };
 
   async close(): Promise<void> {

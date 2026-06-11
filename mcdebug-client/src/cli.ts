@@ -3,6 +3,8 @@ import { Command } from 'commander';
 import { DebugApi } from './api.js';
 import { RpcClient, RpcClientOptions } from './client.js';
 import { registerBeCommands } from './commands/be.js';
+import { registerCmdCommand } from './commands/cmd.js';
+import { registerFluidCommands } from './commands/fluid.js';
 import { registerGuideCommand } from './commands/guide.js';
 import { registerInvCommands } from './commands/inv.js';
 import { registerJarCommand } from './commands/jar.js';
@@ -17,7 +19,7 @@ const program = new Command();
 program
   .name('mcdebug')
   .description('TypeScript CLI for the mcdebug Minecraft debug server mod')
-  .version('0.1.0')
+  .version('0.2.0')
   .option('--port <n>', 'explicit port (overrides MCDEBUG_PORT and port file)')
   .option('--port-file <path>', 'explicit port file path')
   .option('--host <addr>', 'host (default 127.0.0.1)')
@@ -42,6 +44,8 @@ registerServerCommand(program, getApi);
 registerWorldCommands(program, getApi);
 registerBeCommands(program, getApi);
 registerInvCommands(program, getApi);
+registerFluidCommands(program, getApi);
+registerCmdCommand(program, getApi);
 registerWaitCommand(program, getApi);
 registerGuideCommand(program);
 registerJarCommand(program);

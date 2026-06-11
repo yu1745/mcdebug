@@ -25,4 +25,6 @@ object RpcErrors {
     const val WORLD_READ_ONLY = -32010
     const val DIMENSION_NOT_FOUND = -32011
     const val INVALID_PREDICATE = -32012
+    const val FLUID_NOT_FOUND = -32013
+    const val FLUID_INDEX_OUT_OF_RANGE = -32014
 }

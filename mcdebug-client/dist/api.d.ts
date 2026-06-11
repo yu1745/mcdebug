@@ -102,6 +102,53 @@ export declare class DebugApi {
     };
     /** tick is intentionally not exposed: server drives ticks, client never advances them. */
     tick: never;
+    fluid: {
+        info: (p: Pos, opts?: {
+            side?: string;
+            dim?: string;
+        }) => Promise<{
+            side: string;
+            type: string;
+            supportsInsertion: boolean;
+            supportsExtraction: boolean;
+            parts: Array<{
+                fluid: string | null;
+                amount: number;
+                capacity: number;
+            }>;
+        }>;
+        get: (p: Pos, opts?: {
+            side?: string;
+            index?: number;
+            dim?: string;
+        }) => Promise<{
+            index: number;
+            fluid: string | null;
+            amount: number;
+            capacity: number;
+        }>;
+        insert: (p: Pos, fluid: string, amount: number, opts?: {
+            side?: string;
+            index?: number;
+            dim?: string;
+        }) => Promise<{
+            index: number;
+            requested: number;
+            inserted: number;
+            remaining: number;
+        }>;
+        extract: (p: Pos, amount: number, opts?: {
+            side?: string;
+            index?: number;
+            dim?: string;
+        }) => Promise<{
+            index: number;
+            fluid: string;
+            requested: number;
+            extracted: number;
+            remaining: number;
+        }>;
+    };
     wait: {
         /**
          * Passive wait for a condition to become true. Does NOT advance server ticks.
@@ -129,6 +176,13 @@ export declare class DebugApi {
         status: () => Promise<ServerStatus>;
         listDimensions: () => Promise<{
             dims: string[];
+        }>;
+        runCommand: (command: string, opts?: {
+            dim?: string;
+        }) => Promise<{
+            success: boolean;
+            result: number;
+            output: string;
         }>;
     };
     close(): Promise<void>;
