@@ -14,6 +14,8 @@ Examples:
   mcdebug inv insert --x 0 --y 64 --z 0 --item minecraft:coal --count 8
   mcdebug wait-until --expr 'block[0,64,0].id == "minecraft:water"'
   mcdebug raw world.getBlock '{"pos":[0,64,0]}'
+  mcdebug jar                        download mod JAR (same version as CLI)
+  mcdebug jar --latest               download latest release
 
 All commands output JSON to stdout. Errors go to stderr with exit code 1 (or 2 for server errors).
 Use "mcdebug guide" for conceptual documentation (connection, port, error codes, conventions).`;
@@ -260,6 +262,19 @@ Examples:
   mcdebug raw world.setBlocks '{"ops":[{"pos":[0,64,0],"block":"minecraft:stone"}]}'
 
 jsonParams is a JSON object string or @file.json reference.`;
+
+export const JAR_HELP = `
+Download the mcdebug Fabric mod JAR from GitHub Releases.
+
+The downloaded JAR can be placed in your Minecraft instance's mods/ folder.
+
+By default, downloads the JAR matching this CLI's version (use --version for other versions).
+
+Examples:
+  mcdebug jar                      download mcdebug-0.1.0.jar (CLI version)
+  mcdebug jar --version 0.2.0      download mcdebug-0.2.0.jar
+  mcdebug jar --latest             download the latest release
+  mcdebug jar --output mods/mcdebug.jar  save to a custom path`;
 
 // ---- Guide sections ----
 

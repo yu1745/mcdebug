@@ -4,30 +4,26 @@
   "description": "TypeScript CLI for the mcdebug Minecraft debug server mod",
   "type": "module",
   "bin": {
-    "mcdebug": "./dist/cli.js"
+    "mcdebug": "./src/cli.ts"
   },
   "main": "./dist/api.js",
   "types": "./dist/types.d.ts",
   "scripts": {
+    "start": "tsx src/cli.ts",
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
-    "clean": "rm -rf dist"
+    "clean": "rm -rf dist",
+    "test": "tsx --test test/*.test.ts"
   },
   "engines": {
     "node": ">=20"
   },
   "dependencies": {
-    "commander": "^12.1.0"
+    "commander": "^12.1.0",
+    "tsx": "^4.19.0"
   },
   "devDependencies": {
     "@types/node": "^22.10.2",
-    "tsx": "^4.19.0",
     "typescript": "^5.7.2"
-  },
-  "scripts": {
-    "build": "tsc -p tsconfig.json",
-    "dev": "tsc -p tsconfig.json --watch",
-    "clean": "rm -rf dist",
-    "test": "tsx --test test/*.test.ts"
   }
 }

@@ -5,6 +5,7 @@ import { RpcClient, RpcClientOptions } from './client.js';
 import { registerBeCommands } from './commands/be.js';
 import { registerGuideCommand } from './commands/guide.js';
 import { registerInvCommands } from './commands/inv.js';
+import { registerJarCommand } from './commands/jar.js';
 import { startRepl } from './commands/repl.js';
 import { registerServerCommand } from './commands/server.js';
 import { registerWaitCommand } from './commands/wait.js';
@@ -43,6 +44,7 @@ registerBeCommands(program, getApi);
 registerInvCommands(program, getApi);
 registerWaitCommand(program, getApi);
 registerGuideCommand(program);
+registerJarCommand(program);
 
 program
   .command('repl')
