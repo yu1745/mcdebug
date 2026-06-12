@@ -441,11 +441,13 @@ Download the mcdebug Fabric mod JAR from GitHub Releases.
 
 The downloaded JAR can be placed in your Minecraft instance's mods/ folder.
 
-By default, downloads the JAR matching this CLI's version (use --version for other versions).
+By default, downloads the JAR matching this CLI's version. Use --latest
+to grab the newest release (then upgrade your CLI to match before using it).
+Cross-version JAR+CLI pairs are not supported — the JSON-RPC protocol
+versions must agree.
 
 Examples:
-  mcdebug jar                      download mcdebug-0.2.0.jar (CLI version)
-  mcdebug jar --version 0.2.0      download mcdebug-0.2.0.jar
+  mcdebug jar                      download mcdebug-0.4.2.jar (CLI version)
   mcdebug jar --latest             download the latest release
   mcdebug jar --output mods/mcdebug.jar  save to a custom path`;
 export const CRAFT_GROUP_HELP = `
