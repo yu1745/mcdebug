@@ -43,6 +43,44 @@ export class DebugApi {
         atomic: opts?.atomic,
         dim: opts?.dim,
       }),
+    /**
+     * Place a block as if a player were clicking the side of an adjacent block.
+     * Goes through the full BlockItem / ItemPlacementContext pipeline with a
+     * stable fake ServerPlayerEntity as the placer, so stairs / doors / furnaces
+     * / chests, etc. derive their state from `face` + `playerFacing` (NOT from
+     * defaultState). Fires sounds, game events, onPlaced, and
+     * Criteria.PLACED_BLOCK. May fail if the target pos is non-replaceable.
+     */
+    placeAsPlayer: (
+      pos: Pos,
+      block: string,
+      face: 'up' | 'down' | 'north' | 'south' | 'east' | 'west',
+      opts?: {
+        neighbor?: Pos;
+        playerFacing?: 'up' | 'down' | 'north' | 'south' | 'east' | 'west';
+        nbt?: JsonNbt;
+        dim?: string;
+      },
+    ) =>
+      this.rpc.call<{
+        ok: boolean;
+        pos: Pos;
+        neighbor: Pos;
+        face: string;
+        playerFacing: string;
+        placer: string;
+        placerUuid: string;
+        previous: { name: string; props: Record<string, string> };
+        state: { name: string; props: Record<string, string> };
+      }>('world.placeAsPlayer', {
+        pos,
+        block,
+        face,
+        neighbor: opts?.neighbor,
+        playerFacing: opts?.playerFacing,
+        nbt: opts?.nbt,
+        dim: opts?.dim,
+      }),
     getRegion: (box: Box, opts?: { includeNbt?: boolean; dim?: string }) =>
       this.rpc.call<{ blocks: Array<BlockSnapshot & { pos: Pos }> }>('world.getRegion', {
         box,

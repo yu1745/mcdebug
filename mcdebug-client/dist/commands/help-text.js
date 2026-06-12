@@ -4,11 +4,13 @@
  * All text is designed for ~78 char terminal width.
  */
 // ---- Global program help (appended after auto-generated --help) ----
+export const REPO_URL = 'https://github.com/yu1745/mcdebug';
 export const GLOBAL_HELP_AFTER = `
 Examples:
   mcdebug status
   mcdebug get --x 0 --y 64 --z 0
   mcdebug place --x 0 --y 64 --z 0 --block minecraft:furnace --state lit=true
+  mcdebug place-as-player --x 0 --y 65 --z 0 --block minecraft:furnace --face down
   mcdebug inv insert --x 0 --y 64 --z 0 --item minecraft:coal --count 8
   mcdebug wait-until --expr 'block[0,64,0].id == "minecraft:water"'
   mcdebug raw world.getBlock '{"pos":[0,64,0]}'
@@ -16,7 +18,12 @@ Examples:
   mcdebug jar --latest               download latest release
 
 All commands output JSON to stdout. Errors go to stderr with exit code 1 (or 2 for server errors).
-Use "mcdebug guide" for conceptual documentation (connection, port, error codes, conventions).`;
+Use "mcdebug guide" for conceptual documentation (connection, port, error codes, conventions).
+
+Source / issues: ${REPO_URL}
+If the help above is unclear, read the source — each command is a single file
+in mcdebug-client/src/commands/, the mod side is com.mcdebug.api.*Ops.kt
+in src/main/kotlin/ of the repo.`;
 // ---- Per-command help text ----
 export const STATUS_HELP = `
 Examples:
@@ -36,6 +43,24 @@ Examples:
   mcdebug place --x 0 --y 64 --z 0 --block minecraft:stone
   mcdebug place --x 0 --y 64 --z 0 --block minecraft:furnace --state lit=true
   mcdebug place --x 0 --y 64 --z 0 --block minecraft:chest --dim minecraft:the_nether
+  mcdebug place --x 0 --y 64 --z 0 --block minecraft:oak_door --state facing=east --state half=lower --state hinge=right
+
+Notes:
+  --state is repeatable; common keys: facing, horizontal_facing, axis,
+  rotation, half, hinge, type, lit, powered, waterlogged.
+  For directional blocks (furnace, chest, dispenser, stairs, ...),
+  you MUST pass facing/axis explicitly — otherwise you get the block's
+  defaultState (usually facing=north), not the face a player would
+  have clicked. There is no BlockPlaceContext (no neighbor/face/placer),
+  so context-sensitive blocks (redstone wire, attachments) may not
+  place the same way a player would.
+
+  For a real player-like placement (full BlockItem pipeline, stable fake
+  player, fires Criteria / onPlaced / sounds), use 'place-as-player' instead.
+  Trade-off: place-as-player is slower and may fail (ok: false) if the block
+  can't be placed there (e.g. replacing a solid block, vanilla door
+  context-sensitive rules). Use 'place' for raw, fast, no-questions-asked
+  state replacement.
 
 Output:
   true`;
@@ -46,6 +71,71 @@ Examples:
 
 Output:
   true`;
+export const PLACE_AS_PLAYER_HELP = `
+Examples:
+  # Furnace whose facing=SOUTH (player looks north, furnace faces the opposite)
+  mcdebug place-as-player --block minecraft:furnace --x 0 --y 65 --z 0 \
+    --face down --player-facing north
+
+  # Stairs whose facing=EAST (stairs take playerFacing directly, not its opposite)
+  mcdebug place-as-player --block minecraft:oak_stairs --x 0 --y 64 --z 0 \
+    --face west --player-facing east
+
+  # Door, lower half, hinge on the right, facing east
+  mcdebug place-as-player --block minecraft:oak_door --x 0 --y 64 --z 0 \
+    --face west --player-facing east
+
+  # Chest whose facing=WEST (chest, like furnace, uses playerFacing.opposite)
+  mcdebug place-as-player --block minecraft:chest --x 5 --y 64 --z 0 \
+    --face west --player-facing east
+
+Output:
+  {
+    "ok": true,
+    "pos": [0, 65, 0],
+    "neighbor": [0, 64, 0],
+    "face": "down",
+    "playerFacing": "north",
+    "placer": "[mcdebug_fake_player]",
+    "placerUuid": "8c0a4d6e-3f2b-4a1e-9d8c-5e7f0a1b2c3d",
+    "previous": { "name": "minecraft:air", "props": {} },
+    "state":   { "name": "minecraft:furnace", "props": { "facing": "south", "lit": "false" } }
+  }
+
+Notes:
+  Goes through the full BlockItem / ItemPlacementContext pipeline — directional
+  blocks (furnace, chest, dispenser, stairs, door, bed, ...) derive their facing
+  from --face and --playerFacing instead of returning defaultState.
+
+  The placer is a STABLE fake ServerPlayerEntity (UUID 8c0a4d6e-...,
+  name "[mcdebug_fake_player]"), reused across all calls and all dims. It is
+  in creative + invulnerable + flying mode, so the placed stack is not
+  decremented and survival-mode interceptions don't fire. This means:
+    - Criteria.PLACED_BLOCK DOES fire (on the fake player's tracker; not visible
+      to any real player since the player is never registered with the player
+      manager, but mods that check "did anyone just place this" see a hit).
+    - block.onPlaced(...) receives the fake player as placer; mods that read
+      the placer's UUID or name see "[mcdebug_fake_player]".
+    - Sound falloff uses the fake player's pos (set to the placement pos each
+      call), so audio behaves like a real player standing on the block.
+
+  --face is REQUIRED: it is the side of the existing block that the player
+  clicked. The new block is placed on the opposite side (pos = neighbor + face).
+  Default --neighbor = pos - face, so for the common case just give --face.
+
+  --player-facing is the direction the player is LOOKING, NOT the direction
+  you want the block to face. Vanilla blocks consume it differently:
+    stairs / doors / beds / banners / item frames : block.facing = playerFacing
+    furnace / chest / dispenser / glazed terracotta: block.facing = playerFacing.opposite
+    glass / stone / other non-directional        : ignored
+  So for a furnace with facing=south, pass --player-facing north. For stairs
+  with facing=east, pass --player-facing east. Default = face.opposite (if
+  horizontal) or north.
+
+  Fails (ok: false) if pos is non-replaceable (e.g. trying to replace a solid
+  block). Use 'remove' first. Vanilla doors / redstone / few other blocks have
+  extra context-sensitive rules and may also fail (ok: false) — this is the
+  same behavior a real player would get.`;
 export const GET_HELP = `
 Examples:
   mcdebug get --x 0 --y 64 --z 0
@@ -265,7 +355,8 @@ Available methods:
   dbg.server.status()              dbg.server.listDimensions()
   dbg.server.runCommand(cmd, opts?)
   dbg.world.getBlock(pos, opts?)   dbg.world.setBlock(pos, block, state?, opts?)
-  dbg.world.setBlocks(ops, opts?)  dbg.world.getRegion(box, opts?)
+  dbg.world.setBlocks(ops, opts?)  dbg.world.placeAsPlayer(pos, block, face, opts?)
+  dbg.world.getRegion(box, opts?)
   dbg.world.selectBlocks(box, pred, opts?)
   dbg.world.forceloadChunk(cx, cz, opts?)   dbg.world.unforceloadChunk(cx, cz, opts?)
   dbg.be.getNbt(pos, dim?)         dbg.be.setNbt(pos, nbt, dim?)
@@ -281,12 +372,15 @@ Available methods:
 pos = [x, y, z] (integer tuple). opts can include { dim: "minecraft:the_nether" }.
 All methods return promises — use await.
 
-Type .exit or Ctrl+C to quit.`;
+Type .exit or Ctrl+C to quit.
+
+Source: ${REPO_URL}`;
 export const RAW_HELP = `
 Available RPC methods (namespace.method):
 
   server.status              server.listDimensions
   world.getBlock              world.setBlock               world.setBlocks
+  world.placeAsPlayer        (uses a stable fake player — see 'mcdebug place-as-player --help')
   world.getRegion             world.selectBlocks
   world.forceloadChunk        world.unforceloadChunk
   be.getNbt                   be.setNbt                    be.getField
@@ -307,7 +401,9 @@ Examples:
   mcdebug raw inv.getSize '{"pos":[0,64,0]}'
   mcdebug raw world.setBlocks '{"ops":[{"pos":[0,64,0],"block":"minecraft:stone"}]}'
 
-jsonParams is a JSON object string or @file.json reference.`;
+jsonParams is a JSON object string or @file.json reference.
+
+Source: ${REPO_URL}`;
 export const CMD_HELP = `
 Run a Minecraft server command as the console.
 
@@ -407,6 +503,39 @@ Block entities:  Blocks like furnaces, chests, hoppers have block entities (NBT 
 
 JSON output:     All commands return JSON to stdout on success.
                 Errors go to stderr with a numeric exit code.`;
+const GUIDE_PLACEMENT = `
+=== Placement: place vs place-as-player ===
+
+Two ways to put a block at a position; pick based on what you need:
+
+  place             raw setBlockState. Fast, no questions, no BlockItem pipeline.
+                    The placed state is exactly what you pass in --state / --flags.
+                    No fake player, no Criteria trigger, no onPlaced callback,
+                    no sound, no GameEvent.
+                    Use when: you want to assert an exact final state in tests,
+                    or the block has no business with a placer.
+
+  place-as-player   Full BlockItem / ItemPlacementContext pipeline with a stable
+                    fake ServerPlayerEntity ([mcdebug_fake_player],
+                    8c0a4d6e-3f2b-4a1e-9d8c-5e7f0a1b2c3d) as the placer.
+                    Fires Criteria.PLACED_BLOCK, onPlaced, sounds, GameEvent.
+                    Block state is derived from --face + --playerFacing via the
+                    block's own getPlacementState (stairs / doors / chests / etc.
+                    compute their facing the way they would for a real player).
+                    Use when: testing mod code that branches on context.getPlayer()
+                    (e.g. IC2 MachineBlock writes OwnerUUID from placer.uuid),
+                    or when you want the block's vanilla state-derivation behavior
+                    rather than a hand-written state.
+
+  remove            Sets the position to minecraft:air. Always succeeds if the
+                    position is loaded.
+
+Workflow tip: after a place-as-player that you want to verify, use
+  mcdebug get-nbt --x ... --y ... --z ...
+to inspect the resulting block entity NBT — the OwnerUUID (or whatever
+mod-specific placer field) should be the fake player's UUID if the mod
+recorded it.
+`;
 const SECTIONS = {
     connection: GUIDE_CONNECTION,
     'port-discovery': GUIDE_PORT_DISCOVERY,
@@ -414,6 +543,7 @@ const SECTIONS = {
     errors: GUIDE_ERRORS,
     'wait-grammar': GUIDE_WAIT_GRAMMAR,
     conventions: GUIDE_CONVENTIONS,
+    placement: GUIDE_PLACEMENT,
 };
 /**
  * Return the guide text for a specific section, or all sections joined.

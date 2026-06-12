@@ -1,12 +1,13 @@
 import type { Command } from 'commander';
 import { DebugApi } from '../api.js';
-import { COUNT_HELP, FIND_HELP, FORCELOAD_HELP, GET_HELP, PLACE_HELP, REMOVE_HELP, UNFORCELOAD_HELP } from './help-text.js';
-import { parseTriplet, parseStateProps, requirePos, outputJson, outputOneLineJson } from './util.js';
+import { JsonNbt } from '../types.js';
+import { COUNT_HELP, FIND_HELP, FORCELOAD_HELP, GET_HELP, PLACE_AS_PLAYER_HELP, PLACE_HELP, REMOVE_HELP, UNFORCELOAD_HELP } from './help-text.js';
+import { parseJsonArg, parseTriplet, parseStateProps, requirePos, outputJson, outputOneLineJson } from './util.js';
 
 export function registerWorldCommands(cmd: Command, getApi: () => DebugApi): void {
   cmd
     .command('place')
-    .description('place a block at a position')
+    .description('place a block at a position (raw setBlockState; no BlockItem pipeline, no fake player). For simulation of a real player placement, use place-as-player.')
     .addHelpText('after', PLACE_HELP)
     .requiredOption('--block <id>', 'block id, e.g. minecraft:stone')
     .requiredOption('--x <n>', 'x coordinate (integer)')
@@ -47,6 +48,72 @@ export function registerWorldCommands(cmd: Command, getApi: () => DebugApi): voi
       outputOneLineJson(r);
       await api.close();
     });
+
+  cmd
+    .command('place-as-player')
+    .description('place a block as if a player were clicking the side of an adjacent block (full BlockItem pipeline with a stable fake player)')
+    .addHelpText('after', PLACE_AS_PLAYER_HELP)
+    .requiredOption('--block <id>', 'block id, e.g. minecraft:furnace')
+    .requiredOption('--x <n>', 'x coordinate of the placement target (integer)')
+    .requiredOption('--y <n>', 'y coordinate (integer)')
+    .requiredOption('--z <n>', 'z coordinate (integer)')
+    .requiredOption(
+      '--face <dir>',
+      'which side of the neighbor was clicked: up|down|north|south|east|west',
+    )
+    .option(
+      '--neighbor <x,y,z>',
+      'block that was clicked (default: pos offset by --face opposite)',
+    )
+    .option(
+      '--player-facing <dir>',
+      'which way the placer was looking (default: opposite of --face if horizontal, else north)',
+    )
+    .option('--nbt <json>', 'ItemStack NBT (e.g. BlockEntityTag for chest), or @file')
+    .option('--dim <id>', 'dimension id (default minecraft:overworld)')
+    .action(
+      async (opts: {
+        block: string;
+        x: string;
+        y: string;
+        z: string;
+        face: string;
+        neighbor?: string;
+        playerFacing?: string;
+        nbt?: string;
+        dim?: string;
+      }) => {
+        const api = getApi();
+        const pos = requirePos(opts, 'place-as-player');
+        const face = opts.face.toLowerCase();
+        if (!['up', 'down', 'north', 'south', 'east', 'west'].includes(face)) {
+          throw new Error(`--face must be one of up|down|north|south|east|west, got: ${opts.face}`);
+        }
+        const nbt = opts.nbt ? await parseJsonArg(opts.nbt) : undefined;
+        const neighbor = opts.neighbor ? parseTriplet(opts.neighbor, '--neighbor') : undefined;
+        const r = await api.world.placeAsPlayer(
+          pos,
+          opts.block,
+          face as 'up' | 'down' | 'north' | 'south' | 'east' | 'west',
+          {
+            neighbor,
+            playerFacing: opts.playerFacing
+              ? (opts.playerFacing.toLowerCase() as
+                  | 'up'
+                  | 'down'
+                  | 'north'
+                  | 'south'
+                  | 'east'
+                  | 'west')
+              : undefined,
+            nbt: nbt as JsonNbt | undefined,
+            dim: opts.dim,
+          },
+        );
+        outputJson(r);
+        await api.close();
+      },
+    );
 
   cmd
     .command('get')
