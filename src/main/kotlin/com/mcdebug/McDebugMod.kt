@@ -36,7 +36,25 @@ object McDebugMod : DedicatedServerModInitializer {
         .orElse("0.0.0")
 
     private var rpcServer: RpcServer? = null
-    private var dispatcher: RpcDispatcher? = null
+
+    /**
+     * Live JSON-RPC dispatcher for the running MC server. Exposed for
+     * in-process callers (e.g. McDebugTestApi in test objects) that
+     * need to invoke handlers directly without going through TCP.
+     * Set in `onServerStarted`, cleared in `onServerStopping`.
+     */
+    @Volatile
+    var dispatcher: RpcDispatcher? = null
+        private set
+
+    /**
+     * The MinecraftServer instance for the currently running test session.
+     * Exposed for the same reason as [dispatcher]. Both are required
+     * arguments to [RpcDispatcher.dispatch].
+     */
+    @Volatile
+    var currentServer: MinecraftServer? = null
+        private set
 
     override fun onInitializeServer() {
         LOGGER.info("mcdebug {} initializing", MOD_VERSION)
@@ -58,6 +76,7 @@ object McDebugMod : DedicatedServerModInitializer {
             registerGroup("mcdebug", McDebugOps)
         }
         dispatcher = d
+        currentServer = server
 
         // Install the tick listener for wait.until. This is passive — it only observes server tick events.
         WaitOps.install()
@@ -81,6 +100,7 @@ object McDebugMod : DedicatedServerModInitializer {
         } finally {
             rpcServer = null
             dispatcher = null
+            currentServer = null
             McDebugTestRegistry.clear()
         }
     }
