@@ -440,96 +440,98 @@ Examples:
   mcdebug jar --latest             download the latest release
   mcdebug jar --output mods/mcdebug.jar  save to a custom path`;
 export const CRAFT_GROUP_HELP = `
-Simulate crafting without placing a crafting table. The 3x3 grid (--grid) is a
-9-element JSON array in row-major order: index 0 = top-left, 1 = top-middle,
-2 = top-right, 3 = middle-left, ..., 8 = bottom-right.
+Simulate crafting without placing a crafting table. Goes through the server's
+full RecipeManager — vanilla shaped/shapeless AND modded types all work.
 
-Each slot is either null (empty) or an object {item, count?, nbt?}. nbt is parsed
-as JSON-NBT and merged into the stack's NBT. Use @file.json to avoid shell escaping.
+The 3x3 grid (--grid) is a 9-element JSON array in row-major order:
+  index 0 = top-left,  1 = top-middle,  2 = top-right
+  index 3 = middle-left, 4 = center,    5 = middle-right
+  index 6 = bottom-left,7 = bottom-mid,  8 = bottom-right
 
-The mod uses the server's full RecipeManager, so vanilla shaped/shapeless AND
-modded types (e.g. ic2_120:battery_energy_shaped, ic2_120:damage_tool_shapeless)
-all work.
+Each slot is either null (empty) or {"item":id, "count":N?, "nbt":{...}?}.
+nbt is merged into the stack's NBT compound. Common keys: "Damage" for tools,
+mod-specific keys vary. Use @file.json instead of inline JSON to avoid
+shell escaping.
+
+Workflow: if you're unsure which recipe will match, run "craft find" first,
+then pass --recipe-id to "craft do" to lock onto the right one.
 
 Use "mcdebug craft <subcommand> --help" for command-specific examples.`;
 export const CRAFT_DO_HELP = `
 Examples:
-  # Vanilla: 2x2 oak_planks from 1 oak_log (oak_log recipe is shaped 2x2)
+  # Shapeless: 2 oak_planks -> 4 sticks
   mcdebug craft do --grid '[
-    {"item":"minecraft:oak_log","count":1},
-    {"item":"minecraft:oak_log","count":1},
+    {"item":"minecraft:oak_planks","count":1},
+    {"item":"minecraft:oak_planks","count":1},
     null, null, null, null, null, null, null
   ]'
 
-  # IC2: 4 charged RE batteries + circuit + casing = advanced_batpack
-  # Pattern is ["ACA","AUA","A A"]; inputs are slot 0..8
+  # Shaped 2x2: oak_log -> 4 oak_planks (must match 2x2 pattern)
   mcdebug craft do --grid '[
-    {"item":"ic2_120:advanced_re_battery","count":1,"nbt":{"charge":50000}},
-    {"item":"ic2_120:circuit","count":1},
-    {"item":"ic2_120:advanced_re_battery","count":1,"nbt":{"charge":50000}},
-    {"item":"ic2_120:advanced_re_battery","count":1,"nbt":{"charge":50000}},
-    {"item":"ic2_120:copper_casing","count":1},
-    {"item":"ic2_120:advanced_re_battery","count":1,"nbt":{"charge":50000}},
-    {"item":"ic2_120:advanced_re_battery","count":1,"nbt":{"charge":50000}},
-    null,
-    {"item":"ic2_120:advanced_re_battery","count":1,"nbt":{"charge":50000}}
-  ]' --recipe-id ic2_120:advanced_batpack
-
-  # IC2: forge_hammer + iron_ingot = iron_plate, hammer damage +1
-  mcdebug craft do --grid '[
-    {"item":"ic2_120:forge_hammer","count":1,"nbt":{"Damage":10}},
-    {"item":"minecraft:iron_ingot","count":1},
-    null, null, null, null, null, null, null
+    {"item":"minecraft:oak_log","count":1}, {"item":"minecraft:oak_log","count":1}, null,
+    {"item":"minecraft:oak_log","count":1}, {"item":"minecraft:oak_log","count":1}, null,
+    null, null, null
   ]'
 
-  # From a file (recommended for complex recipes)
-  mcdebug craft do --grid @grid.json --recipe-id ic2_120:advanced_batpack
+  # Shaped 3x3: chest
+  mcdebug craft do --grid '[
+    {"item":"minecraft:oak_planks"}, {"item":"minecraft:oak_planks"}, {"item":"minecraft:oak_planks"},
+    null,                           {"item":"minecraft:oak_stairs"},    null,
+    {"item":"minecraft:oak_planks"}, {"item":"minecraft:oak_planks"}, {"item":"minecraft:oak_planks"}
+  ]'
+
+  # Shaped 3x3 with NBT: written book with custom title
+  mcdebug craft do --grid @book-crafting.json
+
+  # Force a specific recipe when multiple match
+  mcdebug craft find --grid @grid.json
+  mcdebug craft do --grid @grid.json --recipe-id minecraft:chest
 
 Output (matched):
   {
     "matched": true,
-    "recipeId": "ic2_120:advanced_batpack",
-    "recipeType": "ic2_120:battery_energy_shaped",
-    "result": {
-      "item": "ic2_120:advanced_batpack",
-      "count": 1,
-      "nbt": { "charge": 200000, ... }
-    },
+    "recipeId": "minecraft:oak_planks",
+    "recipeType": "minecraft:crafting",
+    "result": { "item": "minecraft:oak_planks", "count": 4, "nbt": null },
     "remainder": [
-      { "item": "minecraft:air", "count": 0, "nbt": null },
-      { "item": "minecraft:air", "count": 0, "nbt": null },
+      { "item": null, "count": 0, "nbt": null },
+      { "item": null, "count": 0, "nbt": null },
       ...
     ]
   }
 
-The remainder array has 9 entries — one per grid slot — and tells you what
-EACH input becomes after the craft. For ic2_120:damage_tool_shapeless, the
-ForgeHammer / Cutter / Treetap / Wrench slot in remainder will show the tool
-with damage incremented by 1 (or empty if the tool reached maxDamage).
+Output (no match):
+  { "matched": false, "candidates": [] }
 
-For ic2_120:battery_energy_shaped, the result.nbt.charge should equal the sum
-of all input IBatteryItem / IElectricTool charges (capped at the output's
-maxCapacity). Inspect result.nbt to verify charge inheritance.
-
-Use "mcdebug craft find --grid ..." first to see all recipes that match a
-given grid (in case of ambiguity), then pass --recipe-id to lock onto one.`;
+Notes:
+  --grid must be exactly 9 elements. Use null for empty slots.
+  --recipe-id is optional; if omitted, the first matching recipe wins.
+    Run "craft find" first if multiple recipes might match.
+  Shaped recipes do a sliding-window match across the 3x3 grid, so a 2x2
+    recipe matches at any 2x2 sub-region (e.g. slots [0,1,3,4] or [1,2,4,5]).
+  Empty remainder slots show { "item": null } (not "minecraft:air").
+  result.nbt contains the output's full NBT compound, if any. Modded recipe
+    types may write custom NBT to the result (e.g. charge, durability).`;
 export const CRAFT_FIND_HELP = `
 Examples:
   mcdebug craft find --grid '[
-    {"item":"minecraft:oak_log","count":1},
-    {"item":"minecraft:oak_log","count":1},
+    {"item":"minecraft:oak_planks","count":1},
+    {"item":"minecraft:oak_planks","count":1},
     null, null, null, null, null, null, null
   ]'
 
 Output:
   { "matches": [
-    { "recipeId": "minecraft:oak_planks", "recipeType": "minecraft:crafting_shaped",
-      "output": "minecraft:oak_planks x4" }
+    { "recipeId": "minecraft:oak_planks", "recipeType": "minecraft:crafting",
+      "output": "minecraft:oak_planks x4" },
+    { "recipeId": "minecraft:oak_pressure_plate", "recipeType": "minecraft:crafting",
+      "output": "minecraft:oak_pressure_plate x1" }
   ] }
 
-Useful when multiple recipes match the same grid (e.g. several mods register
-overlapping recipes). Pass the chosen recipeId to "craft do --recipe-id" to
-disambiguate. Empty result means no crafting recipe matches this grid.`;
+Returns every crafting recipe whose matches() returns true for the grid.
+When multiple recipes match, pass the chosen recipeId to "craft do
+--recipe-id" to disambiguate. Empty { "matches": [] } means no recipe
+matches this grid.`;
 // ---- Guide sections ----
 const GUIDE_CONNECTION = `
 === Connection ===
