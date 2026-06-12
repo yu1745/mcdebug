@@ -21,12 +21,6 @@ open class McDebugExtension @Inject constructor() {
         var scanPackages: List<String> = emptyList()
 
         /**
-         * Path to the mcdebug CLI entry, relative to the consumer's
-         * project root. Default: `mcdebug-client/dist/cli.js`.
-         */
-        var cliPath: String = "mcdebug-client/dist/cli.js"
-
-        /**
          * Gradle path of the loom `runServer` task to invoke.
          * Multi-project consumers (e.g. `:core:runServer`) override this.
          */

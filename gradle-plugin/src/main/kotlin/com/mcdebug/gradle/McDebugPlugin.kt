@@ -14,7 +14,6 @@ class McDebugPlugin : Plugin<Project> {
             task.group = "verification"
             task.description = "Run mcdebug-driven block tests against a dev MC server"
             task.scanPackages.set(ext.test.scanPackages)
-            task.cliPath.set(ext.test.cliPath)
             task.runServerTask.set(ext.test.runServerTask)
             task.timeoutSec.set(ext.test.timeoutSec)
             // Build the mod first so the JAR (with @McDebugTests classes) is fresh

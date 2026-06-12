@@ -35,9 +35,6 @@ abstract class McDebugTestTask : DefaultTask() {
     abstract val scanPackages: ListProperty<String>
 
     @get:Input
-    abstract val cliPath: Property<String>
-
-    @get:Input
     abstract val runServerTask: Property<String>
 
     @get:Input
