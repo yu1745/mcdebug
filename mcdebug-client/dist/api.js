@@ -103,6 +103,30 @@ export class DebugApi {
             pollIntervalTicks: opts?.pollIntervalTicks,
         }),
     };
+    craft = {
+        /**
+         * Simulate a single craft of a 3x3 grid. Goes through the server's full
+         * RecipeManager — vanilla ShapedRecipe / ShapelessRecipe, AND modded recipe
+         * types (e.g. ic2_120:battery_energy_shaped, ic2_120:damage_tool_shapeless).
+         *
+         * Use the result and `remainder` to verify modded craft behavior:
+         *  - ic2_120:battery_energy_shaped:  result.nbt.charge should equal the sum
+         *                                    of all input IBatteryItem / IElectricTool
+         *                                    charges (capped at output capacity).
+         *  - ic2_120:damage_tool_shapeless:  compare remainder[slotOfHammer].damage
+         *                                    with the input — should be +1.
+         *
+         * If `recipeId` is omitted, the first recipe whose matches() returns true is
+         * used. If none match, returns { matched: false, candidates: [] }. If multiple
+         * match, pass recipeId to disambiguate.
+         */
+        craft: (grid, opts) => this.rpc.call('craft.craft', { grid, recipeId: opts?.recipeId, dim: opts?.dim }),
+        /**
+         * Diagnostic: list every crafting recipe whose matches() returns true for the
+         * given grid. Use this to find the right `recipeId` to pass to `craft()`.
+         */
+        find: (grid, opts) => this.rpc.call('craft.find', { grid, dim: opts?.dim }),
+    };
     scan = {
         findBlocks: (box, block, opts) => this.rpc.call('scan.findBlocks', {
             box,

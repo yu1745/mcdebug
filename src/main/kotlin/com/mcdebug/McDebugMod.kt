@@ -1,6 +1,7 @@
 package com.mcdebug
 
 import com.mcdebug.api.BlockEntityOps
+import com.mcdebug.api.CraftingOps
 import com.mcdebug.api.FluidOps
 import com.mcdebug.api.InventoryOps
 import com.mcdebug.api.ScanOps
@@ -50,6 +51,7 @@ object McDebugMod : DedicatedServerModInitializer {
             registerGroup("server", ServerOps)
             registerGroup("wait", WaitOps)
             registerGroup("fluid", FluidOps)
+            registerGroup("craft", CraftingOps)
         }
         dispatcher = d
 

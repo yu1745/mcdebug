@@ -14,6 +14,7 @@ Examples:
   mcdebug inv insert --x 0 --y 64 --z 0 --item minecraft:coal --count 8
   mcdebug wait-until --expr 'block[0,64,0].id == "minecraft:water"'
   mcdebug raw world.getBlock '{"pos":[0,64,0]}'
+  mcdebug craft do --grid @grid.json --recipe-id ic2_120:advanced_batpack
   mcdebug jar                        download mod JAR (same version as CLI)
   mcdebug jar --latest               download latest release
 
@@ -367,6 +368,7 @@ Available methods:
   dbg.fluid.info(pos, opts?)       dbg.fluid.get(pos, opts?)
   dbg.fluid.insert(pos, fluid, amount, opts?)   dbg.fluid.extract(pos, amount, opts?)
   dbg.wait.until(predicate, opts?)
+  dbg.craft.craft(grid, opts?)     dbg.craft.find(grid, opts?)
   dbg.scan.findBlocks(box, block, opts?)     dbg.scan.countByBlock(box, dim?)
 
 pos = [x, y, z] (integer tuple). opts can include { dim: "minecraft:the_nether" }.
@@ -391,6 +393,7 @@ Available RPC methods (namespace.method):
   wait.until
   fluid.info                  fluid.get                    fluid.insert
   fluid.extract
+  craft.craft                 craft.find
   server.runCommand
 
 Methods with no dedicated CLI command (use raw to call):
@@ -436,6 +439,97 @@ Examples:
   mcdebug jar --version 0.2.0      download mcdebug-0.2.0.jar
   mcdebug jar --latest             download the latest release
   mcdebug jar --output mods/mcdebug.jar  save to a custom path`;
+export const CRAFT_GROUP_HELP = `
+Simulate crafting without placing a crafting table. The 3x3 grid (--grid) is a
+9-element JSON array in row-major order: index 0 = top-left, 1 = top-middle,
+2 = top-right, 3 = middle-left, ..., 8 = bottom-right.
+
+Each slot is either null (empty) or an object {item, count?, nbt?}. nbt is parsed
+as JSON-NBT and merged into the stack's NBT. Use @file.json to avoid shell escaping.
+
+The mod uses the server's full RecipeManager, so vanilla shaped/shapeless AND
+modded types (e.g. ic2_120:battery_energy_shaped, ic2_120:damage_tool_shapeless)
+all work.
+
+Use "mcdebug craft <subcommand> --help" for command-specific examples.`;
+export const CRAFT_DO_HELP = `
+Examples:
+  # Vanilla: 2x2 oak_planks from 1 oak_log (oak_log recipe is shaped 2x2)
+  mcdebug craft do --grid '[
+    {"item":"minecraft:oak_log","count":1},
+    {"item":"minecraft:oak_log","count":1},
+    null, null, null, null, null, null, null
+  ]'
+
+  # IC2: 4 charged RE batteries + circuit + casing = advanced_batpack
+  # Pattern is ["ACA","AUA","A A"]; inputs are slot 0..8
+  mcdebug craft do --grid '[
+    {"item":"ic2_120:advanced_re_battery","count":1,"nbt":{"charge":50000}},
+    {"item":"ic2_120:circuit","count":1},
+    {"item":"ic2_120:advanced_re_battery","count":1,"nbt":{"charge":50000}},
+    {"item":"ic2_120:advanced_re_battery","count":1,"nbt":{"charge":50000}},
+    {"item":"ic2_120:copper_casing","count":1},
+    {"item":"ic2_120:advanced_re_battery","count":1,"nbt":{"charge":50000}},
+    {"item":"ic2_120:advanced_re_battery","count":1,"nbt":{"charge":50000}},
+    null,
+    {"item":"ic2_120:advanced_re_battery","count":1,"nbt":{"charge":50000}}
+  ]' --recipe-id ic2_120:advanced_batpack
+
+  # IC2: forge_hammer + iron_ingot = iron_plate, hammer damage +1
+  mcdebug craft do --grid '[
+    {"item":"ic2_120:forge_hammer","count":1,"nbt":{"Damage":10}},
+    {"item":"minecraft:iron_ingot","count":1},
+    null, null, null, null, null, null, null
+  ]'
+
+  # From a file (recommended for complex recipes)
+  mcdebug craft do --grid @grid.json --recipe-id ic2_120:advanced_batpack
+
+Output (matched):
+  {
+    "matched": true,
+    "recipeId": "ic2_120:advanced_batpack",
+    "recipeType": "ic2_120:battery_energy_shaped",
+    "result": {
+      "item": "ic2_120:advanced_batpack",
+      "count": 1,
+      "nbt": { "charge": 200000, ... }
+    },
+    "remainder": [
+      { "item": "minecraft:air", "count": 0, "nbt": null },
+      { "item": "minecraft:air", "count": 0, "nbt": null },
+      ...
+    ]
+  }
+
+The remainder array has 9 entries — one per grid slot — and tells you what
+EACH input becomes after the craft. For ic2_120:damage_tool_shapeless, the
+ForgeHammer / Cutter / Treetap / Wrench slot in remainder will show the tool
+with damage incremented by 1 (or empty if the tool reached maxDamage).
+
+For ic2_120:battery_energy_shaped, the result.nbt.charge should equal the sum
+of all input IBatteryItem / IElectricTool charges (capped at the output's
+maxCapacity). Inspect result.nbt to verify charge inheritance.
+
+Use "mcdebug craft find --grid ..." first to see all recipes that match a
+given grid (in case of ambiguity), then pass --recipe-id to lock onto one.`;
+export const CRAFT_FIND_HELP = `
+Examples:
+  mcdebug craft find --grid '[
+    {"item":"minecraft:oak_log","count":1},
+    {"item":"minecraft:oak_log","count":1},
+    null, null, null, null, null, null, null
+  ]'
+
+Output:
+  { "matches": [
+    { "recipeId": "minecraft:oak_planks", "recipeType": "minecraft:crafting_shaped",
+      "output": "minecraft:oak_planks x4" }
+  ] }
+
+Useful when multiple recipes match the same grid (e.g. several mods register
+overlapping recipes). Pass the chosen recipeId to "craft do --recipe-id" to
+disambiguate. Empty result means no crafting recipe matches this grid.`;
 // ---- Guide sections ----
 const GUIDE_CONNECTION = `
 === Connection ===
