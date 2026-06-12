@@ -10,6 +10,7 @@ import org.gradle.api.provider.ListProperty
 import org.gradle.api.provider.Property
 import org.gradle.api.tasks.Input
 import org.gradle.api.tasks.TaskAction
+import org.gradle.work.DisableCachingByDefault
 import java.io.BufferedReader
 import java.io.File
 import java.io.InputStreamReader
@@ -30,6 +31,7 @@ import java.util.concurrent.TimeUnit
  * The JSON-RPC wire format mirrors what `mcdebug-client` does in TypeScript:
  * NDJSON, one object per line, no authentication, loopback only.
  */
+@DisableCachingByDefault(because = "Starts and controls an external Minecraft server process")
 abstract class McDebugTestTask : DefaultTask() {
     @get:Input
     abstract val scanPackages: ListProperty<String>
