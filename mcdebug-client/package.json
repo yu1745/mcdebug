@@ -13,8 +13,10 @@
   ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
+    "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
     "dev": "tsc -p tsconfig.json --watch",
     "clean": "rm -rf dist",
+    "pretest": "npm run build && npm run typecheck:test",
     "prepublishOnly": "npm run build",
     "test": "tsx --test test/*.test.ts"
   },

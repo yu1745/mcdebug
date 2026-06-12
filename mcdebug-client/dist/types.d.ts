@@ -12,6 +12,11 @@ export interface BlockStateSpec {
 export type JsonNbt = string | number | boolean | null | {
     [k: string]: JsonNbt;
 } | JsonNbt[];
+export interface ItemStackJson {
+    item: string | null;
+    count: number;
+    nbt?: JsonNbt | null;
+}
 export interface BlockSnapshot {
     pos: Pos;
     dim: string;

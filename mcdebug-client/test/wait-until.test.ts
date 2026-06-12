@@ -5,7 +5,7 @@ import { RpcError } from '../src/types.js';
 
 describe('wait-until', () => {
   let api: ReturnType<typeof createApi>;
-  const p = pos(0, 0, 0);
+  const p = pos(10, 0, 0);
 
   before(async () => {
     api = createApi();

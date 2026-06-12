@@ -22,6 +22,12 @@ export type JsonNbt =
   | { [k: string]: JsonNbt }
   | JsonNbt[];
 
+export interface ItemStackJson {
+  item: string | null;
+  count: number;
+  nbt?: JsonNbt | null;
+}
+
 export interface BlockSnapshot {
   pos: Pos;
   dim: string;
@@ -60,4 +66,3 @@ export class RpcError extends Error {
     this.name = 'RpcError';
   }
 }
-

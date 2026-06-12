@@ -1,5 +1,5 @@
 import { RpcClient } from './client.js';
-import { BlockSnapshot, BlockStateSpec, Box, JsonNbt, Pos, ServerStatus, WaitResult } from './types.js';
+import { BlockSnapshot, BlockStateSpec, Box, ItemStackJson, JsonNbt, Pos, ServerStatus, WaitResult } from './types.js';
 /**
  * High-level typed API on top of RpcClient.
  * Matches the methods described in C:\Users\wangyu\.claude\plans\typed-wandering-wall.md
@@ -116,16 +116,8 @@ export declare class DebugApi {
             eventConsumed: boolean;
             blockConsumed: boolean;
             itemConsumed: boolean;
-            itemBefore: {
-                item: string | null;
-                count: number;
-                nbt?: JsonNbt | null;
-            };
-            itemAfter: {
-                item: string | null;
-                count: number;
-                nbt?: JsonNbt | null;
-            };
+            itemBefore: ItemStackJson;
+            itemAfter: ItemStackJson;
             blockState: {
                 name: string;
                 props: Record<string, string>;
@@ -145,16 +137,8 @@ export declare class DebugApi {
             success: boolean;
             action: string;
             sneaking: boolean;
-            itemBefore: {
-                item: string | null;
-                count: number;
-                nbt?: JsonNbt | null;
-            };
-            itemAfter: {
-                item: string | null;
-                count: number;
-                nbt?: JsonNbt | null;
-            };
+            itemBefore: ItemStackJson;
+            itemAfter: ItemStackJson;
         }>;
         /**
          * Simulate left-clicking (attacking) a block.
@@ -172,16 +156,8 @@ export declare class DebugApi {
             eventConsumed: boolean;
             pos: Pos;
             face: string;
-            itemBefore: {
-                item: string | null;
-                count: number;
-                nbt?: JsonNbt | null;
-            };
-            itemAfter: {
-                item: string | null;
-                count: number;
-                nbt?: JsonNbt | null;
-            };
+            itemBefore: ItemStackJson;
+            itemAfter: ItemStackJson;
             blockState: {
                 name: string;
                 props: Record<string, string>;
@@ -212,16 +188,8 @@ export declare class DebugApi {
             eventConsumed: boolean;
             entityConsumed: boolean;
             itemConsumed: boolean;
-            itemBefore: {
-                item: string | null;
-                count: number;
-                nbt?: JsonNbt | null;
-            };
-            itemAfter: {
-                item: string | null;
-                count: number;
-                nbt?: JsonNbt | null;
-            };
+            itemBefore: ItemStackJson;
+            itemAfter: ItemStackJson;
         }>;
         /**
          * Simulate left-clicking (attacking) an entity.
@@ -244,16 +212,11 @@ export declare class DebugApi {
             entityHealth?: number;
             entityMaxHealth?: number;
             entityDead: boolean;
-            itemBefore: {
-                item: string | null;
-                count: number;
-                nbt?: JsonNbt | null;
-            };
-            itemAfter: {
-                item: string | null;
-                count: number;
-                nbt?: JsonNbt | null;
-            };
+            itemBefore: ItemStackJson;
+            itemAfter: ItemStackJson;
+            attackDamageBefore: number;
+            attackSpeedBefore: number;
+            attackCooldownBefore: number;
         }>;
     };
     be: {
@@ -271,9 +234,7 @@ export declare class DebugApi {
             size: number;
         }>;
         getSlot: (p: Pos, slot: number, dim?: string) => Promise<{
-            item: string | null;
-            count: number;
-            nbt: JsonNbt | null;
+            slot: ItemStackJson;
             maxCount: number;
         }>;
         setSlot: (p: Pos, slot: number, item: string | null, count: number, nbt?: JsonNbt, dim?: string) => Promise<unknown>;
@@ -383,16 +344,8 @@ export declare class DebugApi {
             matched: true;
             recipeId: string;
             recipeType: string;
-            result: {
-                item: string | null;
-                count: number;
-                nbt: JsonNbt | null;
-            };
-            remainder: Array<{
-                item: string | null;
-                count: number;
-                nbt: JsonNbt | null;
-            }>;
+            result: ItemStackJson;
+            remainder: Array<ItemStackJson>;
         } | {
             matched: false;
             candidates: string[];

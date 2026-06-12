@@ -3,6 +3,7 @@ import {
   BlockSnapshot,
   BlockStateSpec,
   Box,
+  ItemStackJson,
   JsonNbt,
   Pos,
   ServerStatus,
@@ -133,8 +134,8 @@ export class DebugApi {
         eventConsumed: boolean;
         blockConsumed: boolean;
         itemConsumed: boolean;
-        itemBefore: { item: string | null; count: number; nbt?: JsonNbt | null };
-        itemAfter: { item: string | null; count: number; nbt?: JsonNbt | null };
+        itemBefore: ItemStackJson;
+        itemAfter: ItemStackJson;
         blockState: { name: string; props: Record<string, string> };
       }>('world.useOnBlock', {
         pos,
@@ -164,8 +165,8 @@ export class DebugApi {
         success: boolean;
         action: string;
         sneaking: boolean;
-        itemBefore: { item: string | null; count: number; nbt?: JsonNbt | null };
-        itemAfter: { item: string | null; count: number; nbt?: JsonNbt | null };
+        itemBefore: ItemStackJson;
+        itemAfter: ItemStackJson;
       }>('world.useItem', {
         item,
         count: opts?.count,
@@ -194,8 +195,8 @@ export class DebugApi {
         eventConsumed: boolean;
         pos: Pos;
         face: string;
-        itemBefore: { item: string | null; count: number; nbt?: JsonNbt | null };
-        itemAfter: { item: string | null; count: number; nbt?: JsonNbt | null };
+        itemBefore: ItemStackJson;
+        itemAfter: ItemStackJson;
         blockState: { name: string; props: Record<string, string> };
       }>('world.attackBlock', {
         pos,
@@ -234,8 +235,8 @@ export class DebugApi {
         eventConsumed: boolean;
         entityConsumed: boolean;
         itemConsumed: boolean;
-        itemBefore: { item: string | null; count: number; nbt?: JsonNbt | null };
-        itemAfter: { item: string | null; count: number; nbt?: JsonNbt | null };
+        itemBefore: ItemStackJson;
+        itemAfter: ItemStackJson;
       }>('world.interactEntity', {
         entityUuid,
         item: opts?.item,
@@ -270,8 +271,11 @@ export class DebugApi {
         entityHealth?: number;
         entityMaxHealth?: number;
         entityDead: boolean;
-        itemBefore: { item: string | null; count: number; nbt?: JsonNbt | null };
-        itemAfter: { item: string | null; count: number; nbt?: JsonNbt | null };
+        itemBefore: ItemStackJson;
+        itemAfter: ItemStackJson;
+        attackDamageBefore: number;
+        attackSpeedBefore: number;
+        attackCooldownBefore: number;
       }>('world.attackEntity', {
         entityUuid,
         item: opts?.item,
@@ -297,7 +301,7 @@ export class DebugApi {
     getSize: (p: Pos, dim?: string) =>
       this.rpc.call<{ size: number }>('inv.getSize', { pos: p, dim }),
     getSlot: (p: Pos, slot: number, dim?: string) =>
-      this.rpc.call<{ item: string | null; count: number; nbt: JsonNbt | null; maxCount: number }>(
+      this.rpc.call<{ slot: ItemStackJson; maxCount: number }>(
         'inv.getSlot',
         { pos: p, slot, dim },
       ),
@@ -417,8 +421,8 @@ export class DebugApi {
         matched: true;
         recipeId: string;
         recipeType: string;
-        result: { item: string | null; count: number; nbt: JsonNbt | null };
-        remainder: Array<{ item: string | null; count: number; nbt: JsonNbt | null }>;
+        result: ItemStackJson;
+        remainder: Array<ItemStackJson>;
       } | {
         matched: false;
         candidates: string[];
