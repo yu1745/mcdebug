@@ -16,6 +16,7 @@ class McDebugPlugin : Plugin<Project> {
             task.scanPackages.set(ext.scanPackages)
             task.runServerTask.set(ext.runServerTask)
             task.timeoutSec.set(ext.timeoutSec)
+            task.parallelism.set(ext.parallelism)
             // Build the mod first so the JAR (with @McDebugTests classes) is fresh
             task.dependsOn("build")
         }

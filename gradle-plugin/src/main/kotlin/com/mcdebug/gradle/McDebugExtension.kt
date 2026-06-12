@@ -34,5 +34,9 @@ open class McDebugExtension @Inject constructor() {
      * before failing the task. Loom cold start can be 60–120s.
      */
     var timeoutSec: Int = 180
-}
 
+    /**
+     * Maximum number of mcdebug tests to run concurrently inside the dev server.
+     */
+    var parallelism: Int = 64
+}

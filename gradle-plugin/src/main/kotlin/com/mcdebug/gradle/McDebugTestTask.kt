@@ -40,9 +40,13 @@ abstract class McDebugTestTask : DefaultTask() {
     @get:Input
     abstract val timeoutSec: Property<Int>
 
+    @get:Input
+    abstract val parallelism: Property<Int>
+
     @TaskAction
     fun run() {
         val resolvedScanPackages = resolveScanPackages()
+        val resolvedParallelism = resolveParallelism()
         val portFile = project.layout.projectDirectory.file("run/mcdebug/port").asFile
         if (portFile.exists()) portFile.delete()
 
@@ -50,7 +54,10 @@ abstract class McDebugTestTask : DefaultTask() {
         val server = startServerProcess()
         try {
             val port = waitForPort(portFile, timeoutSec.get())
-            logger.lifecycle("MC server on 127.0.0.1:$port; scanning $resolvedScanPackages for tests")
+            logger.lifecycle(
+                "MC server on 127.0.0.1:$port; scanning $resolvedScanPackages for tests " +
+                    "(parallelism=$resolvedParallelism)"
+            )
 
             val results = runAllTestsRpc(port, filter = "")
             printReport(results)
@@ -82,6 +89,14 @@ abstract class McDebugTestTask : DefaultTask() {
         return configured
     }
 
+    private fun resolveParallelism(): Int {
+        val configured = parallelism.get()
+        require(configured > 0) {
+            "mcdebug { parallelism = ... } must be greater than 0"
+        }
+        return configured
+    }
+
     private fun startServerProcess(): Process {
         val gradlew = project.rootProject.file("gradlew")
         val logFile = project.layout.buildDirectory
@@ -94,6 +109,7 @@ abstract class McDebugTestTask : DefaultTask() {
             // TestDiscovery knows what to enumerate. Comma-separated to
             // match the env-var contract on the Kotlin side.
             environment().put("MCDEBUG_TEST_SCAN_PACKAGES", scanPackages.get().joinToString(","))
+            environment().put("MCDEBUG_TEST_PARALLELISM", parallelism.get().toString())
         }.start()
         // Drain stdout/stderr to a log file asynchronously — without this the
         // OS pipe buffer (~64 KiB) fills up within seconds of MC server
@@ -142,7 +158,7 @@ abstract class McDebugTestTask : DefaultTask() {
         val line = gson.toJson(request)
 
         Socket("127.0.0.1", port).use { sock ->
-            sock.soTimeout = 60_000
+            sock.soTimeout = 300_000 // 5 min — 16 tests with 20-60s waitUntil each can take 2-3 min
             val writer = PrintWriter(sock.getOutputStream(), true)
             val reader = BufferedReader(InputStreamReader(sock.getInputStream()))
             writer.println(line)

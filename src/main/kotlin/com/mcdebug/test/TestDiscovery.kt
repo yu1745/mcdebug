@@ -4,15 +4,19 @@ import java.io.File
 import java.net.JarURLConnection
 import java.net.URL
 import java.net.URLDecoder
+import java.lang.reflect.Modifier
 import java.util.jar.JarFile
 import kotlin.reflect.KClass
 import kotlin.reflect.full.findAnnotation
 
 /**
- * Hand-rolled classpath scanner that finds classes annotated with
- * [McDebugTests] within a set of base packages, then returns the
- * [KClass] instances referenced by each annotation's `testClasses`
- * vararg.
+ * Hand-rolled classpath scanner that finds mcdebug tests within a set of base
+ * packages.
+ *
+ * Supported discovery modes:
+ *   1. Classes annotated with [McDebugTests], returning each referenced test.
+ *   2. Classes annotated with [McDebugTestPackages], returning top-level
+ *      Kotlin `object`s implementing [McDebugTest] in those packages.
  *
  * Why hand-rolled: avoids `reflections` / `classgraph` dependencies.
  * The pattern mirrors ic2-fabric's `ClassScanner.kt` but with no
@@ -24,8 +28,10 @@ import kotlin.reflect.full.findAnnotation
  *      (a `file:` URL for a directory in dev, a `jar:file:` URL for
  *      a packaged mod).
  *   2. Enumerate `.class` files under that URL.
- *   3. Load each, look for `@McDebugTests`, collect the KClass args.
- *   4. Dedupe and return.
+ *   3. Load each class.
+ *   4. Collect explicit `@McDebugTests` references and package-scoped
+ *      `@McDebugTestPackages` test objects.
+ *   5. Dedupe and return.
  *
  * Limitations:
  *   - Skips inner/anonymous classes (any class name containing `\$`).
@@ -35,8 +41,7 @@ import kotlin.reflect.full.findAnnotation
  */
 object TestDiscovery {
   /**
-   * Scan [basePackages] for `@McDebugTests`-annotated classes and return
-   * the union of `testClasses` KClass arguments they reference.
+   * Scan [basePackages] for mcdebug tests.
    */
   fun discover(
     classLoader: ClassLoader = Thread.currentThread().contextClassLoader,
@@ -50,10 +55,41 @@ object TestDiscovery {
         collectClassNames(resources.nextElement(), pkg, classNames)
       }
     }
-    return classNames.asSequence()
+    val classes = classNames.asSequence()
       .mapNotNull { runCatching { Class.forName(it, false, classLoader) }.getOrNull() }
+
+    val loadedClasses = classes.toList()
+
+    val explicit = loadedClasses.asSequence()
       .mapNotNull { it.kotlin.findAnnotation<McDebugTests>() }
       .flatMap { it.testClasses.asSequence() }
+
+    val packageTests = loadedClasses.asSequence()
+      .mapNotNull { it.kotlin.findAnnotation<McDebugTestPackages>() }
+      .flatMap { it.packages.asSequence() }
+      .distinct()
+      .flatMap { discoverTestObjects(classLoader, it).asSequence() }
+
+    return (explicit + packageTests)
+      .distinct()
+      .toList()
+  }
+
+  private fun discoverTestObjects(
+    classLoader: ClassLoader,
+    pkg: String,
+  ): List<KClass<out McDebugTest>> {
+    val classNames = mutableSetOf<String>()
+    val resources = classLoader.getResources(pkg.replace('.', '/'))
+    while (resources.hasMoreElements()) {
+      collectClassNames(resources.nextElement(), pkg, classNames)
+    }
+    return classNames.asSequence()
+      .mapNotNull { runCatching { Class.forName(it, false, classLoader) }.getOrNull() }
+      .filter { McDebugTest::class.java.isAssignableFrom(it) }
+      .filter { !it.isInterface && !Modifier.isAbstract(it.modifiers) }
+      .map { it.asSubclass(McDebugTest::class.java).kotlin }
+      .filter { it.objectInstance != null }
       .distinct()
       .toList()
   }

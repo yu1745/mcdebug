@@ -22,8 +22,19 @@ interface McDebugTest {
    * Execute the test. Throw on failure (any exception type works — the
    * registry captures the message). Return normally on success.
    *
-   * Tests run sequentially on the MC server thread; do not block waiting
-   * for external resources.
+   * Tests run on mcdebug worker threads; RPC operations hop to the server
+   * thread internally.
    */
   fun run()
+
+  /**
+   * Execute the test with an externally allocated isolated area.
+   *
+   * Existing tests can keep overriding [run] and access the current area
+   * through [McDebugTestApi.currentContext]. Tests that need direct context
+   * access may override this method instead.
+   */
+  fun run(context: McDebugTestContext) {
+    run()
+  }
 }
