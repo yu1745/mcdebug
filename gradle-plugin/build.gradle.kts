@@ -22,7 +22,9 @@ repositories {
 }
 
 dependencies {
-    // No runtime deps; pure Gradle API
+    // Gson for inline JSON-RPC over TCP — avoids hand-rolling a JSON parser
+    // (the request payload is filterable user input, needs proper escaping).
+    implementation("com.google.code.gson:gson:2.10.1")
 }
 
 gradlePlugin {
