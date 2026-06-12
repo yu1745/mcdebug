@@ -1,13 +1,22 @@
 import { createWriteStream } from 'node:fs';
-import { mkdir } from 'node:fs/promises';
+import { mkdir, unlink } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { Readable } from 'node:stream';
+import { pipeline } from 'node:stream/promises';
 import { dirname, resolve } from 'node:path';
-import { get } from 'node:https';
 import type { Command } from 'commander';
 import { version as CLI_VERSION } from '../version.js';
 import { JAR_HELP } from './help-text.js';
 
 const OWNER = 'yu1745';
 const REPO = 'mcdebug';
+const jarName = (ver: string) => `mcdebug-${ver}.jar`;
+const shaName = (ver: string) => `mcdebug-${ver}.jar.sha256`;
+const releaseUrl = (ver: string) =>
+  `https://github.com/${OWNER}/${REPO}/releases/download/v${ver}/${jarName(ver)}`;
+const shaUrl = (ver: string) =>
+  `https://github.com/${OWNER}/${REPO}/releases/download/v${ver}/${shaName(ver)}`;
+const LATEST_REDIRECT = `https://github.com/${OWNER}/${REPO}/releases/latest`;
 
 export function registerJarCommand(program: Command): void {
   program
@@ -19,91 +28,106 @@ export function registerJarCommand(program: Command): void {
     .option('--output <path>', 'output file path (default: mcdebug-{version}.jar)')
     .action(async (opts: { version?: string; latest?: boolean; output?: string }) => {
       const ver = opts.latest ? await fetchLatestVersion() : (opts.version ?? CLI_VERSION);
-      const fileName = opts.output ?? `mcdebug-${ver}.jar`;
-      const assetId = await fetchAssetId(ver);
+      const fileName = opts.output ?? jarName(ver);
       const filePath = resolve(fileName);
 
       await mkdir(dirname(filePath), { recursive: true });
-      await downloadAsset(assetId, ver, filePath);
 
-      console.error(`Downloaded mcdebug-${ver}.jar → ${filePath}`);
+      const expectedSha = await tryFetchSha256(ver);
+
+      const actualSha = await downloadAndHash(ver, filePath);
+      console.error(`Computed SHA256: ${actualSha}`);
+
+      if (expectedSha) {
+        if (actualSha !== expectedSha) {
+          await unlink(filePath).catch(() => {});
+          throw new Error(
+            `SHA256 mismatch — the downloaded file is not the expected artifact.\n` +
+            `  expected: ${expectedSha}\n` +
+            `  actual:   ${actualSha}\n` +
+            `The downloaded file has been deleted.`,
+          );
+        }
+        console.error(`✓ SHA256 verified`);
+      } else {
+        console.error(`(no .sha256 sidecar in release — verification skipped)`);
+      }
     });
 }
 
+/**
+ * Resolve the latest released version by following the `/releases/latest` 302
+ * redirect. The final URL has shape `.../releases/tag/vX.Y.Z`; we extract the
+ * tag from there. No GitHub API call, so no rate-limit exposure.
+ */
 async function fetchLatestVersion(): Promise<string> {
-  const url = `https://api.github.com/repos/${OWNER}/${REPO}/releases/latest`;
-  const data = await fetchJson<{ tag_name: string }>(url);
-  const tag = data.tag_name;
+  const res = await fetch(LATEST_REDIRECT, { redirect: 'follow' });
+  // Drain body — we don't need the HTML
+  await res.text();
+  const m = res.url.match(/\/releases\/tag\/(v?[\d.+a-z-]+)$/i);
+  if (!m) throw new Error(`Cannot parse version from ${res.url}`);
+  const tag = m[1];
   return tag.startsWith('v') ? tag.slice(1) : tag;
 }
 
-async function fetchAssetId(ver: string): Promise<number> {
-  const tag = ver.startsWith('v') ? ver : `v${ver}`;
-  const url = `https://api.github.com/repos/${OWNER}/${REPO}/releases/tags/${tag}`;
-  const data = await fetchJson<{ assets: Array<{ id: number; name: string }> }>(url);
+/**
+ * Try to fetch the `<jar>.sha256` sidecar that the release workflow uploads.
+ * Returns null if the sidecar is missing (404) or malformed — older releases
+ * predate the sidecar convention. Never throws.
+ */
+async function tryFetchSha256(ver: string): Promise<string | null> {
+  let res: Response;
+  try {
+    res = await fetch(shaUrl(ver));
+  } catch {
+    return null;
+  }
+  if (res.status === 404) return null;
+  if (!res.ok) return null;
+  const text = (await res.text()).trim();
+  // Format: "<hash>   <filename>\n" (sha256sum output) or just "<hash>\n"
+  const hash = text.split(/\s+/)[0];
+  return /^[a-f0-9]{64}$/i.test(hash) ? hash.toLowerCase() : null;
+}
 
-  const asset = data.assets.find((a) => a.name === `mcdebug-${ver}.jar`);
-  if (!asset) {
-    const available = data.assets.map((a) => a.name).join(', ') || '(none)';
+/**
+ * Download the JAR, stream it to disk, and compute its SHA256 in one pass.
+ * Rejects if the response is HTML (GitHub returns 200 + text/html for missing
+ * assets under the release URL, instead of a real 404) or any non-200 status.
+ */
+async function downloadAndHash(ver: string, filePath: string): Promise<string> {
+  const res = await fetch(releaseUrl(ver));
+  if (!res.ok) {
+    throw new Error(`Download failed: HTTP ${res.status}`);
+  }
+  if (!res.body) {
+    throw new Error('Download failed: empty response body');
+  }
+  const ct = res.headers.get('content-type') ?? '';
+  if (ct.startsWith('text/') || ct.includes('html')) {
     throw new Error(
-      `Asset mcdebug-${ver}.jar not found in release ${tag}.\nAvailable assets: ${available}`,
+      `Refusing to save: server returned Content-Type "${ct}" ` +
+      `(this is usually a 404 page, not the JAR). ` +
+      `Check that version "${ver}" exists and the asset name matches "${jarName(ver)}".`,
     );
   }
-  return asset.id;
-}
 
-function downloadAsset(assetId: number, ver: string, filePath: string): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const url = `https://github.com/${OWNER}/${REPO}/releases/download/v${ver}/mcdebug-${ver}.jar`;
-    const file = createWriteStream(filePath);
-
-    get(url, (res) => {
-      if (res.statusCode === 302 && res.headers.location) {
-        // GitHub releases redirect to the actual CDN URL
-        get(res.headers.location, (redirectRes) => {
-          if (redirectRes.statusCode !== 200) {
-            reject(new Error(`Download failed with status ${redirectRes.statusCode}`));
-            return;
-          }
-          redirectRes.pipe(file);
-          file.on('finish', () => {
-            file.close();
-            resolve();
-          });
-        }).on('error', reject);
-      } else if (res.statusCode === 200) {
-        res.pipe(file);
-        file.on('finish', () => {
-          file.close();
-          resolve();
-        });
-      } else {
-        reject(new Error(`Download failed with status ${res.statusCode}`));
-      }
-    }).on('error', reject);
-  });
-}
-
-function fetchJson<T>(url: string): Promise<T> {
-  return new Promise((resolve, reject) => {
-    get(url, { headers: { 'User-Agent': 'mcdebug-cli' } }, (res) => {
-      if (res.statusCode !== 200) {
-        const chunks: Buffer[] = [];
-        res.on('data', (c: Buffer) => chunks.push(c));
-        res.on('end', () => {
-          reject(new Error(`GitHub API returned ${res.statusCode}: ${Buffer.concat(chunks).toString()}`));
-        });
-        return;
-      }
-      const chunks: Buffer[] = [];
-      res.on('data', (c: Buffer) => chunks.push(c));
-      res.on('end', () => {
-        try {
-          resolve(JSON.parse(Buffer.concat(chunks).toString()));
-        } catch {
-          reject(new Error('Failed to parse GitHub API response'));
+  const hash = createHash('sha256');
+  const file = createWriteStream(filePath);
+  try {
+    await pipeline(
+      Readable.fromWeb(res.body as never),
+      async function* (source: AsyncIterable<Buffer>) {
+        for await (const chunk of source) {
+          hash.update(chunk);
+          yield chunk;
         }
-      });
-    }).on('error', reject);
-  });
+      },
+      file,
+    );
+  } catch (e) {
+    await unlink(filePath).catch(() => {});
+    throw e;
+  }
+  return hash.digest('hex');
 }

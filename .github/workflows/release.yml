@@ -39,12 +39,20 @@ jobs:
           JAR_FILE=$(find build/libs -name 'mcdebug-*.jar' \
             ! -name '*-dev.jar' ! -name '*-sources.jar' ! -name '*-all.jar' \
             | head -1)
-          echo "Publishing: $JAR_FILE"
+          VERSION="${{ steps.version.outputs.VERSION }}"
+          CANONICAL="mcdebug-${VERSION}.jar"
+          echo "Publishing: $JAR_FILE → $CANONICAL"
 
           # Rename to canonical name for the release
-          mv "$JAR_FILE" "mcdebug-${{ steps.version.outputs.VERSION }}.jar"
+          mv "$JAR_FILE" "$CANONICAL"
+
+          # SHA256 sidecar — the CLI's `mcdebug jar` downloads this to verify
+          # the JAR. Convention: <filename>.sha256 contains just the hex digest.
+          sha256sum "$CANONICAL" | awk '{print $1}' > "${CANONICAL}.sha256"
+          echo "SHA256: $(cat ${CANONICAL}.sha256)"
 
           gh release create "${GITHUB_REF_NAME}" \
-            "mcdebug-${{ steps.version.outputs.VERSION }}.jar" \
+            "$CANONICAL" \
+            "${CANONICAL}.sha256" \
             --title "${GITHUB_REF_NAME}" \
             --generate-notes
