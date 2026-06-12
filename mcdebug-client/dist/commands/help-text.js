@@ -447,7 +447,7 @@ Cross-version JAR+CLI pairs are not supported — the JSON-RPC protocol
 versions must agree.
 
 Examples:
-  mcdebug jar                      download mcdebug-0.4.2.jar (CLI version)
+  mcdebug jar                      download mcdebug-0.4.3.jar (CLI version)
   mcdebug jar --latest             download the latest release
   mcdebug jar --output mods/mcdebug.jar  save to a custom path`;
 export const CRAFT_GROUP_HELP = `

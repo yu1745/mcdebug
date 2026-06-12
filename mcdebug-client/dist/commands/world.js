@@ -9,7 +9,7 @@ export function registerWorldCommands(cmd, getApi) {
         .requiredOption('--x <n>', 'x coordinate (integer)')
         .requiredOption('--y <n>', 'y coordinate (integer)')
         .requiredOption('--z <n>', 'z coordinate (integer)')
-        .option('--state <k=v>', 'state property, repeatable, e.g. --state lit=true')
+        .option('--state <k=v>', 'state property, repeatable, e.g. --state lit=true', (value, previous) => previous.concat(value), [])
         .option('--dim <id>', 'dimension id (default minecraft:overworld)')
         .option('--flags <n>', 'setBlock flags (default 3)')
         .action(async (opts) => {
