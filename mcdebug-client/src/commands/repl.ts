@@ -3,6 +3,10 @@ import { stdin, stdout } from 'node:process';
 import { DebugApi } from '../api.js';
 import { handleError } from './util.js';
 
+const AsyncFunction = Object.getPrototypeOf(async function () {}).constructor as new (
+  ...args: string[]
+) => (dbg: DebugApi) => Promise<unknown>;
+
 /**
  * Start an interactive REPL exposing the DebugApi as `dbg`.
  *
@@ -26,7 +30,8 @@ export async function startRepl(api: DebugApi): Promise<void> {
     if (trimmed === '.exit' || trimmed === ':exit' || trimmed === 'exit') break;
     try {
       // The expression has access to `dbg`. Await its result, print JSON.
-      const result = await (0, eval)(`(async () => { return (${trimmed}); })()`);
+      const evaluate = new AsyncFunction('dbg', `return (${trimmed});`);
+      const result = await evaluate(api);
       if (result !== undefined) console.log(JSON.stringify(result, null, 2));
     } catch (e) {
       handleError(e);
