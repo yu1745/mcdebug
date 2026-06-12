@@ -34,7 +34,8 @@ mc-debug-server/
     ├── kotlin/com/mcdebug/
     │   ├── McDebugMod.kt         # @Mod 入口，注册 server lifecycle 钩子
     │   ├── rpc/                  # 传输 + 协议层（JsonRpc/RpcServer/RpcDispatcher/RpcErrors/RpcHandler）
-    │   ├── api/                  # WorldOps / BlockEntityOps / InventoryOps / ScanOps / ServerOps
+    │   ├── api/                  # WorldOps / BlockEntityOps / InventoryOps / CraftingOps / FluidOps
+    │   │                         #   ScanOps / ServerOps
     │   ├── wait/WaitOps.kt       # wait.until — 被动观察
     │   └── util/{NbtJson,ServerContext}.kt
     └── resources/
@@ -48,6 +49,8 @@ mc-debug-server/
   - `WorldOps` ↔ `world.*`
   - `BlockEntityOps` ↔ `be.*`
   - `InventoryOps` ↔ `inv.*`
+  - `CraftingOps` ↔ `craft.*`
+  - `FluidOps` ↔ `fluid.*`
   - `WaitOps` ↔ `wait.*`
   - `ScanOps` ↔ `scan.*`
   - `ServerOps` ↔ `server.*`
@@ -116,7 +119,42 @@ node dist/cli.js status    # 调用 server.status RPC
 - Loom 缓存了旧 remap jar：清 `run/.fabric/processedMods/`，再 `./gradlew.bat build`
 - TS 端快速调试：`node dist/cli.js raw world.getBlock '{"pos":[0,64,0]}'`
 
-## 10. 已知小问题 / TODO（v2）
+## 10. 版本更新规则
+
+版本号在 5 处出现，**发版时全部必须同步更新**，否则会出现 CLI 显示旧版本或 npx 安装到错误版本。
+
+| # | 文件 | 字段 | 用途 |
+|---|------|------|------|
+| 1 | `gradle.properties` | `mod_version=X.Y.Z` | Fabric mod 版本（Gradle → fabric.mod.json `${version}`） |
+| 2 | `mcdebug-client/src/version.ts` | `export const version = 'X.Y.Z'` | **CLI 唯一真相源** — cli.ts 从这里 import |
+| 3 | `mcdebug-client/package.json` | `"version": "X.Y.Z"` | npm 发布（mcdebug-client 子包） |
+| 4 | `package.json`（根） | `"version": "X.Y.Z"` | `npx github:yu1745/mcdebug` 直接安装时读取 |
+| 5 | `mcdebug-client/src/cli.ts` | `.version(version)` | **必须 import from version.ts，不能硬编码字符串** |
+
+### 发版检查清单
+
+```
+□ gradle.properties                        mod_version=X.Y.Z
+□ mcdebug-client/src/version.ts          export const version = 'X.Y.Z'
+□ mcdebug-client/package.json              "version": "X.Y.Z"
+□ package.json                             "version": "X.Y.Z"
+□ cli.ts                                  grep -n 'version' 确认是 import 不是硬编码
+□ ./gradlew build -x test
+□ npm run build --prefix mcdebug-client
+□ node mcdebug-client/dist/cli.js --version  ← 必须输出 X.Y.Z
+□ git add -A && git commit -m "vX.Y.Z: ..."
+□ git tag -a vX.Y.Z -m "..."
+□ git push origin main && git push origin vX.Y.Z
+□ gh run watch（确认 CI 成功）
+□ rm -rf ~/.npm/_npx/*mcdebug* && npx yu1745/mcdebug --version ← 确认 X.Y.Z
+```
+
+### 踩过的坑
+
+- **cli.ts 硬编码 version**（v0.3.0、v0.4.0）：cli.ts 的 `.version('0.2.0')` 忘了改成 import，导致 `--version` 和 `npx` 永远显示 0.2.0。**必须从 version.ts import，不允许出现硬编码版本字符串。**
+- **根 package.json 遗漏**（v0.3.0）：只改了 mcdebug-client/package.json 没改根 package.json，导致 `npx github:yu1745/mcdebug` 安装的是旧版本号。两个 package.json 都要改。
+
+## 11. 已知小问题 / TODO（v2）
 
 - `be.setNbt` 用 `readNbt` 重置整个 NBT；某些 BlockEntity 子类可能不会完全重新初始化（红石信号、缓存等）
 - `wait.until` 在断连时不会主动取消服务端回调，依赖 tick listener 的 `future.isDone` 自检
