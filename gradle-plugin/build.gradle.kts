@@ -6,8 +6,8 @@ plugins {
     kotlin("jvm") version "2.3.10"
 }
 
-group = rootProject.property("maven_group") as String
-version = rootProject.property("mod_version") as String
+group = rootProject.findProperty("group") ?: rootProject.property("maven_group") as String
+version = rootProject.findProperty("version") ?: rootProject.property("mod_version") as String
 
 java {
     sourceCompatibility = JavaVersion.VERSION_17
