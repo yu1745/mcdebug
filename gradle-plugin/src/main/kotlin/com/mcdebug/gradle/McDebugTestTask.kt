@@ -95,11 +95,31 @@ abstract class McDebugTestTask : DefaultTask() {
 
     private fun startServerProcess(): Process {
         val gradlew = project.rootProject.file("gradlew")
-        return ProcessBuilder(gradlew.absolutePath, runServerTask.get(), "--no-daemon")
+        val logFile = project.layout.buildDirectory
+            .file("mcdebugTest/server.log").get().asFile
+        logFile.parentFile.mkdirs()
+        val process = ProcessBuilder(gradlew.absolutePath, runServerTask.get(), "--no-daemon")
             .directory(project.rootDir)
             .redirectErrorStream(true)
             .start()
+        // Drain stdout/stderr to a log file asynchronously — without this the
+        // OS pipe buffer (~64 KiB) fills up within seconds of MC server
+        // startup and the subprocess blocks. Log file is surfaced in the
+        // timeout error so users can grep for the real cause.
+        Thread({
+            runCatching {
+                logFile.outputStream().buffered().use { out ->
+                    process.inputStream.copyTo(out)
+                }
+            }
+        }, "mcdebug-server-log-drain").apply { isDaemon = true; start() }
+        // Stash for the timeout error message
+        serverLogFile = logFile
+        return process
     }
+
+    @Transient
+    private var serverLogFile: File? = null
 
     private fun waitForPort(portFile: File, timeoutSec: Int): Int {
         val deadline = System.currentTimeMillis() + timeoutSec * 1000L
@@ -112,7 +132,7 @@ abstract class McDebugTestTask : DefaultTask() {
         }
         throw GradleException(
             "MC server didn't write $portFile within ${timeoutSec}s. " +
-            "Run `./gradlew ${runServerTask.get()}` manually to inspect startup errors."
+            "Inspect server log: ${serverLogFile ?: "(no log file captured)"}"
         )
     }
 
