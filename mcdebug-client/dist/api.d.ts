@@ -90,6 +90,171 @@ export declare class DebugApi {
             changed: boolean;
             dim: string;
         }>;
+        /**
+         * Simulate right-clicking (using) a block with an item in hand.
+         * Mirrors the full ServerPlayerInteractionManager.interactBlock pipeline:
+         *   0. Fabric API UseBlockCallback (mod handlers like IC2 wrench register here)
+         *   1. BlockState.onUse — block handles (lever toggle, button press, door open)
+         *   2. ItemStack.useOnBlock — item handles if block returned PASS
+         * Vanilla sneaking check: shift+right-click with item → skip block.onUse.
+         * Uses the same stable fake player as placeAsPlayer (creative + invulnerable).
+         */
+        useOnBlock: (pos: Pos, face: "up" | "down" | "north" | "south" | "east" | "west", opts?: {
+            item?: string;
+            count?: number;
+            nbt?: JsonNbt;
+            sneaking?: boolean;
+            playerFacing?: "north" | "south" | "east" | "west";
+            dim?: string;
+        }) => Promise<{
+            success: boolean;
+            action: string;
+            pos: Pos;
+            face: string;
+            sneaking: boolean;
+            playerFacing: string;
+            eventConsumed: boolean;
+            blockConsumed: boolean;
+            itemConsumed: boolean;
+            itemBefore: {
+                item: string | null;
+                count: number;
+                nbt?: JsonNbt | null;
+            };
+            itemAfter: {
+                item: string | null;
+                count: number;
+                nbt?: JsonNbt | null;
+            };
+            blockState: {
+                name: string;
+                props: Record<string, string>;
+            };
+        }>;
+        /**
+         * Simulate right-clicking with the item in air.
+         * Triggers Item.use(world, player, hand), for tools like nano saber that
+         * toggle state without a block/entity target.
+         */
+        useItem: (item: string, opts?: {
+            count?: number;
+            nbt?: JsonNbt;
+            sneaking?: boolean;
+            dim?: string;
+        }) => Promise<{
+            success: boolean;
+            action: string;
+            sneaking: boolean;
+            itemBefore: {
+                item: string | null;
+                count: number;
+                nbt?: JsonNbt | null;
+            };
+            itemAfter: {
+                item: string | null;
+                count: number;
+                nbt?: JsonNbt | null;
+            };
+        }>;
+        /**
+         * Simulate left-clicking (attacking) a block.
+         * Mirrors the full ServerPlayerInteractionManager.processBlockBreakingAction pipeline:
+         *   0. Fabric API AttackBlockCallback (mod handlers like IC2 wrench disassembly)
+         *   1. Block.onBlockBreakStart, then break in creative mode
+         */
+        attackBlock: (pos: Pos, face: "up" | "down" | "north" | "south" | "east" | "west", opts?: {
+            item?: string;
+            count?: number;
+            nbt?: JsonNbt;
+            dim?: string;
+        }) => Promise<{
+            broken: boolean;
+            eventConsumed: boolean;
+            pos: Pos;
+            face: string;
+            itemBefore: {
+                item: string | null;
+                count: number;
+                nbt?: JsonNbt | null;
+            };
+            itemAfter: {
+                item: string | null;
+                count: number;
+                nbt?: JsonNbt | null;
+            };
+            blockState: {
+                name: string;
+                props: Record<string, string>;
+            };
+        }>;
+        /**
+         * Simulate right-clicking (using) an entity with an item in hand.
+         * Mirrors PlayerEntity.interact(entity, hand):
+         *   0. Fabric API UseEntityCallback
+         *   1. entity.interact(player, hand)
+         *   2. item.useOnEntity(player, livingEntity, hand) — e.g. bucket milks cow
+         */
+        interactEntity: (entityUuid: string, opts?: {
+            item?: string;
+            count?: number;
+            nbt?: JsonNbt;
+            sneaking?: boolean;
+            playerFacing?: "north" | "south" | "east" | "west";
+            dim?: string;
+        }) => Promise<{
+            success: boolean;
+            action: string;
+            entityType: string;
+            entityUuid: string;
+            entityPos: Pos;
+            sneaking: boolean;
+            playerFacing: string;
+            eventConsumed: boolean;
+            entityConsumed: boolean;
+            itemConsumed: boolean;
+            itemBefore: {
+                item: string | null;
+                count: number;
+                nbt?: JsonNbt | null;
+            };
+            itemAfter: {
+                item: string | null;
+                count: number;
+                nbt?: JsonNbt | null;
+            };
+        }>;
+        /**
+         * Simulate left-clicking (attacking) an entity.
+         * Mirrors PlayerEntity.attack(entity):
+         *   0. Fabric API AttackEntityCallback
+         *   1. PlayerEntity.attack(entity) — damage, knockback, sweep, etc.
+         */
+        attackEntity: (entityUuid: string, opts?: {
+            item?: string;
+            count?: number;
+            nbt?: JsonNbt;
+            playerFacing?: "north" | "south" | "east" | "west";
+            dim?: string;
+        }) => Promise<{
+            success: boolean;
+            entityType: string;
+            entityUuid: string;
+            entityPos: Pos;
+            eventConsumed: boolean;
+            entityHealth?: number;
+            entityMaxHealth?: number;
+            entityDead: boolean;
+            itemBefore: {
+                item: string | null;
+                count: number;
+                nbt?: JsonNbt | null;
+            };
+            itemAfter: {
+                item: string | null;
+                count: number;
+                nbt?: JsonNbt | null;
+            };
+        }>;
     };
     be: {
         getNbt: (p: Pos, dim?: string) => Promise<{
@@ -260,6 +425,23 @@ export declare class DebugApi {
         }>;
         countByBlock: (box: Box, dim?: string) => Promise<{
             counts: Record<string, number>;
+        }>;
+        findEntities: (box: Box, opts?: {
+            type?: string;
+            includeNbt?: boolean;
+            dim?: string;
+        }) => Promise<{
+            entities: Array<{
+                type: string;
+                uuid: string;
+                x: number;
+                y: number;
+                z: number;
+                health?: number;
+                maxHealth?: number;
+                nbt?: JsonNbt;
+            }>;
+            count: number;
         }>;
     };
     server: {

@@ -1,13 +1,20 @@
 package com.mcdebug.api
 
 import com.mojang.authlib.GameProfile
+import net.minecraft.network.ClientConnection
+import net.minecraft.network.NetworkSide
+import net.minecraft.network.packet.Packet
 import net.minecraft.server.MinecraftServer
+import net.minecraft.server.network.ServerPlayNetworkHandler
 import net.minecraft.server.network.ServerPlayerEntity
 import net.minecraft.server.world.ServerWorld
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
 import java.util.UUID
 
 /**
- * Stable fake ServerPlayerEntity used as the placer for world.placeAsPlayer.
+ * Stable fake ServerPlayerEntity used as the placer for world.placeAsPlayer
+ * and the interactor for world.useOnBlock / world.attackBlock.
  *
  * Why a real ServerPlayerEntity (not null):
  *   - The vanilla BlockItem.place pipeline calls onPlaced(world, pos, state, placer, stack)
@@ -26,16 +33,22 @@ import java.util.UUID
  *   - Per call we set its position to the placement pos (for sound falloff) and
  *     yaw/pitch from the playerFacing param. The cached instance is mutated, not cloned.
  *
+ * Network handler:
+ *   - The fake player has a no-op ServerPlayNetworkHandler that silently drops all
+ *     outbound packets. This allows mod code that calls player.openHandledScreen(),
+ *     player.sendMessageToClient(), Criteria.trigger(), etc. to work without NPE.
+ *   - The handler is NOT ticked (the player is never spawned), so no keep-alive or
+ *     position-sync packets are sent.
+ *
  * Limitations vs a real player:
- *   - Advancement triggers fire on the (per-server) advancement tracker, but since the
- *     player is never registered with the player manager, no real player sees the
- *     criterion. Same goes for stats: the stat handler exists but isn't connected to
- *     any saved data. This is acceptable for placement simulation.
- *   - The player's inventory is empty; getStackInHand returns ItemStack.EMPTY. Vanilla
- *     BlockItem.place only uses the stack from the ItemPlacementContext, not the
- *     placer's held item, so this is fine.
+ *   - Packets are silently dropped — no real client receives them. This means GUI
+ *     screens open server-side but the fake player can't interact with them.
+ *   - Advancement triggers fire on the fake player's tracker, not visible to real players.
+ *   - The player's inventory is managed per-call (set before use, cleared after).
  */
 internal object FakePlayerPool {
+    private val LOGGER: Logger = LoggerFactory.getLogger("mcdebug-fakeplayer")
+
     // Fixed UUID — same identity across server restarts, across calls, across dims.
     // mcdebug_<random> namespace makes it easy to grep in NBT.
     val PROFILE: GameProfile = GameProfile(
@@ -48,15 +61,26 @@ internal object FakePlayerPool {
     fun get(server: MinecraftServer, world: ServerWorld): ServerPlayerEntity {
         return cache.getOrPut(server to world) {
             val p = ServerPlayerEntity(server, world, PROFILE)
-            // creative + invulnerable so:
-            //   - the placed stack isn't decremented (we made a fresh stack anyway, but
-            //     this keeps the stack reusable if we ever cache it)
-            //   - sound / GameEvent / onPlaced see a "creative" placer, matching the
-            //     expected automation use case (no survival-mode interceptions)
+            // creative + invulnerable + flying so:
+            //   - the placed/used stack isn't decremented (creative mode)
+            //   - sound / GameEvent / onPlaced see a "creative" interactor
             p.abilities.creativeMode = true
             p.abilities.invulnerable = true
             p.abilities.flying = true
             p.setInvulnerable(true)
+
+            // Install a no-op network handler so mod code that calls
+            // player.openHandledScreen() / player.sendMessageToClient() /
+            // Criteria.trigger() / etc. doesn't NPE on null networkHandler.
+            // Packets are silently dropped — no real client receives them.
+            val connection = ClientConnection(NetworkSide.CLIENTBOUND)
+            val handler = object : ServerPlayNetworkHandler(server, connection, p) {
+                override fun sendPacket(packet: Packet<*>) {
+                    // no-op: silently drop all outbound packets
+                }
+            }
+            p.networkHandler = handler
+
             p
         }
     }

@@ -102,6 +102,184 @@ export class DebugApi {
       this.rpc.call<{ chunk: [number, number]; forced: boolean; changed: boolean; dim: string }>('world.forceloadChunk', { chunk: [cx, cz], dim: opts?.dim }),
     unforceloadChunk: (cx: number, cz: number, opts?: { dim?: string }) =>
       this.rpc.call<{ chunk: [number, number]; forced: boolean; changed: boolean; dim: string }>('world.unforceloadChunk', { chunk: [cx, cz], dim: opts?.dim }),
+    /**
+     * Simulate right-clicking (using) a block with an item in hand.
+     * Mirrors the full ServerPlayerInteractionManager.interactBlock pipeline:
+     *   0. Fabric API UseBlockCallback (mod handlers like IC2 wrench register here)
+     *   1. BlockState.onUse — block handles (lever toggle, button press, door open)
+     *   2. ItemStack.useOnBlock — item handles if block returned PASS
+     * Vanilla sneaking check: shift+right-click with item → skip block.onUse.
+     * Uses the same stable fake player as placeAsPlayer (creative + invulnerable).
+     */
+    useOnBlock: (
+      pos: Pos,
+      face: 'up' | 'down' | 'north' | 'south' | 'east' | 'west',
+      opts?: {
+        item?: string;
+        count?: number;
+        nbt?: JsonNbt;
+        sneaking?: boolean;
+        playerFacing?: 'north' | 'south' | 'east' | 'west';
+        dim?: string;
+      },
+    ) =>
+      this.rpc.call<{
+        success: boolean;
+        action: string;
+        pos: Pos;
+        face: string;
+        sneaking: boolean;
+        playerFacing: string;
+        eventConsumed: boolean;
+        blockConsumed: boolean;
+        itemConsumed: boolean;
+        itemBefore: { item: string | null; count: number; nbt?: JsonNbt | null };
+        itemAfter: { item: string | null; count: number; nbt?: JsonNbt | null };
+        blockState: { name: string; props: Record<string, string> };
+      }>('world.useOnBlock', {
+        pos,
+        face,
+        item: opts?.item,
+        count: opts?.count,
+        nbt: opts?.nbt,
+        sneaking: opts?.sneaking,
+        playerFacing: opts?.playerFacing,
+        dim: opts?.dim,
+      }),
+    /**
+     * Simulate right-clicking with the item in air.
+     * Triggers Item.use(world, player, hand), for tools like nano saber that
+     * toggle state without a block/entity target.
+     */
+    useItem: (
+      item: string,
+      opts?: {
+        count?: number;
+        nbt?: JsonNbt;
+        sneaking?: boolean;
+        dim?: string;
+      },
+    ) =>
+      this.rpc.call<{
+        success: boolean;
+        action: string;
+        sneaking: boolean;
+        itemBefore: { item: string | null; count: number; nbt?: JsonNbt | null };
+        itemAfter: { item: string | null; count: number; nbt?: JsonNbt | null };
+      }>('world.useItem', {
+        item,
+        count: opts?.count,
+        nbt: opts?.nbt,
+        sneaking: opts?.sneaking,
+        dim: opts?.dim,
+      }),
+    /**
+     * Simulate left-clicking (attacking) a block.
+     * Mirrors the full ServerPlayerInteractionManager.processBlockBreakingAction pipeline:
+     *   0. Fabric API AttackBlockCallback (mod handlers like IC2 wrench disassembly)
+     *   1. Block.onBlockBreakStart, then break in creative mode
+     */
+    attackBlock: (
+      pos: Pos,
+      face: 'up' | 'down' | 'north' | 'south' | 'east' | 'west',
+      opts?: {
+        item?: string;
+        count?: number;
+        nbt?: JsonNbt;
+        dim?: string;
+      },
+    ) =>
+      this.rpc.call<{
+        broken: boolean;
+        eventConsumed: boolean;
+        pos: Pos;
+        face: string;
+        itemBefore: { item: string | null; count: number; nbt?: JsonNbt | null };
+        itemAfter: { item: string | null; count: number; nbt?: JsonNbt | null };
+        blockState: { name: string; props: Record<string, string> };
+      }>('world.attackBlock', {
+        pos,
+        face,
+        item: opts?.item,
+        count: opts?.count,
+        nbt: opts?.nbt,
+        dim: opts?.dim,
+      }),
+    /**
+     * Simulate right-clicking (using) an entity with an item in hand.
+     * Mirrors PlayerEntity.interact(entity, hand):
+     *   0. Fabric API UseEntityCallback
+     *   1. entity.interact(player, hand)
+     *   2. item.useOnEntity(player, livingEntity, hand) — e.g. bucket milks cow
+     */
+    interactEntity: (
+      entityUuid: string,
+      opts?: {
+        item?: string;
+        count?: number;
+        nbt?: JsonNbt;
+        sneaking?: boolean;
+        playerFacing?: 'north' | 'south' | 'east' | 'west';
+        dim?: string;
+      },
+    ) =>
+      this.rpc.call<{
+        success: boolean;
+        action: string;
+        entityType: string;
+        entityUuid: string;
+        entityPos: Pos;
+        sneaking: boolean;
+        playerFacing: string;
+        eventConsumed: boolean;
+        entityConsumed: boolean;
+        itemConsumed: boolean;
+        itemBefore: { item: string | null; count: number; nbt?: JsonNbt | null };
+        itemAfter: { item: string | null; count: number; nbt?: JsonNbt | null };
+      }>('world.interactEntity', {
+        entityUuid,
+        item: opts?.item,
+        count: opts?.count,
+        nbt: opts?.nbt,
+        sneaking: opts?.sneaking,
+        playerFacing: opts?.playerFacing,
+        dim: opts?.dim,
+      }),
+    /**
+     * Simulate left-clicking (attacking) an entity.
+     * Mirrors PlayerEntity.attack(entity):
+     *   0. Fabric API AttackEntityCallback
+     *   1. PlayerEntity.attack(entity) — damage, knockback, sweep, etc.
+     */
+    attackEntity: (
+      entityUuid: string,
+      opts?: {
+        item?: string;
+        count?: number;
+        nbt?: JsonNbt;
+        playerFacing?: 'north' | 'south' | 'east' | 'west';
+        dim?: string;
+      },
+    ) =>
+      this.rpc.call<{
+        success: boolean;
+        entityType: string;
+        entityUuid: string;
+        entityPos: Pos;
+        eventConsumed: boolean;
+        entityHealth?: number;
+        entityMaxHealth?: number;
+        entityDead: boolean;
+        itemBefore: { item: string | null; count: number; nbt?: JsonNbt | null };
+        itemAfter: { item: string | null; count: number; nbt?: JsonNbt | null };
+      }>('world.attackEntity', {
+        entityUuid,
+        item: opts?.item,
+        count: opts?.count,
+        nbt: opts?.nbt,
+        playerFacing: opts?.playerFacing,
+        dim: opts?.dim,
+      }),
   };
 
   be = {
@@ -266,6 +444,13 @@ export class DebugApi {
       }),
     countByBlock: (box: Box, dim?: string) =>
       this.rpc.call<{ counts: Record<string, number> }>('scan.countByBlock', { box, dim }),
+    findEntities: (box: Box, opts?: { type?: string; includeNbt?: boolean; dim?: string }) =>
+      this.rpc.call<{ entities: Array<{ type: string; uuid: string; x: number; y: number; z: number; health?: number; maxHealth?: number; nbt?: JsonNbt }>; count: number }>('scan.findEntities', {
+        box,
+        type: opts?.type,
+        includeNbt: opts?.includeNbt,
+        dim: opts?.dim,
+      }),
   };
 
   server = {

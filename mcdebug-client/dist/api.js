@@ -54,6 +54,81 @@ export class DebugApi {
         }),
         forceloadChunk: (cx, cz, opts) => this.rpc.call('world.forceloadChunk', { chunk: [cx, cz], dim: opts?.dim }),
         unforceloadChunk: (cx, cz, opts) => this.rpc.call('world.unforceloadChunk', { chunk: [cx, cz], dim: opts?.dim }),
+        /**
+         * Simulate right-clicking (using) a block with an item in hand.
+         * Mirrors the full ServerPlayerInteractionManager.interactBlock pipeline:
+         *   0. Fabric API UseBlockCallback (mod handlers like IC2 wrench register here)
+         *   1. BlockState.onUse — block handles (lever toggle, button press, door open)
+         *   2. ItemStack.useOnBlock — item handles if block returned PASS
+         * Vanilla sneaking check: shift+right-click with item → skip block.onUse.
+         * Uses the same stable fake player as placeAsPlayer (creative + invulnerable).
+         */
+        useOnBlock: (pos, face, opts) => this.rpc.call('world.useOnBlock', {
+            pos,
+            face,
+            item: opts?.item,
+            count: opts?.count,
+            nbt: opts?.nbt,
+            sneaking: opts?.sneaking,
+            playerFacing: opts?.playerFacing,
+            dim: opts?.dim,
+        }),
+        /**
+         * Simulate right-clicking with the item in air.
+         * Triggers Item.use(world, player, hand), for tools like nano saber that
+         * toggle state without a block/entity target.
+         */
+        useItem: (item, opts) => this.rpc.call('world.useItem', {
+            item,
+            count: opts?.count,
+            nbt: opts?.nbt,
+            sneaking: opts?.sneaking,
+            dim: opts?.dim,
+        }),
+        /**
+         * Simulate left-clicking (attacking) a block.
+         * Mirrors the full ServerPlayerInteractionManager.processBlockBreakingAction pipeline:
+         *   0. Fabric API AttackBlockCallback (mod handlers like IC2 wrench disassembly)
+         *   1. Block.onBlockBreakStart, then break in creative mode
+         */
+        attackBlock: (pos, face, opts) => this.rpc.call('world.attackBlock', {
+            pos,
+            face,
+            item: opts?.item,
+            count: opts?.count,
+            nbt: opts?.nbt,
+            dim: opts?.dim,
+        }),
+        /**
+         * Simulate right-clicking (using) an entity with an item in hand.
+         * Mirrors PlayerEntity.interact(entity, hand):
+         *   0. Fabric API UseEntityCallback
+         *   1. entity.interact(player, hand)
+         *   2. item.useOnEntity(player, livingEntity, hand) — e.g. bucket milks cow
+         */
+        interactEntity: (entityUuid, opts) => this.rpc.call('world.interactEntity', {
+            entityUuid,
+            item: opts?.item,
+            count: opts?.count,
+            nbt: opts?.nbt,
+            sneaking: opts?.sneaking,
+            playerFacing: opts?.playerFacing,
+            dim: opts?.dim,
+        }),
+        /**
+         * Simulate left-clicking (attacking) an entity.
+         * Mirrors PlayerEntity.attack(entity):
+         *   0. Fabric API AttackEntityCallback
+         *   1. PlayerEntity.attack(entity) — damage, knockback, sweep, etc.
+         */
+        attackEntity: (entityUuid, opts) => this.rpc.call('world.attackEntity', {
+            entityUuid,
+            item: opts?.item,
+            count: opts?.count,
+            nbt: opts?.nbt,
+            playerFacing: opts?.playerFacing,
+            dim: opts?.dim,
+        }),
     };
     be = {
         getNbt: (p, dim) => this.rpc.call('be.getNbt', { pos: p, dim }),
@@ -135,6 +210,12 @@ export class DebugApi {
             dim: opts?.dim,
         }),
         countByBlock: (box, dim) => this.rpc.call('scan.countByBlock', { box, dim }),
+        findEntities: (box, opts) => this.rpc.call('scan.findEntities', {
+            box,
+            type: opts?.type,
+            includeNbt: opts?.includeNbt,
+            dim: opts?.dim,
+        }),
     };
     server = {
         status: () => this.rpc.call('server.status'),

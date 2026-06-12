@@ -15,6 +15,8 @@ Examples:
   mcdebug wait-until --expr 'block[0,64,0].id == "minecraft:water"'
   mcdebug raw world.getBlock '{"pos":[0,64,0]}'
   mcdebug craft do --grid @grid.json --recipe-id ic2_120:advanced_batpack
+  mcdebug use --x 0 --y 64 --z 0 --face up                    toggle lever (empty hand)
+  mcdebug use --x 0 --y 64 --z 0 --face north --item minecraft:bucket  pick up water
   mcdebug jar                        download mod JAR (same version as CLI)
   mcdebug jar --latest               download latest release
 
@@ -357,6 +359,8 @@ Available methods:
   dbg.server.runCommand(cmd, opts?)
   dbg.world.getBlock(pos, opts?)   dbg.world.setBlock(pos, block, state?, opts?)
   dbg.world.setBlocks(ops, opts?)  dbg.world.placeAsPlayer(pos, block, face, opts?)
+  dbg.world.useItem(item, opts?)   dbg.world.useOnBlock(pos, face, opts?)
+  dbg.world.attackBlock(pos, face, opts?)
   dbg.world.getRegion(box, opts?)
   dbg.world.selectBlocks(box, pred, opts?)
   dbg.world.forceloadChunk(cx, cz, opts?)   dbg.world.unforceloadChunk(cx, cz, opts?)
@@ -370,6 +374,7 @@ Available methods:
   dbg.wait.until(predicate, opts?)
   dbg.craft.craft(grid, opts?)     dbg.craft.find(grid, opts?)
   dbg.scan.findBlocks(box, block, opts?)     dbg.scan.countByBlock(box, dim?)
+  dbg.scan.findEntities(box, opts?)
 
 pos = [x, y, z] (integer tuple). opts can include { dim: "minecraft:the_nether" }.
 All methods return promises — use await.
@@ -383,6 +388,9 @@ Available RPC methods (namespace.method):
   server.status              server.listDimensions
   world.getBlock              world.setBlock               world.setBlocks
   world.placeAsPlayer        (uses a stable fake player — see 'mcdebug place-as-player --help')
+  world.useItem              (right-click an item in air — see 'mcdebug use-item --help')
+  world.useOnBlock           (right-click a block — see 'mcdebug use --help')
+  world.attackBlock          (left-click / break a block — see 'mcdebug attack --help')
   world.getRegion             world.selectBlocks
   world.forceloadChunk        world.unforceloadChunk
   be.getNbt                   be.setNbt                    be.getField
@@ -390,6 +398,7 @@ Available RPC methods (namespace.method):
   inv.getSize                 inv.getSlot                  inv.setSlot
   inv.insert                  inv.extract
   scan.findBlocks             scan.countByBlock
+  scan.findEntities
   wait.until
   fluid.info                  fluid.get                    fluid.insert
   fluid.extract
@@ -512,6 +521,28 @@ Notes:
   Empty remainder slots show { "item": null } (not "minecraft:air").
   result.nbt contains the output's full NBT compound, if any. Modded recipe
     types may write custom NBT to the result (e.g. charge, durability).`;
+export const FIND_ENTITIES_HELP = `
+List all entities in a box. Returns type, UUID, position, and health
+(for living entities). Use --type to filter by entity type.
+
+Examples:
+  mcdebug find-entities --from 0,63,0 --to 10,70,10
+  mcdebug find-entities --from -5,63,-5 --to 5,70,5 --type minecraft:chicken
+  mcdebug find-entities --from 0,100,0 --to 5,105,5 --nbt
+
+Output:
+  {
+    "count": 3,
+    "entities": [
+      {"type":"minecraft:chicken","uuid":"...","x":2.5,"y":100.0,"z":3.5,"health":4.0,"maxHealth":4.0},
+      ...
+    ]
+  }
+
+Notes:
+  Coordinates are double (entity center position, not block pos).
+  The box has a +1 block margin on each side to catch entities on edges.
+  Use --nbt to include full entity NBT (large output for complex entities).`;
 export const CRAFT_FIND_HELP = `
 Examples:
   mcdebug craft find --grid '[
@@ -532,6 +563,177 @@ Returns every crafting recipe whose matches() returns true for the grid.
 When multiple recipes match, pass the chosen recipeId to "craft do
 --recipe-id" to disambiguate. Empty { "matches": [] } means no recipe
 matches this grid.`;
+export const USE_HELP = `
+Simulate right-clicking (using) a block. Goes through the full vanilla
+two-phase pipeline:
+  1. BlockState.onUse — the block handles the interaction
+     (lever toggles, button presses, doors open, chests open GUI, etc.)
+  2. ItemStack.useOnBlock — if the block returned PASS, the item handles it
+     (bucket picks up water, flint-and-steel ignites, wrench rotates,
+     fluid cell injects fluid, etc.)
+
+The fake player is in creative mode, so the held item is NOT consumed
+(count does not decrement). This matches the automation use case.
+
+Examples:
+  # Toggle a lever (empty hand — lever handles Block.onUse itself)
+  mcdebug use --x 0 --y 64 --z 0 --face up
+  # Press a button
+  mcdebug use --x 0 --y 65 --z 0 --face north
+  # Open a chest / furnace (empty hand opens GUI-like interaction)
+  mcdebug use --x 5 --y 64 --z 0 --face south
+  # Use flint-and-steel on a block to ignite
+  mcdebug use --x 0 --y 64 --z 0 --face north --item minecraft:flint_and_steel
+  # Use bucket to pick up water source block
+  mcdebug use --x 3 --y 62 --z 5 --face up --item minecraft:bucket
+  # Use a modded wrench to rotate a machine
+  mcdebug use --x 10 --y 64 --z 5 --face north --item modid:wrench
+  # Shift+right-click wrench to disassemble a machine
+  mcdebug use --x 10 --y 64 --z 5 --face north --item modid:wrench --sneaking
+
+Output:
+  {
+    "success": true,
+    "action": "success",
+    "pos": [0, 64, 0],
+    "face": "up",
+    "blockConsumed": true,
+    "itemConsumed": false,
+    "itemBefore": { "item": null, "count": 0 },
+    "itemAfter":  { "item": null, "count": 0 },
+    "blockState": { "name": "minecraft:lever", "props": { "face": "ceiling", "powered": "true" } }
+  }
+
+Notes:
+  --item is optional. Omit it for empty-hand interactions (lever, button,
+    door, chest, etc.) where the block itself handles the right-click.
+  --sneaking simulates shift+right-click. Many blocks/items change behavior:
+    vanilla beds/doors return PASS when sneaking (letting item use fire);
+    modded wrenches often use shift+click for disassemble vs rotate.
+  --face is the face of the target block being clicked, not the player's
+    facing direction.
+  blockConsumed=true means BlockState.onUse returned accepted (lever
+    toggled, door opened, etc.).
+  itemConsumed=true means ItemStack.useOnBlock returned accepted (bucket
+    picked up fluid, wrench rotated, etc.).
+  itemAfter shows the stack after interaction — check for durability changes
+    (Damage field) or NBT changes if the item was modified.
+  If neither blockConsumed nor itemConsumed, action will be "pass" and
+  success will be false — the interaction had no effect.`;
+export const USE_ITEM_HELP = `
+Simulate right-clicking (using) the held item in air, with no block or entity
+target. This triggers Item.use(world, player, hand).
+
+Use this for items whose right-click behavior is not tied to a target:
+  - toggle tools such as ic2_120:nano_saber
+  - bows, food, potions, scrolls, scanners, or other mod items that act on use
+
+Examples:
+  # Toggle a full IC2 nano saber on
+  mcdebug use-item --item ic2_120:nano_saber --nbt '{"Energy":160000}'
+  # Toggle the same saber off
+  mcdebug use-item --item ic2_120:nano_saber --nbt '{"Energy":160000,"NanoSaberActive":1}'
+  # Use a mod item while sneaking
+  mcdebug use-item --item modid:tool --sneaking
+
+Output:
+  {
+    "success": true,
+    "action": "consume",
+    "sneaking": false,
+    "itemBefore": { "item": "ic2_120:nano_saber", "count": 1, "nbt": { "Energy": 160000 } },
+    "itemAfter":  { "item": "ic2_120:nano_saber", "count": 1, "nbt": { "Energy": 160000, "NanoSaberActive": 1 } }
+  }
+
+Notes:
+  This is different from 'mcdebug use', which right-clicks a block face, and
+  from 'mcdebug interact-entity', which right-clicks an entity.
+  itemAfter shows changed NBT, transformed stacks, or consumed items.`;
+export const ATTACK_HELP = `
+Simulate left-clicking (attacking) a block. Triggers Block.onBlockBreakStart
+(the "start mining" event), and in creative mode immediately breaks the block.
+
+This fires block-break events, loot drops, and onBroken callbacks — unlike
+'remove' which is a raw setBlockState to air with no side effects.
+
+Examples:
+  # Break a block (creative mode — instant break with drops)
+  mcdebug attack --x 0 --y 64 --z 0 --face north
+  # Left-click with a sword (triggers sweep attack particles, etc.)
+  mcdebug attack --x 5 --y 64 --z 3 --face up --item minecraft:diamond_sword
+
+Output:
+  {
+    "broken": true,
+    "pos": [0, 64, 0],
+    "face": "north",
+    "itemBefore": { "item": null, "count": 0 },
+    "itemAfter":  { "item": null, "count": 0 },
+    "blockState": { "name": "minecraft:air", "props": {} }
+  }
+
+Notes:
+  The fake player is in creative mode, so blocks break instantly.
+  broken=true means the block was destroyed (creative mode break).
+  itemAfter may show durability changes if the held item was affected.`;
+export const INTERACT_ENTITY_HELP = `
+Simulate right-clicking (using) an entity. Mirrors the vanilla entity
+interaction pipeline (PlayerEntity.interact):
+  1. Fabric API UseEntityCallback (mod handlers)
+  2. entity.interact(player, hand) — entity handles interaction
+  3. item.useOnEntity(player, entity, hand) — item handles interaction
+     (e.g. bucket milks cow, shears shear sheep, food feeds animal)
+
+Examples:
+  # Milk a cow (find UUID via find-entities first)
+  mcdebug interact-entity --uuid <cow-uuid> --item minecraft:bucket
+  # Shear a sheep
+  mcdebug interact-entity --uuid <sheep-uuid> --item minecraft:shears
+  # Feed a horse (shift+right-click with golden carrot)
+  mcdebug interact-entity --uuid <horse-uuid> --item minecraft:golden_carrot --sneaking
+
+Output:
+  {
+    "success": true,
+    "entityType": "minecraft:cow",
+    "entityUuid": "...",
+    "eventConsumed": false,
+    "entityConsumed": false,
+    "itemConsumed": true,
+    "itemBefore": { "item": "minecraft:bucket", "count": 1 },
+    "itemAfter":  { "item": "minecraft:milk_bucket", "count": 1 }
+  }
+
+Notes:
+  Use 'find-entities' to get the UUID of the target entity.
+  itemConsumed=true means the item handled the interaction (e.g. bucket → milk bucket).
+  The fake player is in creative mode, so item count is preserved.`;
+export const ATTACK_ENTITY_HELP = `
+Simulate left-clicking (attacking) an entity. Mirrors PlayerEntity.attack():
+  1. Fabric API AttackEntityCallback (mod handlers)
+  2. PlayerEntity.attack(entity) — damage, knockback, sweep attack, etc.
+
+Examples:
+  # Punch a cow (empty hand, 1 damage in survival)
+  mcdebug attack-entity --uuid <cow-uuid>
+  # Attack with a diamond sword (sweep + extra damage)
+  mcdebug attack-entity --uuid <zombie-uuid> --item minecraft:diamond_sword
+
+Output:
+  {
+    "entityType": "minecraft:cow",
+    "entityUuid": "...",
+    "eventConsumed": false,
+    "entityHealth": 9,
+    "entityMaxHealth": 10,
+    "entityDead": false
+  }
+
+Notes:
+  Use 'find-entities' to get the UUID of the target entity.
+  The fake player temporarily switches to survival mode with full attack
+  cooldown, so weapon damage should match a normal fully charged attack.
+  entityDead=true means the entity was killed by the attack.`;
 // ---- Guide sections ----
 const GUIDE_CONNECTION = `
 === Connection ===

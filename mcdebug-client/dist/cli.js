@@ -5,12 +5,15 @@ import { RpcClient } from './client.js';
 import { registerBeCommands } from './commands/be.js';
 import { registerCmdCommand } from './commands/cmd.js';
 import { registerCraftCommands } from './commands/craft.js';
+import { registerEntityCommands } from './commands/entity.js';
 import { registerFluidCommands } from './commands/fluid.js';
+import { registerInteractEntityCommand } from './commands/interact-entity.js';
 import { registerGuideCommand } from './commands/guide.js';
 import { registerInvCommands } from './commands/inv.js';
 import { registerJarCommand } from './commands/jar.js';
 import { startRepl } from './commands/repl.js';
 import { registerServerCommand } from './commands/server.js';
+import { registerUseCommand } from './commands/use.js';
 import { registerWaitCommand } from './commands/wait.js';
 import { registerWorldCommands } from './commands/world.js';
 import { handleError, outputJson } from './commands/util.js';
@@ -47,6 +50,9 @@ registerCmdCommand(program, getApi);
 registerWaitCommand(program, getApi);
 registerGuideCommand(program);
 registerJarCommand(program);
+registerEntityCommands(program, getApi);
+registerInteractEntityCommand(program, getApi);
+registerUseCommand(program, getApi);
 program
     .command('repl')
     .description('start an interactive REPL (dbg.DebugApi is available)')
