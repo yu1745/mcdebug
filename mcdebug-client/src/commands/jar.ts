@@ -23,11 +23,10 @@ export function registerJarCommand(program: Command): void {
     .command('jar')
     .description('download the mcdebug mod JAR from GitHub Releases')
     .addHelpText('after', JAR_HELP)
-    .option('--version <ver>', 'download a specific version (default: same as CLI version)')
     .option('--latest', 'download the latest release instead of matching CLI version')
-    .option('--output <path>', 'output file path (default: mcdebug-{version}.jar)')
-    .action(async (opts: { version?: string; latest?: boolean; output?: string }) => {
-      const ver = opts.latest ? await fetchLatestVersion() : (opts.version ?? CLI_VERSION);
+    .option('--output <path>', 'output file path (default: mcdebug-{cli-version}.jar)')
+    .action(async (opts: { latest?: boolean; output?: string }) => {
+      const ver = opts.latest ? await fetchLatestVersion() : CLI_VERSION;
       const fileName = opts.output ?? jarName(ver);
       const filePath = resolve(fileName);
 
