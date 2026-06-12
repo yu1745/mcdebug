@@ -15,11 +15,12 @@ import { registerWaitCommand } from './commands/wait.js';
 import { registerWorldCommands } from './commands/world.js';
 import { handleError, outputJson } from './commands/util.js';
 import { GLOBAL_HELP_AFTER, RAW_HELP, REPL_HELP } from './commands/help-text.js';
+import { version } from './version.js';
 const program = new Command();
 program
     .name('mcdebug')
     .description('TypeScript CLI for the mcdebug Minecraft debug server mod')
-    .version('0.2.0')
+    .version(version)
     .option('--port <n>', 'explicit port (overrides MCDEBUG_PORT and port file)')
     .option('--port-file <path>', 'explicit port file path')
     .option('--host <addr>', 'host (default 127.0.0.1)')
