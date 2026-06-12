@@ -87,15 +87,14 @@ abstract class McDebugTestTask : DefaultTask() {
         val logFile = project.layout.buildDirectory
             .file("mcdebugTest/server.log").get().asFile
         logFile.parentFile.mkdirs()
-        val process = ProcessBuilder(gradlew.absolutePath, runServerTask.get(), "--no-daemon")
-            .directory(project.rootDir)
-            .redirectErrorStream(true)
+        val process = ProcessBuilder(gradlew.absolutePath, runServerTask.get(), "--no-daemon").apply {
+            directory(project.rootDir)
+            redirectErrorStream(true)
             // Pass the scan package list to the server so McDebugMod's
             // TestDiscovery knows what to enumerate. Comma-separated to
             // match the env-var contract on the Kotlin side.
-            .environment()["MCDEBUG_TEST_SCAN_PACKAGES"] =
-                scanPackages.get().joinToString(",")
-            .start()
+            environment().put("MCDEBUG_TEST_SCAN_PACKAGES", scanPackages.get().joinToString(","))
+        }.start()
         // Drain stdout/stderr to a log file asynchronously — without this the
         // OS pipe buffer (~64 KiB) fills up within seconds of MC server
         // startup and the subprocess blocks. Log file is surfaced in the
