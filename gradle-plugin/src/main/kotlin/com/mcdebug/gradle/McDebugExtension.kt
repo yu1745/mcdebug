@@ -14,9 +14,13 @@ open class McDebugExtension @Inject constructor() {
     open class TestConfig {
         /**
          * Packages to scan for `@McDebugTests` annotated classes.
-         * Empty list means "auto-detect" — the plugin will use
-         * `archives_base_name` from gradle.properties, or `project.group`,
-         * or the project directory name, in that order.
+         *
+         * **Required.** The task fails fast with a GradleException if this
+         * is left empty — no auto-detection. The package list directly
+         * scopes what the classpath scanner will enumerate, so getting it
+         * wrong means either a silent miss (test classes never found) or
+         * a slow scan (entire classpath walked). Better to make the
+         * consumer write it explicitly.
          */
         var scanPackages: List<String> = emptyList()
 

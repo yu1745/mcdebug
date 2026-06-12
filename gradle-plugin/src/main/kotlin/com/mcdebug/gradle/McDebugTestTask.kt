@@ -74,20 +74,12 @@ abstract class McDebugTestTask : DefaultTask() {
 
     private fun resolveScanPackages(): List<String> {
         val configured = scanPackages.get()
-        if (configured.isNotEmpty()) return configured
-        val auto = listOfNotNull(
-            project.findProperty("archives_base_name") as? String,
-            project.group.toString().takeIf { it.isNotBlank() && it != "unspecified" },
-            project.projectDir.name,
-        )
-        if (auto.isEmpty()) {
-            throw GradleException(
-                "mcdebug.test.scanPackages is empty and project has no " +
-                "archives_base_name / group to auto-detect from. " +
-                "Set `mcdebug { test { scanPackages = ['your.pkg'] } }`."
-            )
+        require(configured.isNotEmpty()) {
+            "mcdebug { test { scanPackages = [...] } } is required and must list at " +
+            "least one package containing @McDebugTests-annotated classes. " +
+            "Example: mcdebug { test { scanPackages = ['com.example.mymod'] } }"
         }
-        return listOf(auto.first())
+        return configured
     }
 
     private fun startServerProcess(): Process {

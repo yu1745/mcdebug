@@ -86,12 +86,20 @@ object McDebugMod : DedicatedServerModInitializer {
     }
 
     private fun discoverAndRegisterTests() {
+        // Package list comes from MCDEBUG_TEST_SCAN_PACKAGES env var
+        // (comma-separated). The Gradle plugin's mcdebugTest task always
+        // sets it; manual server runs without the env var get an empty
+        // registry (no tests discovered, no scan performed).
         val pkgEnv = System.getenv("MCDEBUG_TEST_SCAN_PACKAGES")
         val packages = pkgEnv
             ?.split(',')
             ?.map { it.trim() }
             ?.filter { it.isNotEmpty() }
-            ?: listOf("com")
+            ?: emptyList()
+        if (packages.isEmpty()) {
+            LOGGER.info("mcdebug: no MCDEBUG_TEST_SCAN_PACKAGES set, skipping test discovery")
+            return
+        }
         val testClasses = TestDiscovery.discover(basePackages = packages)
         var registered = 0
         for (kclass in testClasses) {
