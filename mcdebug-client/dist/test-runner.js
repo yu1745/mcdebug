@@ -1,0 +1,207 @@
+import { DebugApi } from './api.js';
+import { RpcClient } from './client.js';
+export function createTestRunner(options = {}) {
+    const tests = [];
+    return {
+        get tests() {
+            return tests;
+        },
+        test(name, run) {
+            tests.push({ name, run });
+        },
+        run: () => runTests(tests, options),
+    };
+}
+export function offset(origin, dx = 0, dy = 0, dz = 0) {
+    return [origin[0] + dx, origin[1] + dy, origin[2] + dz];
+}
+function createApi(opts = {}) {
+    return new DebugApi(new RpcClient(opts));
+}
+function blockBox(origin, options) {
+    const minOffset = options.clearMinOffset ?? [-8, -1, -8];
+    const maxOffset = options.clearMaxOffset ?? [9, 6, 9];
+    return {
+        min: offset(origin, minOffset[0], minOffset[1], minOffset[2]),
+        max: offset(origin, maxOffset[0], maxOffset[1], maxOffset[2]),
+    };
+}
+function* positionsInBox(min, max) {
+    for (let x = min[0]; x <= max[0]; x++) {
+        for (let y = min[1]; y <= max[1]; y++) {
+            for (let z = min[2]; z <= max[2]; z++) {
+                yield [x, y, z];
+            }
+        }
+    }
+}
+function chunksForBox(min, max) {
+    const chunks = new Set();
+    for (const [x, , z] of positionsInBox(min, max)) {
+        chunks.add(`${Math.floor(x / 16)},${Math.floor(z / 16)}`);
+    }
+    return [...chunks].map((key) => key.split(',').map(Number));
+}
+async function clearArea(api, origin, options) {
+    const { min, max } = blockBox(origin, options);
+    const ops = [...positionsInBox(min, max)].map((pos) => ({ pos, block: 'minecraft:air' }));
+    const batchSize = options.batchSize ?? 512;
+    for (let i = 0; i < ops.length; i += batchSize) {
+        await api.world.setBlocks(ops.slice(i, i + batchSize));
+    }
+}
+async function prepareArea(api, origin, options) {
+    const { min, max } = blockBox(origin, options);
+    const chunks = chunksForBox(min, max);
+    for (const [cx, cz] of chunks)
+        await api.world.forceloadChunk(cx, cz);
+    await clearArea(api, origin, options);
+    return chunks;
+}
+async function cleanupArea(api, origin, chunks, options) {
+    await clearArea(api, origin, options);
+    for (const [cx, cz] of chunks)
+        await api.world.unforceloadChunk(cx, cz);
+}
+function originFor(index, options) {
+    const base = options.origin ?? [100, 64, 100];
+    const stride = options.stride ?? 32;
+    const columns = options.gridColumns ?? 16;
+    const col = index % columns;
+    const row = Math.floor(index / columns);
+    return [base[0] + col * stride, base[1], base[2] + row * stride];
+}
+async function runOne(testCase, index, options) {
+    const api = createApi(options.client);
+    const origin = originFor(index, options);
+    const ctx = {
+        api,
+        origin,
+        pos: (dx = 0, dy = 0, dz = 0) => offset(origin, dx, dy, dz),
+    };
+    const start = Date.now();
+    let chunks = [];
+    try {
+        chunks = await prepareArea(api, origin, options);
+        await testCase.run(ctx);
+        return { ok: true, durationMs: Date.now() - start };
+    }
+    catch (error) {
+        return { ok: false, durationMs: Date.now() - start, error };
+    }
+    finally {
+        try {
+            await cleanupArea(api, origin, chunks, options);
+        }
+        finally {
+            await api.close();
+        }
+    }
+}
+async function runTests(tests, options) {
+    const envName = options.parallelismEnv ?? 'MCDEBUG_TEST_PARALLELISM';
+    const envParallelism = Number(process.env[envName] ?? '');
+    const configured = options.parallelism ?? envParallelism;
+    const concurrency = Number.isFinite(configured) && configured > 0 ? configured : 128;
+    const queue = [...tests.entries()];
+    let failed = 0;
+    console.log(`[==========] Running ${tests.length} mcdebug TS test(s)`);
+    async function worker() {
+        while (queue.length > 0) {
+            const next = queue.shift();
+            if (!next)
+                return;
+            const [index, testCase] = next;
+            const result = await runOne(testCase, index, options);
+            if (result.ok) {
+                console.log(`[       OK ] ${testCase.name} (${result.durationMs}ms)`);
+            }
+            else {
+                failed++;
+                const message = result.error instanceof Error ? result.error.stack ?? result.error.message : String(result.error);
+                console.error(`[  FAILED  ] ${testCase.name} (${result.durationMs}ms)`);
+                console.error(message);
+            }
+        }
+    }
+    await Promise.all(Array.from({ length: Math.min(concurrency, tests.length) }, () => worker()));
+    console.log(`[==========] ${tests.length} test(s) reported`);
+    if (failed > 0) {
+        console.error(`[  FAILED  ] ${failed}/${tests.length} test(s) failed`);
+        process.exitCode = 1;
+    }
+}
+export async function setBlocks(ctx, ops) {
+    await ctx.api.world.setBlocks(ops.map((op) => ({ pos: op.pos, block: op.block, state: op.props ? { name: op.block, props: op.props } : undefined })));
+}
+export async function place(ctx, pos, block) {
+    await ctx.api.world.setBlock(pos, block);
+}
+export async function placeAsPlayer(ctx, pos, block, face, opts = {}) {
+    await ctx.api.world.placeAsPlayer(pos, block, face, opts);
+}
+export async function assertBlockId(ctx, pos, expected) {
+    const block = await ctx.api.world.getBlock(pos);
+    const actual = block.state.name;
+    if (actual !== expected)
+        throw new Error(`expected block ${expected} at ${pos}, got ${actual}`);
+}
+export async function setBeField(ctx, pos, path, value) {
+    await ctx.api.be.setField(pos, path, value);
+}
+export async function getBeNumber(ctx, pos, path) {
+    const result = await ctx.api.be.getField(pos, path);
+    if (typeof result.value !== 'number')
+        throw new Error(`expected numeric BE field ${path}, got ${JSON.stringify(result.value)}`);
+    return result.value;
+}
+export async function insertItem(ctx, pos, item, count, slot) {
+    await ctx.api.inv.insert(pos, item, count, { slot });
+}
+export async function setSlot(ctx, pos, slot, item, count, nbt) {
+    await ctx.api.inv.setSlot(pos, slot, item, count, nbt);
+}
+export async function getSlot(ctx, pos, slot) {
+    return (await ctx.api.inv.getSlot(pos, slot)).slot;
+}
+export async function assertSlotHas(ctx, pos, slot, item) {
+    const stack = await getSlot(ctx, pos, slot);
+    if (stack.item !== item)
+        throw new Error(`expected slot ${slot} at ${pos} to contain ${item}, got ${stack.item ?? 'empty'}`);
+}
+export async function assertSlotEmpty(ctx, pos, slot) {
+    const stack = await getSlot(ctx, pos, slot);
+    if (stack.item !== null || stack.count !== 0)
+        throw new Error(`expected slot ${slot} at ${pos} to be empty, got ${JSON.stringify(stack)}`);
+}
+export async function assertSlotCount(ctx, pos, slot, expectedCount) {
+    const stack = await getSlot(ctx, pos, slot);
+    if (stack.count !== expectedCount)
+        throw new Error(`expected slot ${slot} at ${pos} count ${expectedCount}, got ${stack.count}`);
+}
+export function invItemEquals(pos, slot, itemId) {
+    return `inv[${pos[0]},${pos[1]},${pos[2]}].${slot}.item == "${itemId}"`;
+}
+export function invCountLessThan(pos, slot, count) {
+    return `inv[${pos[0]},${pos[1]},${pos[2]}].${slot}.count < ${count}`;
+}
+export function beFieldGreaterThan(pos, path, value) {
+    return `be[${pos[0]},${pos[1]},${pos[2]}].${path} > ${value}`;
+}
+export async function waitUntil(ctx, predicate, timeoutTicks) {
+    await ctx.api.wait.until(predicate, { timeoutTicks });
+}
+export async function waitTicks(ctx, ticks) {
+    const status = await ctx.api.server.status();
+    await waitUntil(ctx, `tick >= ${status.tick + ticks}`, ticks + 20);
+}
+export async function fluidInsert(ctx, pos, fluid, amount) {
+    const result = await ctx.api.fluid.insert(pos, fluid, amount);
+    return result.inserted;
+}
+export async function fluidGet(ctx, pos, index) {
+    return ctx.api.fluid.get(pos, { index });
+}
+export async function fluidExtract(ctx, pos, amount, index) {
+    await ctx.api.fluid.extract(pos, amount, { index });
+}

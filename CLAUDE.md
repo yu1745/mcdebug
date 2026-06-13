@@ -1,6 +1,6 @@
 # mcdebug — Minecraft Debug Server Mod
 
-Fabric 1.20.1 + Kotlin Mod，提供 localhost JSON-RPC 服务，让 TypeScript CLI 远程读写世界/方块实体/物品栏，**用于 Mod 开发者自动化测试自己的机器方块**。
+Fabric 1.20.1 + Kotlin Mod，提供 localhost JSON-RPC 服务，让 TypeScript CLI 远程读写世界/方块实体/物品栏，**用于 Mod 开发者用外部 TS runner 自动化测试自己的机器方块**。
 
 ```
 ┌─────────────────┐  JSON-RPC 2.0   ┌──────────────────┐
@@ -110,6 +110,7 @@ node dist/cli.js status    # 调用 server.status RPC
 - 改 TS：`pnpm build` 通过
 - 改 entrypoint/资源：手动 `./gradlew.bat runServer` 启动一次确认 mod 加载 + RPC 端口监听
 - 改了 API/CLI 协议：两端一起改，TS 端的 `DebugApi` 强类型签名是契约
+- 不要新增 Kotlin test DSL / Gradle plugin / 注解扫描测试入口；测试编排放在消费者项目的 TS dispatcher
 - 改 mcdebug 默认端口 / 协议层：先在 plan 文件里讨论再动
 
 ## 9. 调试技巧
@@ -161,7 +162,6 @@ node scripts/set-version.mjs X.Y.Z
 - `be.setNbt` 用 `readNbt` 重置整个 NBT；某些 BlockEntity 子类可能不会完全重新初始化（红石信号、缓存等）
 - `wait.until` 在断连时不会主动取消服务端回调，依赖 tick listener 的 `future.isDone` 自检
 - `ScanOps.countByBlock` 在 box 很大时是 O(N)，加 chunk 进度回调再说
-- YAML test runner 没做（`mcdebug script` 占位）
 - MCP adapter 没做（对话中"Layer 4"）
 - GUI/FakePlayer 没做（对话中"第二阶段"）
 - 鉴权 / 远程连接 没做

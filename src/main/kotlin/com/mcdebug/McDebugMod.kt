@@ -4,14 +4,11 @@ import com.mcdebug.api.BlockEntityOps
 import com.mcdebug.api.CraftingOps
 import com.mcdebug.api.FluidOps
 import com.mcdebug.api.InventoryOps
-import com.mcdebug.api.McDebugOps
 import com.mcdebug.api.ScanOps
 import com.mcdebug.api.ServerOps
 import com.mcdebug.api.WorldOps
 import com.mcdebug.rpc.RpcDispatcher
 import com.mcdebug.rpc.RpcServer
-import com.mcdebug.test.McDebugTestRegistry
-import com.mcdebug.test.TestDiscovery
 import com.mcdebug.wait.WaitOps
 import net.fabricmc.api.DedicatedServerModInitializer
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents
@@ -37,21 +34,12 @@ object McDebugMod : DedicatedServerModInitializer {
 
     private var rpcServer: RpcServer? = null
 
-    /**
-     * Live JSON-RPC dispatcher for the running MC server. Exposed for
-     * in-process callers (e.g. McDebugTestApi in test objects) that
-     * need to invoke handlers directly without going through TCP.
-     * Set in `onServerStarted`, cleared in `onServerStopping`.
-     */
+    /** Live JSON-RPC dispatcher for the running MC server. */
     @Volatile
     var dispatcher: RpcDispatcher? = null
         private set
 
-    /**
-     * The MinecraftServer instance for the currently running test session.
-     * Exposed for the same reason as [dispatcher]. Both are required
-     * arguments to [RpcDispatcher.dispatch].
-     */
+    /** The MinecraftServer instance backing the current RPC session. */
     @Volatile
     var currentServer: MinecraftServer? = null
         private set
@@ -73,19 +61,12 @@ object McDebugMod : DedicatedServerModInitializer {
             registerGroup("wait", WaitOps)
             registerGroup("fluid", FluidOps)
             registerGroup("craft", CraftingOps)
-            registerGroup("mcdebug", McDebugOps)
         }
         dispatcher = d
         currentServer = server
 
         // Install the tick listener for wait.until. This is passive — it only observes server tick events.
         WaitOps.install()
-
-        // Discover and register @McDebugTests-annotated test objects.
-        // Package list comes from MCDEBUG_TEST_SCAN_PACKAGES env var (comma-separated),
-        // defaulting to "com" — broad but acceptable for dev. Consumers (gradle plugin)
-        // should set the env var to a tight set to avoid scanning unrelated jars.
-        discoverAndRegisterTests()
 
         rpcServer = RpcServer(d, ::portFilePath).also { it.start(server) }
         LOGGER.info("mcdebug RPC ready on 127.0.0.1:{}", rpcServer?.boundPort)
@@ -101,37 +82,7 @@ object McDebugMod : DedicatedServerModInitializer {
             rpcServer = null
             dispatcher = null
             currentServer = null
-            McDebugTestRegistry.clear()
         }
-    }
-
-    private fun discoverAndRegisterTests() {
-        // Package list comes from MCDEBUG_TEST_SCAN_PACKAGES env var
-        // (comma-separated). The Gradle plugin's mcdebugTest task always
-        // sets it; manual server runs without the env var get an empty
-        // registry (no tests discovered, no scan performed).
-        val pkgEnv = System.getenv("MCDEBUG_TEST_SCAN_PACKAGES")
-        val packages = pkgEnv
-            ?.split(',')
-            ?.map { it.trim() }
-            ?.filter { it.isNotEmpty() }
-            ?: emptyList()
-        if (packages.isEmpty()) {
-            LOGGER.info("mcdebug: no MCDEBUG_TEST_SCAN_PACKAGES set, skipping test discovery")
-            return
-        }
-        val testClasses = TestDiscovery.discover(basePackages = packages)
-        var registered = 0
-        for (kclass in testClasses) {
-            val instance = kclass.objectInstance
-            if (instance == null) {
-                LOGGER.warn("mcdebug test class ${kclass.qualifiedName} is not a Kotlin object; skipping")
-                continue
-            }
-            McDebugTestRegistry.register(instance)
-            registered++
-        }
-        LOGGER.info("mcdebug: discovered ${testClasses.size} test classes from $packages, registered $registered")
     }
 
     private fun portFilePath(): Path {

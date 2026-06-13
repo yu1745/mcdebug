@@ -10,4 +10,3 @@ pluginManagement {
 }
 
 rootProject.name = 'mcdebug'
-include ':gradle-plugin'

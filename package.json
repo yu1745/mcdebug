@@ -3,6 +3,8 @@
   "version": "0.4.11",
   "description": "TypeScript CLI for the mcdebug Minecraft debug server mod",
   "type": "module",
+  "main": "./mcdebug-client/dist/index.js",
+  "types": "./mcdebug-client/dist/index.d.ts",
   "bin": {
     "mcdebug": "./mcdebug-client/dist/cli.js"
   },
