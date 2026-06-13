@@ -1,3 +1,6 @@
+import { readdir } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import { DebugApi } from './api.js';
 import { RpcClient } from './client.js';
 export function createTestRunner(options = {}) {
@@ -11,6 +14,60 @@ export function createTestRunner(options = {}) {
         },
         run: () => runTests(tests, options),
     };
+}
+export function defineTest(name, run) {
+    return { name, run };
+}
+export function defineTests(tests) {
+    return tests;
+}
+export async function loadTestModules(runner, options) {
+    const suffix = options.suffix ?? '.test.ts';
+    const dir = options.dir instanceof URL ? fileURLToPath(options.dir) : options.dir;
+    const files = await collectTestFiles(resolve(dir), suffix);
+    for (const file of files) {
+        const mod = (await import(pathToFileURL(file).href));
+        const tests = collectExportedTests(mod);
+        if (tests.length === 0) {
+            throw new Error(`mcdebug test module ${file} did not export any tests`);
+        }
+        for (const test of tests)
+            runner.test(test.name, test.run);
+    }
+    return files;
+}
+function collectExportedTests(mod) {
+    const tests = [];
+    const visit = (value) => {
+        if (Array.isArray(value)) {
+            for (const item of value)
+                visit(item);
+            return;
+        }
+        if (isTestCase(value))
+            tests.push(value);
+    };
+    for (const value of Object.values(mod))
+        visit(value);
+    return tests;
+}
+function isTestCase(value) {
+    return (typeof value === 'object' &&
+        value !== null &&
+        typeof value.name === 'string' &&
+        typeof value.run === 'function');
+}
+async function collectTestFiles(dir, suffix) {
+    const entries = await readdir(dir, { withFileTypes: true });
+    const files = await Promise.all(entries.map(async (entry) => {
+        const path = resolve(dir, entry.name);
+        if (entry.isDirectory())
+            return collectTestFiles(path, suffix);
+        if (entry.isFile() && entry.name.endsWith(suffix))
+            return [path];
+        return [];
+    }));
+    return files.flat().sort();
 }
 export function offset(origin, dx = 0, dy = 0, dz = 0) {
     return [origin[0] + dx, origin[1] + dy, origin[2] + dz];

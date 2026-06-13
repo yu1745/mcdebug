@@ -1,3 +1,6 @@
+import { readdir } from 'node:fs/promises';
+import { resolve } from 'node:path';
+import { pathToFileURL, fileURLToPath } from 'node:url';
 import { DebugApi } from './api.js';
 import { RpcClient, RpcClientOptions } from './client.js';
 import { ItemStackJson, JsonNbt, Pos } from './types.js';
@@ -39,6 +42,11 @@ export interface TestRunner {
   run(): Promise<void>;
 }
 
+export interface LoadTestModulesOptions {
+  dir: string | URL;
+  suffix?: string;
+}
+
 export function createTestRunner(options: TestRunnerOptions = {}): TestRunner {
   const tests: TestCase[] = [];
   return {
@@ -50,6 +58,66 @@ export function createTestRunner(options: TestRunnerOptions = {}): TestRunner {
     },
     run: () => runTests(tests, options),
   };
+}
+
+export function defineTest(name: string, run: TestFn): TestCase {
+  return { name, run };
+}
+
+export function defineTests(tests: readonly TestCase[]): readonly TestCase[] {
+  return tests;
+}
+
+export async function loadTestModules(runner: TestRunner, options: LoadTestModulesOptions): Promise<string[]> {
+  const suffix = options.suffix ?? '.test.ts';
+  const dir = options.dir instanceof URL ? fileURLToPath(options.dir) : options.dir;
+  const files = await collectTestFiles(resolve(dir), suffix);
+
+  for (const file of files) {
+    const mod = (await import(pathToFileURL(file).href)) as Record<string, unknown>;
+    const tests = collectExportedTests(mod);
+    if (tests.length === 0) {
+      throw new Error(`mcdebug test module ${file} did not export any tests`);
+    }
+    for (const test of tests) runner.test(test.name, test.run);
+  }
+
+  return files;
+}
+
+function collectExportedTests(mod: Record<string, unknown>): TestCase[] {
+  const tests: TestCase[] = [];
+  const visit = (value: unknown) => {
+    if (Array.isArray(value)) {
+      for (const item of value) visit(item);
+      return;
+    }
+    if (isTestCase(value)) tests.push(value);
+  };
+  for (const value of Object.values(mod)) visit(value);
+  return tests;
+}
+
+function isTestCase(value: unknown): value is TestCase {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    typeof (value as TestCase).name === 'string' &&
+    typeof (value as TestCase).run === 'function'
+  );
+}
+
+async function collectTestFiles(dir: string, suffix: string): Promise<string[]> {
+  const entries = await readdir(dir, { withFileTypes: true });
+  const files = await Promise.all(
+    entries.map(async (entry) => {
+      const path = resolve(dir, entry.name);
+      if (entry.isDirectory()) return collectTestFiles(path, suffix);
+      if (entry.isFile() && entry.name.endsWith(suffix)) return [path];
+      return [];
+    }),
+  );
+  return files.flat().sort();
 }
 
 export function offset(origin: Pos, dx = 0, dy = 0, dz = 0): Pos {

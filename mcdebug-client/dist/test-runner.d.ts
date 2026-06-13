@@ -32,7 +32,14 @@ export interface TestRunner {
     test(name: string, run: TestFn): void;
     run(): Promise<void>;
 }
+export interface LoadTestModulesOptions {
+    dir: string | URL;
+    suffix?: string;
+}
 export declare function createTestRunner(options?: TestRunnerOptions): TestRunner;
+export declare function defineTest(name: string, run: TestFn): TestCase;
+export declare function defineTests(tests: readonly TestCase[]): readonly TestCase[];
+export declare function loadTestModules(runner: TestRunner, options: LoadTestModulesOptions): Promise<string[]>;
 export declare function offset(origin: Pos, dx?: number, dy?: number, dz?: number): Pos;
 export declare function setBlocks(ctx: TestContext, ops: SetBlockOp[]): Promise<void>;
 export declare function place(ctx: TestContext, pos: Pos, block: string): Promise<void>;
