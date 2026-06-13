@@ -21,7 +21,7 @@ export declare class DebugApi {
             block: string;
             state?: BlockStateSpec;
         }>, opts?: {
-            atomic?: boolean;
+            flags?: number;
             dim?: string;
         }) => Promise<unknown>;
         /**
@@ -64,7 +64,6 @@ export declare class DebugApi {
         }>;
         selectBlocks: (box: Box, pred: {
             block?: string;
-            tag?: string;
         }, opts?: {
             includeNbt?: boolean;
             dim?: string;

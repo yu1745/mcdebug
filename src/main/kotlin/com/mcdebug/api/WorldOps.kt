@@ -935,6 +935,7 @@ object WorldOps : RpcHandlerGroup {
                 val be = world.getBlockEntity(pos)
                 val entry = JsonObject().apply {
                     add("pos", ServerContext.posAsJson(pos))
+                    addProperty("dim", world.registryKey.value.toString())
                     add("state", ServerContext.blockStateToJson(state))
                     addProperty("hasBlockEntity", be != null)
                     if (includeNbt && be != null) add("nbt", NbtJson.toJson(be.createNbt()))

@@ -37,11 +37,11 @@ export class DebugApi {
       }),
     setBlocks: (
       ops: Array<{ pos: Pos; block: string; state?: BlockStateSpec }>,
-      opts?: { atomic?: boolean; dim?: string },
+      opts?: { flags?: number; dim?: string },
     ) =>
       this.rpc.call('world.setBlocks', {
         ops: ops.map((o) => ({ pos: o.pos, block: o.block, stateProps: o.state?.props })),
-        atomic: opts?.atomic,
+        flags: opts?.flags,
         dim: opts?.dim,
       }),
     /**
@@ -90,7 +90,7 @@ export class DebugApi {
       }),
     selectBlocks: (
       box: Box,
-      pred: { block?: string; tag?: string },
+      pred: { block?: string },
       opts?: { includeNbt?: boolean; dim?: string },
     ) =>
       this.rpc.call<{ matches: Array<{ pos: Pos; nbt?: JsonNbt }> }>('world.selectBlocks', {

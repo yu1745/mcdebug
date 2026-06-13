@@ -21,7 +21,7 @@ export class DebugApi {
         }),
         setBlocks: (ops, opts) => this.rpc.call('world.setBlocks', {
             ops: ops.map((o) => ({ pos: o.pos, block: o.block, stateProps: o.state?.props })),
-            atomic: opts?.atomic,
+            flags: opts?.flags,
             dim: opts?.dim,
         }),
         /**

@@ -6,6 +6,9 @@ import com.google.gson.JsonNull
 import com.google.gson.JsonObject
 import com.google.gson.JsonPrimitive
 import com.mcdebug.McDebugMod
+import com.mcdebug.rpc.RpcErrors
+import com.mcdebug.rpc.RpcException
+import java.util.concurrent.ExecutionException
 import java.util.concurrent.TimeUnit
 
 /**
@@ -569,14 +572,25 @@ object McDebugTestApi {
      * Example: `waitUntil("""inv[100,64,100].2.item == "minecraft:iron_ingot"""")`
      */
     fun waitUntil(predicate: String, timeoutTicks: Int = 20 * 60) {
-        val result = call("wait.until", json {
-            addProperty("predicate", predicate)
-            addProperty("timeoutTicks", timeoutTicks)
-        }).asJsonObject
-        if (!result.get("matched").asBoolean) {
-            throw AssertionError(
-                "wait.until did not match within $timeoutTicks ticks: $predicate"
-            )
+        try {
+            val result = call("wait.until", json {
+                addProperty("predicate", predicate)
+                addProperty("timeoutTicks", timeoutTicks)
+            }).asJsonObject
+            if (!result.get("matched").asBoolean) {
+                throw AssertionError(
+                    "wait.until did not match within $timeoutTicks ticks: $predicate"
+                )
+            }
+        } catch (e: ExecutionException) {
+            val cause = e.cause
+            if (cause is RpcException && cause.rpcCode == RpcErrors.TICK_TIMEOUT) {
+                throw AssertionError(
+                    "wait.until did not match within $timeoutTicks ticks: $predicate",
+                    cause,
+                )
+            }
+            throw e
         }
     }
 
