@@ -121,7 +121,13 @@ node dist/cli.js status    # 调用 server.status RPC
 
 ## 10. 版本更新规则
 
-版本号在 5 处出现，**发版时全部必须同步更新**，否则会出现 CLI 显示旧版本或 npx 安装到错误版本。
+版本源是 `gradle.properties` 的 `mod_version`。不要手工逐个改版本号；使用脚本一次性同步 Gradle、npm 包声明、CLI version source 和 dist 输出。
+
+```bash
+node scripts/set-version.mjs X.Y.Z
+```
+
+脚本会更新：
 
 | # | 文件 | 字段 | 用途 |
 |---|------|------|------|
@@ -134,13 +140,9 @@ node dist/cli.js status    # 调用 server.status RPC
 ### 发版检查清单
 
 ```
-□ gradle.properties                        mod_version=X.Y.Z
-□ mcdebug-client/src/version.ts          export const version = 'X.Y.Z'
-□ mcdebug-client/package.json              "version": "X.Y.Z"
-□ package.json                             "version": "X.Y.Z"
+□ node scripts/set-version.mjs X.Y.Z
 □ cli.ts                                  grep -n 'version' 确认是 import 不是硬编码
 □ ./gradlew build -x test
-□ npm run build --prefix mcdebug-client
 □ node mcdebug-client/dist/cli.js --version  ← 必须输出 X.Y.Z
 □ git add -A && git commit -m "vX.Y.Z: ..."
 □ git tag -a vX.Y.Z -m "..."
