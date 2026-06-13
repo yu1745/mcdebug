@@ -1,4 +1,16 @@
 export type Pos = readonly [number, number, number];
+export interface PosHelpers {
+    offset(dx?: number, dy?: number, dz?: number): RichPos;
+    east(blocks?: number): RichPos;
+    west(blocks?: number): RichPos;
+    up(blocks?: number): RichPos;
+    down(blocks?: number): RichPos;
+    south(blocks?: number): RichPos;
+    north(blocks?: number): RichPos;
+}
+export type RichPos = Pos & PosHelpers;
+export declare function pos(x: number, y: number, z: number): RichPos;
+export declare function pos(value: Pos): RichPos;
 export interface Box {
     from: Pos;
     to: Pos;

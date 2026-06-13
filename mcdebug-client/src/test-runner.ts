@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { DebugApi } from './api.js';
 import { RpcClient, RpcClientOptions } from './client.js';
-import { ItemStackJson, JsonNbt, Pos } from './types.js';
+import { ItemStackJson, JsonNbt, Pos, RichPos, pos as makePos } from './types.js';
 
 export type TestFn = (ctx: TestContext) => Promise<void>;
 
@@ -20,8 +20,8 @@ export interface SetBlockOp {
 
 export interface TestContext {
   api: DebugApi;
-  origin: Pos;
-  pos(dx?: number, dy?: number, dz?: number): Pos;
+  origin: RichPos;
+  pos(dx?: number, dy?: number, dz?: number): RichPos;
 }
 
 export interface TestRunnerOptions {
@@ -120,8 +120,8 @@ async function collectTestFiles(dir: string, suffix: string): Promise<string[]> 
   return files.flat().sort();
 }
 
-export function offset(origin: Pos, dx = 0, dy = 0, dz = 0): Pos {
-  return [origin[0] + dx, origin[1] + dy, origin[2] + dz] as const;
+export function offset(origin: Pos, dx = 0, dy = 0, dz = 0): RichPos {
+  return makePos(origin[0] + dx, origin[1] + dy, origin[2] + dz);
 }
 
 function createApi(opts: RpcClientOptions = {}): DebugApi {
@@ -177,13 +177,13 @@ async function cleanupArea(api: DebugApi, origin: Pos, chunks: Array<[number, nu
   for (const [cx, cz] of chunks) await api.world.unforceloadChunk(cx, cz);
 }
 
-function originFor(index: number, options: TestRunnerOptions): Pos {
+function originFor(index: number, options: TestRunnerOptions): RichPos {
   const base = options.origin ?? ([100, 64, 100] as const);
   const stride = options.stride ?? 32;
   const columns = options.gridColumns ?? 16;
   const col = index % columns;
   const row = Math.floor(index / columns);
-  return [base[0] + col * stride, base[1], base[2] + row * stride] as const;
+  return makePos(base[0] + col * stride, base[1], base[2] + row * stride);
 }
 
 async function runOne(testCase: TestCase, index: number, options: TestRunnerOptions): Promise<{ ok: boolean; durationMs: number; error?: unknown }> {
@@ -192,7 +192,7 @@ async function runOne(testCase: TestCase, index: number, options: TestRunnerOpti
   const ctx: TestContext = {
     api,
     origin,
-    pos: (dx = 0, dy = 0, dz = 0) => offset(origin, dx, dy, dz),
+    pos: (dx = 0, dy = 0, dz = 0) => makePos(offset(origin, dx, dy, dz)),
   };
   const start = Date.now();
   let chunks: Array<[number, number]> = [];

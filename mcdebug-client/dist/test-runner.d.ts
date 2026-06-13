@@ -1,6 +1,6 @@
 import { DebugApi } from './api.js';
 import { RpcClientOptions } from './client.js';
-import { ItemStackJson, JsonNbt, Pos } from './types.js';
+import { ItemStackJson, JsonNbt, Pos, RichPos } from './types.js';
 export type TestFn = (ctx: TestContext) => Promise<void>;
 export interface TestCase {
     name: string;
@@ -13,8 +13,8 @@ export interface SetBlockOp {
 }
 export interface TestContext {
     api: DebugApi;
-    origin: Pos;
-    pos(dx?: number, dy?: number, dz?: number): Pos;
+    origin: RichPos;
+    pos(dx?: number, dy?: number, dz?: number): RichPos;
 }
 export interface TestRunnerOptions {
     client?: RpcClientOptions;
@@ -40,7 +40,7 @@ export declare function createTestRunner(options?: TestRunnerOptions): TestRunne
 export declare function defineTest(name: string, run: TestFn): TestCase;
 export declare function defineTests(tests: readonly TestCase[]): readonly TestCase[];
 export declare function loadTestModules(runner: TestRunner, options: LoadTestModulesOptions): Promise<string[]>;
-export declare function offset(origin: Pos, dx?: number, dy?: number, dz?: number): Pos;
+export declare function offset(origin: Pos, dx?: number, dy?: number, dz?: number): RichPos;
 export declare function setBlocks(ctx: TestContext, ops: SetBlockOp[]): Promise<void>;
 export declare function place(ctx: TestContext, pos: Pos, block: string): Promise<void>;
 export declare function placeAsPlayer(ctx: TestContext, pos: Pos, block: string, face: 'up' | 'down' | 'north' | 'south' | 'east' | 'west', opts?: {

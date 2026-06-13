@@ -3,6 +3,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { DebugApi } from './api.js';
 import { RpcClient } from './client.js';
+import { pos as makePos } from './types.js';
 export function createTestRunner(options = {}) {
     const tests = [];
     return {
@@ -70,7 +71,7 @@ async function collectTestFiles(dir, suffix) {
     return files.flat().sort();
 }
 export function offset(origin, dx = 0, dy = 0, dz = 0) {
-    return [origin[0] + dx, origin[1] + dy, origin[2] + dz];
+    return makePos(origin[0] + dx, origin[1] + dy, origin[2] + dz);
 }
 function createApi(opts = {}) {
     return new DebugApi(new RpcClient(opts));
@@ -126,7 +127,7 @@ function originFor(index, options) {
     const columns = options.gridColumns ?? 16;
     const col = index % columns;
     const row = Math.floor(index / columns);
-    return [base[0] + col * stride, base[1], base[2] + row * stride];
+    return makePos(base[0] + col * stride, base[1], base[2] + row * stride);
 }
 async function runOne(testCase, index, options) {
     const api = createApi(options.client);
@@ -134,7 +135,7 @@ async function runOne(testCase, index, options) {
     const ctx = {
         api,
         origin,
-        pos: (dx = 0, dy = 0, dz = 0) => offset(origin, dx, dy, dz),
+        pos: (dx = 0, dy = 0, dz = 0) => makePos(offset(origin, dx, dy, dz)),
     };
     const start = Date.now();
     let chunks = [];
