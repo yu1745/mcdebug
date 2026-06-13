@@ -99,8 +99,20 @@ object McDebugOps : RpcHandlerGroup {
             testName = testName,
             index = index,
             origin = origin,
-            min = origin,
-            max = Pos(origin.x + 15, origin.y + 7, origin.z + 15),
+            // origin is the CENTER of an 18×8×18 cleaned/force-loaded area.
+            //   x ∈ [origin.x-8, origin.x+9]   (18 wide; origin sits at the 9th column)
+            //   y ∈ [origin.y-1, origin.y+6]   (8 tall; origin sits on the 2nd layer)
+            //   z ∈ [origin.z-8, origin.z+9]   (18 wide; origin sits at the 9th column)
+            //
+            // `testPos(dx, dy, dz)` returns `origin + (dx, dy, dz)`. Any block placed
+            // within the above box is cleared by the dispatcher before the next test
+            // runs. Blocks placed OUTSIDE this box are NOT cleaned and will leak across
+            // tests if subsequent tests run on the same origin.
+            //
+            // The 8-block stride between origins (32 - 18 + ... actually 32 here, see
+            // allocator math) keeps adjacent tests' cleaned areas from overlapping.
+            min = Pos(origin.x - 8, origin.y - 1, origin.z - 8),
+            max = Pos(origin.x + 9, origin.y + 6, origin.z + 9),
         )
     }
 
