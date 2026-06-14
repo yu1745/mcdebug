@@ -110,8 +110,15 @@ npx -y github:yu1745/mcdebug raw storage.list '{"target":{"kind":"block","pos":[
 
 - 任何"等 N 拍"或"等条件成立"的需求统一走 `wait.until`，禁止在 RPC 层提供 `tick.run` / `tick.runUntil`
 - `wait.until` 实现：`ServerTickEvents.END_SERVER_TICK` 注册回调，每个自然 tick 检查一次条件；满足或超时才返回
-- 谓词白名单：`be[x,y,z].<path> <op> <value>` / `inv[x,y,z].<slot>.<field> <op> <value>` / `block[x,y,z].<id|prop.k> <op> <value>` / `tick <op> <value>`，操作符限定 `==/!=/</<=/>/>=`
-- 复杂断言（任意表达式、脚本）v2 再做，避免 RCE 风险
+- 谓词是手写 DSL（`PredicateExpr`，词法器 + 递归下降解析器，**无 eval、无脚本、无反射**，避免 RCE）。语法：
+  - 比较：`be[x,y,z].<path> <op> <value>` / `inv[x,y,z].<slot>.<field> <op> <value>` / `block[x,y,z].<id|prop.k> <op> <value>` / `tick <op> <value>`
+  - 布尔组合：`AND` / `OR` / `NOT` / 括号（关键字大写）
+  - 算术：`+` `-` `*`（比较两侧或聚合结果上）
+  - 聚合（仅单 BE 库存）：`sum(inv[x,y,z].*.count) >= 64` / `count(inv[x,y,z].*.item) > 0`，`field ∈ {*, count, item, nbt.<path>}`
+  - 字面量：数字（默认窄化为 NbtInt；NBT 写入要精确类型用 `be.setNbt` 的 `#nbt` 标注，见 §11b）/ 字符串 / `true` / `false` / `null`
+  - 操作符：`==/!=/</<=/>/>=`
+  - v1 的单比较谓词是 v2 DSL 的子集，完全向后兼容
+- 断连时服务端会取消该连接发起的 `wait.until`（`WaitOps.cancelConnection`），不依赖超时兜底
 
 ## 8. 提交前验证
 
@@ -169,7 +176,7 @@ node scripts/set-version.mjs X.Y.Z
 - **cli.ts 硬编码 version**（v0.3.0、v0.4.0）：cli.ts 的 `.version('0.2.0')` 忘了改成 import，导致 `--version` 和 `npx` 永远显示 0.2.0。**必须从 version.ts import，不允许出现硬编码版本字符串。**
 - **根 package.json 遗漏**（v0.3.0）：只改了 mcdebug-client/package.json 没改根 package.json，导致 `npx github:yu1745/mcdebug` 安装的是旧版本号。两个 package.json 都要改。
 
-## 11. 已知小问题 / TODO（v2）
+## 11. 已知小问题
 
 - `be.setNbt` 用 `readNbt` 重置整个 NBT；某些 BlockEntity 子类可能不会完全重新初始化（红石信号、缓存等）
 - `wait.until` 在断连时不会主动取消服务端回调，依赖 tick listener 的 `future.isDone` 自检
@@ -181,7 +188,27 @@ node scripts/set-version.mjs X.Y.Z
 - 专用 CLI 子命令暂未覆盖 `storage.*` / `snapshot.*` / `trace.*` / `screen.*`，目前通过 `raw`、REPL 和 TS `DebugApi` 调用
 - 自定义 storage adapter SPI 没做；特殊资源类型后续扩展
 - `modid.mixins.json` 是 Fabric 模板遗留，且 mod 当前未写任何 mixin 代码，发版前可清理
-- 鉴权 / 远程连接 没做（v1 绑 127.0.0.1，假设本机可信）
+
+## 11b. v2 已完成（变更记录）
+
+下列原 v2 待办已实现。保留描述以便回溯"为什么这么设计"。
+
+- **v2-nbtJson：NbtJson 精确类型**（`util/NbtJson.kt`）
+  `fromJson` 支持 `{"#nbt":"<type>","value":...}` 标注，`type ∈ {byte, short, int, long, float, double, string, byteArray, intArray, longArray}`。不带标注的 JSON 数字仍窄化为 NbtInt（向后兼容）。`#nbt` 键保留，常规 NBT compound 不以 `#` 开头故无冲突。NBT→JSON 方向（`toJson`）保留原类型。
+
+- **v2-setNbt：`be.setNbt` / `be.setField` 重初始化**（`api/BlockEntityOps.kt`）
+  统一抽 `applyBeNbt(world, pos, be, nbt)`：`readNbt` + `markDirty` + `ServerWorld.updateListeners`（客户端 block/BE NBT 增量）+ `World.updateComparators`（比较器立即重算红石信号）。旧的 `readNbt` + 只调 `updateListeners` 缺了比较器更新，导致"设了 NBT 但比较器信号没变"。
+
+- **v2-waitCancel：`wait.until` 断连取消**（`rpc/RpcServer.kt` + `rpc/RpcHandler.kt` + `wait/WaitOps.kt`）
+  `RpcContext.currentConnectionId` ThreadLocal 在 `handleConnection` 入口设置；`until` 把它存进 `WaitJob.connId`；`handleConnection` 的 finally 调 `WaitOps.cancelConnection(connId)` 把该连接所有未完成的 wait future 异常完成。注意：ThreadLocal 只在连接线程读（`until` 函数体在 dispatch 调用栈、未进 `server.execute`），所以不跨线程传递，安全。
+
+- **v2-complexPredicate：复杂断言**（`wait/PredicateExpr.kt` 新文件 + `wait/WaitOps.kt`）
+  `wait.until` 谓词从 v1 单比较正则升级为手写 DSL（语法见 §7）。**无 eval/脚本/反射**，纯词法器 + 递归下降解析器 + 求值器，绝对避免 RCE。v1 单比较是 v2 的子集，完全向后兼容。`PredicateExpr` 刻意不依赖任何 Minecraft 类型（pos 用 `Triple<Int,Int,Int>`，server 通过闭包传入），便于将来单测。已通过 14 例自测（v1 兼容 5 + v2 新 6 + 负面 3）。
+
+不在计划内（已决定不做，不要再加回来）：
+- 鉴权 / 远程连接：v1 绑 127.0.0.1 假设本机可信。
+- `scan.countByBlock` chunk 进度回调：O(N) 可接受。
+- MCP adapter。
 
 ## 12. 已移除的子系统（避免被旧文档/旧 commit 误导）
 

@@ -1,10 +1,13 @@
 package com.mcdebug.wait
 
 import com.google.gson.JsonElement
+import com.google.gson.JsonNull
 import com.google.gson.JsonObject
+import com.google.gson.JsonPrimitive
 import com.mcdebug.api.getIntOr
 import com.mcdebug.api.getStringOrNull
 import com.mcdebug.api.requireString
+import com.mcdebug.rpc.RpcContext
 import com.mcdebug.rpc.RpcErrors
 import com.mcdebug.rpc.RpcException
 import com.mcdebug.rpc.RpcHandler
@@ -17,6 +20,7 @@ import net.minecraft.item.ItemStack
 import net.minecraft.registry.Registries
 import net.minecraft.server.MinecraftServer
 import net.minecraft.util.math.BlockPos
+import org.slf4j.LoggerFactory
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CopyOnWriteArrayList
 
@@ -28,6 +32,7 @@ import java.util.concurrent.CopyOnWriteArrayList
  */
 object WaitOps : RpcHandlerGroup {
 
+    private val log = LoggerFactory.getLogger("mcdebug-wait")
     private val activeWaits = CopyOnWriteArrayList<WaitJob>()
 
     override fun methods(): Map<String, RpcHandler> = mapOf(
@@ -53,27 +58,57 @@ object WaitOps : RpcHandlerGroup {
         activeWaits.clear()
     }
 
+    /**
+     * Cancel every wait owned by [connId]. Called by RpcServer when the client
+     * disconnects, so a dropped connection doesn't leave predicate callbacks
+     * running until their timeout. The actual list pruning happens on the next
+     * tick sweep (it skips jobs whose future isDone).
+     */
+    fun cancelConnection(connId: Int) {
+        var cancelled = 0
+        for (job in activeWaits) {
+            if (job.connId == connId && !job.future.isDone) {
+                job.future.completeExceptionally(
+                    RpcException(RpcErrors.INTERNAL_ERROR, "client disconnected")
+                )
+                cancelled++
+            }
+        }
+        if (cancelled > 0) log.debug("cancelled {} wait(s) for connection {}", cancelled, connId)
+    }
+
     private fun tickSweep(srv: MinecraftServer) {
+        currentServer = srv
+        try {
+            tickSweepInner(srv)
+        } finally {
+            currentServer = null
+        }
+    }
+
+    private fun tickSweepInner(srv: MinecraftServer) {
         val toRemove = mutableListOf<WaitJob>()
         for (job in activeWaits) {
             if (job.future.isDone) { toRemove.add(job); continue }
             job.ticksElapsed++
             if (job.ticksElapsed % job.pollInterval != 0) continue
-            val v = try { job.predicate.evaluate(srv) } catch (e: Exception) {
+            val matched = try {
+                PredicateExpr.evaluate(job.predicate, ::resolveLeaf, ::resolveAggregate)
+            } catch (e: Exception) {
                 job.future.completeExceptionally(
                     RpcException(RpcErrors.INTERNAL_ERROR, "predicate eval error: ${e.message}", null, e)
                 )
                 toRemove.add(job)
                 continue
             }
-            job.lastValue = v
-            if (job.predicate.matches(v)) {
-                job.future.complete(buildResult(true, job.ticksElapsed, v))
+            job.lastValue = com.google.gson.JsonPrimitive(matched)
+            if (matched) {
+                job.future.complete(buildResult(true, job.ticksElapsed, job.lastValue))
                 toRemove.add(job)
             } else if (job.timeoutTicks > 0 && job.ticksElapsed >= job.timeoutTicks) {
                 job.future.completeExceptionally(
                     RpcException(RpcErrors.TICK_TIMEOUT, "wait.until timeout after ${job.ticksElapsed} ticks",
-                        JsonObject().apply { add("lastValue", v ?: com.google.gson.JsonNull.INSTANCE) })
+                        JsonObject().apply { add("lastValue", job.lastValue) })
                 )
                 toRemove.add(job)
             }
@@ -82,18 +117,20 @@ object WaitOps : RpcHandlerGroup {
     }
 
     /**
-     * Handler: parse on the calling thread (safe — just regex), then register the job on the server thread,
-     * and return the future immediately. The connection thread blocks on future.get() until the tick listener
-     * completes the future with a match or timeout.
+     * Handler: parse on the calling thread (safe — just lexer + recursive descent, no eval),
+     * then register the job on the server thread, and return the future immediately. The
+     * connection thread blocks on future.get() until the tick listener completes the future
+     * with a match or timeout.
      */
     private fun until(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> {
         val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
         val predicateStr = p.requireString("predicate")
         val timeoutTicks = p.getIntOr("timeoutTicks", 0)
         val pollInterval = p.getIntOr("pollIntervalTicks", 1).coerceAtLeast(1)
-        val predicate = parsePredicate(predicateStr)
+        val predicate = PredicateExpr.parse(predicateStr)
         val future = CompletableFuture<JsonElement>()
-        val job = WaitJob(future, predicate, timeoutTicks, pollInterval)
+        val connId = RpcContext.currentConnectionId.get()
+        val job = WaitJob(future, predicate, timeoutTicks, pollInterval, connId)
         try {
             server.execute { activeWaits.add(job) }
         } catch (e: Exception) {
@@ -109,63 +146,92 @@ object WaitOps : RpcHandlerGroup {
             if (value != null) add("value", value)
         }
 
-    // ---- predicate parsing ----
+    // ---- world-state resolvers (used by PredicateExpr.evaluator) ----
 
-    private fun parsePredicate(s: String): ParsedPredicate {
-        val m = PREDICATE_RE.matchEntire(s.trim())
-            ?: throw RpcException(RpcErrors.INVALID_PREDICATE, "predicate must match grammar: be/inv/block[x,y,z].path <op> <value> or tick <op> <value>")
-        // Group indices (1-based):
-        //   1: source (be|inv|block|tick)
-        //   2: full [x,y,z] (or "")
-        //   3..5: x, y, z (or "")
-        //   6: path (or "")
-        //   7: op
-        //   8: raw literal
-        val source = m.groupValues[1]
-        val x = m.groupValues[3].toIntOrNull()
-        val y = m.groupValues[4].toIntOrNull()
-        val z = m.groupValues[5].toIntOrNull()
-        val path = m.groupValues[6].removePrefix(".")
-        val op = m.groupValues[7]
-        val raw = m.groupValues[8]
-        val literal = parseLiteral(raw)
-        val pos = if (x != null && y != null && z != null) BlockPos(x, y, z) else null
-        val evaluator: (MinecraftServer) -> JsonElement? = when (source) {
-            "tick" -> { srv -> com.google.gson.JsonPrimitive(srv.ticks) }
-            "block" -> { srv ->
+    /**
+     * Resolve a SourceRef (be/inv/block/tick + optional pos + optional path) to its
+     * current JSON value. Reuses the same per-source logic as v1; called once per
+     * predicate evaluation per leaf node.
+     */
+    private fun resolveLeaf(ref: PredicateExpr.SourceRef): JsonElement? {
+        val srv = currentServer ?: return JsonNull.INSTANCE
+        val pos = ref.pos?.let { BlockPos(it.first, it.second, it.third) }
+        return when (ref.source) {
+            "tick" -> JsonPrimitive(srv.ticks)
+            "block" -> {
                 val w = ServerContext.world(srv, null)
                 val state = w.getBlockState(pos!!)
+                val path = ref.path
                 when {
                     path.isEmpty() || path == "id" ->
                         com.google.gson.JsonPrimitive(Registries.BLOCK.getId(state.block).toString())
                     path.startsWith("prop.") -> {
                         val pname = path.removePrefix("prop.")
                         val prop = state.block.stateManager.getProperty(pname)
-                        if (prop == null) com.google.gson.JsonNull.INSTANCE
-                        else com.google.gson.JsonPrimitive(state.get(prop).toString())
+                            ?: return JsonNull.INSTANCE
+                        com.google.gson.JsonPrimitive(state.get(prop).toString())
                     }
                     else -> throw RpcException(RpcErrors.INVALID_PREDICATE, "block path must be 'id' or 'prop.<name>'")
                 }
             }
-            "be" -> { srv ->
+            "be" -> {
                 val w = ServerContext.world(srv, null)
                 val be: BlockEntity? = w.getBlockEntity(pos!!)
-                if (be == null) com.google.gson.JsonNull.INSTANCE
-                else NbtJson.getByPathAsJson(be.createNbt(), path)
+                if (be == null) JsonNull.INSTANCE
+                else NbtJson.getByPathAsJson(be.createNbt(), ref.path)
             }
-            "inv" -> { srv ->
+            "inv" -> {
                 val w = ServerContext.world(srv, null)
                 val be: BlockEntity? = w.getBlockEntity(pos!!)
                 val inv: Inventory? = be as? Inventory
-                if (inv == null) com.google.gson.JsonNull.INSTANCE
-                else evaluateInvPath(inv, path)
+                if (inv == null) JsonNull.INSTANCE
+                else evaluateInvPath(inv, ref.path)
             }
-            else -> throw RpcException(RpcErrors.INVALID_PREDICATE, "unknown source: $source")
+            else -> throw RpcException(RpcErrors.INVALID_PREDICATE, "unknown source: ${ref.source}")
         }
-        return ParsedPredicate(evaluator, op, literal)
     }
 
-    /** Path inside an Inventory. Accepts:
+    /**
+     * Resolve an aggregate (sum/count) over every slot of an inventory.
+     * field "*" → count of non-empty slots (count fn) or total item count (sum fn)
+     * field "count" → sum of stack counts
+     * field "item" → count of slots holding any item (sum/count identical)
+     * field "nbt.<path>" → sum of the numeric nbt field across slots (sum only)
+     */
+    private fun resolveAggregate(agg: PredicateExpr.Aggregate): JsonElement {
+        val srv = currentServer ?: return JsonPrimitive(0)
+        val w = ServerContext.world(srv, null)
+        val pos = BlockPos(agg.pos.first, agg.pos.second, agg.pos.third)
+        val be = w.getBlockEntity(pos) ?: return JsonPrimitive(0)
+        val inv = be as? Inventory ?: return JsonPrimitive(0)
+        var sum = 0.0
+        var count = 0
+        for (slot in 0 until inv.size()) {
+            val stack = inv.getStack(slot)
+            when {
+                agg.field == "*" -> {
+                    if (!stack.isEmpty) count++
+                    sum += stack.count.toDouble()
+                }
+                agg.field == "count" -> sum += stack.count.toDouble()
+                agg.field == "item" -> if (!stack.isEmpty) count++
+                agg.field.startsWith("nbt.") -> {
+                    if (!stack.isEmpty && stack.nbt != null) {
+                        val v = NbtJson.getByPathAsJson(stack.nbt!!, agg.field.removePrefix("nbt."))
+                        if (v.isJsonPrimitive && v.asJsonPrimitive.isNumber) sum += v.asDouble
+                    }
+                }
+                else -> throw RpcException(RpcErrors.INVALID_PREDICATE, "unknown aggregate field: ${agg.field}")
+            }
+        }
+        return when (agg.fn) {
+            "sum" -> JsonPrimitive(sum)
+            "count" -> JsonPrimitive(count.toDouble())
+            else -> throw RpcException(RpcErrors.INVALID_PREDICATE, "unknown aggregate fn: ${agg.fn}")
+        }
+    }
+
+    /** Path inside an Inventory slot. Accepts:
      *    "size" | "<slot>.item" | "<slot>.count" | "<slot>.maxCount" | "<slot>.nbt.<jsonPointer>"
      */
     private fun evaluateInvPath(inv: Inventory, path: String): JsonElement {
@@ -191,69 +257,18 @@ object WaitOps : RpcHandlerGroup {
         }
     }
 
-    private fun parseLiteral(s: String): JsonElement? = when {
-        s == "null" -> null
-        s == "true" -> com.google.gson.JsonPrimitive(true)
-        s == "false" -> com.google.gson.JsonPrimitive(false)
-        s.startsWith("\"") && s.endsWith("\"") && s.length >= 2 ->
-            com.google.gson.JsonPrimitive(s.substring(1, s.length - 1).replace("\\\"", "\""))
-        s.toLongOrNull() != null -> com.google.gson.JsonPrimitive(s.toLong())
-        s.toDoubleOrNull() != null -> com.google.gson.JsonPrimitive(s.toDouble())
-        else -> throw RpcException(RpcErrors.INVALID_PREDICATE, "invalid literal: $s")
-    }
-
-    /** Grammar:
-     *   tick <op> <literal>
-     *   (be|inv|block)(\[(-?\d+),(-?\d+),(-?\d+)\])?(\.[\w.\[\]]+)? <op> <literal>
-     */
-    private val PREDICATE_RE = Regex(
-        """^(tick|be|inv|block)(\[(-?\d+),(-?\d+),(-?\d+)\])?(\.[\w.\[\]]+)?\s*(==|!=|<=|>=|<|>)\s*(\S+)$"""
-    )
-
-    private data class ParsedPredicate(
-        val evaluator: (MinecraftServer) -> JsonElement?,
-        val op: String,
-        val literal: JsonElement?
-    ) {
-        fun matches(value: JsonElement?): Boolean {
-            if (literal == null) {
-                return when (op) {
-                    "==" -> value == null || value.isJsonNull
-                    "!=" -> value != null && !value.isJsonNull
-                    else -> false
-                }
-            }
-            if (value == null || value.isJsonNull) return op == "!="
-            val l = literal
-            if (l.isJsonPrimitive && l.asJsonPrimitive.isNumber && value.isJsonPrimitive && value.asJsonPrimitive.isNumber) {
-                val a = value.asDouble
-                val b = l.asDouble
-                return when (op) {
-                    "==" -> a == b; "!=" -> a != b
-                    "<" -> a < b; "<=" -> a <= b
-                    ">" -> a > b; ">=" -> a >= b
-                    else -> false
-                }
-            }
-            if (l.isJsonPrimitive && l.asJsonPrimitive.isBoolean && value.isJsonPrimitive && value.asJsonPrimitive.isBoolean) {
-                val a = value.asBoolean; val b = l.asBoolean
-                return when (op) { "==" -> a == b; "!=" -> a != b; else -> false }
-            }
-            if (l.isJsonPrimitive && l.asJsonPrimitive.isString && value.isJsonPrimitive && value.asJsonPrimitive.isString) {
-                val a = value.asString; val b = l.asString
-                return when (op) { "==" -> a == b; "!=" -> a != b; else -> false }
-            }
-            return false
-        }
-
-        fun evaluate(server: MinecraftServer): JsonElement? = evaluator(server)
-    }
+    /** The server for which the current tick sweep is running. Set in tickSweep so
+     * the resolvers above can read it without taking a server param. */
+    @Volatile
+    private var currentServer: MinecraftServer? = null
 
     private data class WaitJob(
         val future: CompletableFuture<JsonElement>,
-        val predicate: ParsedPredicate,
+        val predicate: PredicateExpr.Node,
         val timeoutTicks: Int,
-        val pollInterval: Int
+        val pollInterval: Int,
+        /** Owning RPC connection id, for cancel-on-disconnect. Null if invoked outside a connection. */
+        val connId: Int? = null,
     ) {
         var ticksElapsed: Int = 0
         var lastValue: JsonElement? = null

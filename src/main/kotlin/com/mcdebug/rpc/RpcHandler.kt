@@ -48,6 +48,16 @@ object RpcContext {
     val GSON: Gson = GsonBuilder().disableHtmlEscaping().serializeNulls().create()
 
     /**
+     * The id of the RPC connection currently being serviced on this thread, or null
+     * if not set. Populated by RpcServer.handleConnection for the duration of a
+     * request so that long-running handlers (e.g. WaitOps.until) can tag their
+     * background work with the owning connection and let the server cancel it when
+     * the client disconnects.
+     */
+    val currentConnectionId: ThreadLocal<Int?> = ThreadLocal()
+
+
+    /**
      * Schedule a function on the Minecraft server thread and return a future of its result.
      * Used by every handler so that world reads/writes happen on the main thread.
      */

@@ -5,6 +5,7 @@ import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.mcdebug.McDebugMod
+import com.mcdebug.wait.WaitOps
 import net.minecraft.server.MinecraftServer
 import org.slf4j.LoggerFactory
 import java.io.BufferedReader
@@ -120,6 +121,7 @@ class RpcServer(
     private fun handleConnection(socket: Socket, connId: Int, minecraftServer: MinecraftServer) {
         val peer = "${socket.remoteSocketAddress}"
         log.info("client connected: {}", peer)
+        RpcContext.currentConnectionId.set(connId)
         try {
             socket.soTimeout = 0
             val reader = BufferedReader(InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8))
@@ -141,6 +143,11 @@ class RpcServer(
         } catch (e: Exception) {
             if (!socket.isClosed) log.debug("connection {} ended: {}", peer, e.message)
         } finally {
+            // Cancel any long-running jobs (e.g. wait.until) owned by this connection
+            // so they don't keep evaluating predicates and holding threads after the
+            // client is gone.
+            runCatching { WaitOps.cancelConnection(connId) }
+            RpcContext.currentConnectionId.remove()
             clientSockets.remove(connId)
             runCatching { socket.close() }
             log.info("client disconnected: {}", peer)
