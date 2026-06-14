@@ -18,29 +18,31 @@ Fabric 1.20.1 + Kotlin Mod，提供 localhost JSON-RPC 服务，让 TypeScript C
 
 ## 2. 目录结构
 
+单 Gradle 项目（`settings.gradle` 只有 `rootProject`，无 `include`）。Gradle 插件、Kotlin test DSL、反编译源码参考均已不在仓库中（见 §12）。
+
 ```
-mc-debug-server/
+mcdebug/
 ├── build.gradle              # Fabric 1.20.1 + Kotlin 2.3.10 + fabric-language-kotlin 1.13.9
 ├── gradle.properties         # 锁版本（参考 ic2-fabric 工作配置）
 ├── settings.gradle
 ├── CLAUDE.md
-├── mc_source/                # genSources 反编译产物（common + client）— MC 1.20.1 源码参考
-├── fabric-api_source/        # Fabric API 1.20.1 源码参考（仅参考，不参与编译）
-├── mcdebug-client/           # TypeScript CLI
+├── mcdebug-client/           # TypeScript CLI + SDK + 测试 runner
 │   ├── package.json
 │   ├── tsconfig.json
-│   └── src/{client,api,commands}/...
+│   └── src/{client,api,commands,test-runner,types,...}.ts
+│       test/*.test.ts        # 消费者侧的 mcdebug 测试用例
 └── src/main/
     ├── kotlin/com/mcdebug/
     │   ├── McDebugMod.kt         # @Mod 入口，注册 server lifecycle 钩子
     │   ├── rpc/                  # 传输 + 协议层（JsonRpc/RpcServer/RpcDispatcher/RpcErrors/RpcHandler）
     │   ├── api/                  # WorldOps / BlockEntityOps / InventoryOps / CraftingOps / FluidOps
-    │   │                         #   ScanOps / ServerOps / StorageOps / SnapshotOps / TraceOps / ScreenOps
+    │   │                         #   ScanOps / ServerOps / StorageOps / SnapshotOps / TraceOps / ScreenOps / FakePlayer
     │   ├── wait/WaitOps.kt       # wait.until — 被动观察
     │   └── util/{NbtJson,ServerContext}.kt
     └── resources/
         ├── fabric.mod.json       # 注意 entrypoint 用 "adapter": "kotlin"（Kotlin object 需要）
-        └── mcdebug.mixins.json
+        ├── mcdebug.mixins.json   # 当前 mod 未写 mixin 代码（占位）
+        └── modid.mixins.json     # ← Fabric 模板遗留，待清理
 ```
 
 ## 3. 命名约定
@@ -74,15 +76,10 @@ mc-debug-server/
 
 ```bash
 # 完整 build（Kotlin 重编 + remap jar）
-./gradlew.bat build
+./gradlew build
 
 # 启动开发服务器（dev launcher 注入 classpath）
-./gradlew.bat runServer
-
-# 反编译 MC 源码到 mc_source/（改动 Yarn 映射版本后必跑）
-./gradlew.bat genSources
-# 产物在 .gradle/loom-cache/minecraftMaven/net/minecraft/.../sources.jar
-# 用 Expand-Archive 解压到 mc_source/{common,client}/
+./gradlew runServer
 
 # TS 端
 cd mcdebug-client
@@ -95,6 +92,10 @@ node dist/cli.js status    # 调用 server.status RPC
 npx -y @yu1745/mcdebug status
 npx -y github:yu1745/mcdebug raw storage.list '{"target":{"kind":"block","pos":[0,64,0]}}'
 ```
+
+> 反编译 MC / Fabric API 源码（参考用，不参与编译、不进仓库）：`./gradlew genSources`，
+> 产物在 `.gradle/loom-cache/...` 下，自行解压到本地未跟踪目录查看即可（`mc_source/`
+> 和 `fabric-api_source/` 已被 `.gitignore` 排除，不要再加回来）。
 
 ## 6. 添加新 RPC 方法的流程
 
@@ -114,19 +115,20 @@ npx -y github:yu1745/mcdebug raw storage.list '{"target":{"kind":"block","pos":[
 
 ## 8. 提交前验证
 
-- 改 Kotlin：`./gradlew.bat build` 通过（0 warning, 0 error）
+- 改 Kotlin：`./gradlew build` 通过（0 warning, 0 error）
 - 改 TS：`pnpm build` 通过
-- 改 entrypoint/资源：手动 `./gradlew.bat runServer` 启动一次确认 mod 加载 + RPC 端口监听
+- 改 entrypoint/资源：手动 `./gradlew runServer` 启动一次确认 mod 加载 + RPC 端口监听
 - 改了 API/CLI 协议：两端一起改，TS 端的 `DebugApi` 强类型签名是契约
 - 改了用户可见 RPC：更新 `README.md`、`mcdebug-client/src/commands/help-text.ts`，尤其要给 `npx ... raw namespace.method` 示例
 - 不要新增 Kotlin test DSL / Gradle plugin / 注解扫描测试入口；测试编排放在消费者项目的 TS dispatcher
+- 测试编排统一放在 TS 端 `mcdebug-client/src/test-runner.ts` + `test/*.test.ts`；mod 端不再做任何 test DSL / 注解扫描
 - 改 mcdebug 默认端口 / 协议层：先在 plan 文件里讨论再动
 
 ## 9. 调试技巧
 
 - 看 RPC 端口：`cat run/mcdebug/port` 或 `cat run/config/mcdebug.json`
 - 实时看 server 日志：`run/logs/latest.log`（loom 写文件 + stdout）
-- Loom 缓存了旧 remap jar：清 `run/.fabric/processedMods/`，再 `./gradlew.bat build`
+- Loom 缓存了旧 remap jar：清 `run/.fabric/processedMods/`，再 `./gradlew build`
 - TS 端快速调试：`node dist/cli.js raw world.getBlock '{"pos":[0,64,0]}'`
 - npx 快速调试：`npx -y github:yu1745/mcdebug raw storage.list '{"target":{"kind":"block","pos":[0,64,0]}}'`
 
@@ -172,7 +174,25 @@ node scripts/set-version.mjs X.Y.Z
 - `be.setNbt` 用 `readNbt` 重置整个 NBT；某些 BlockEntity 子类可能不会完全重新初始化（红石信号、缓存等）
 - `wait.until` 在断连时不会主动取消服务端回调，依赖 tick listener 的 `future.isDone` 自检
 - `ScanOps.countByBlock` 在 box 很大时是 O(N)，加 chunk 进度回调再说
+- `world.getRegion` / `world.selectBlocks` 的 `ensureChunkLoaded` 只检查不加载，遇到未加载 chunk 直接抛 `CHUNK_NOT_LOADED`；而 `setBlock(s)` / `getBlock` 不做该检查，chunk 状态行为在 `world.*` 各方法间不完全一致
+- `FakePlayerPool` 是 per-(server,world) 单例且每次调用 mutate 其 position/yaw/手部状态：同一 ServerWorld 上并发 RPC（例如两个 CLI 连接同时 useOnBlock）会互相踩；test-runner 用网格隔离缓解了，但单连接内混用需注意
+- `NbtJson.fromJson` 有损：JSON 数字统一成 `NbtInt`，无法区分 byte/short/int/long；某些 BE 字段（byte 标志位、long 坐标）需要精确类型时可能出错
 - MCP adapter 没做（对话中"Layer 4"）
 - 专用 CLI 子命令暂未覆盖 `storage.*` / `snapshot.*` / `trace.*` / `screen.*`，目前通过 `raw`、REPL 和 TS `DebugApi` 调用
 - 自定义 storage adapter SPI 没做；特殊资源类型后续扩展
-- 鉴权 / 远程连接 没做
+- `modid.mixins.json` 是 Fabric 模板遗留，且 mod 当前未写任何 mixin 代码，发版前可清理
+- 鉴权 / 远程连接 没做（v1 绑 127.0.0.1，假设本机可信）
+
+## 12. 已移除的子系统（避免被旧文档/旧 commit 误导）
+
+下列内容在历史 commit / 旧版 CLAUDE.md 中出现过，但**当前已不在仓库**，不要再加回来：
+
+- **Gradle 插件**（`gradle-plugin/` 子项目，曾含 `McDebugPlugin` / `McDebugExtension` / `McDebugTestTask` / `mcdebugTest` task）——已移除。`settings.gradle` 是单项目，无 `include`。测试编排改由 TS 端 `mcdebug-client/src/test-runner.ts` 承担。
+- **JitPack 发布**（`jitpack.yml` + JitPack 坐标相关 commit）——已废弃。仓库不再通过 JitPack 发布任何构件。
+  - `jitpack.yml` 已删除。
+  - ⚠️ `build.gradle` 里 `maven { url "https://jitpack.io" }` 是**依赖拉取**用的（很多 Fabric mod 只在 jitpack 发版），**不是发布**，保留。
+  - 当前发布通道只有 GitHub Release（`.github/workflows/release.yml` 把 remapped jar 上传到 tag release，CLI 的 `mcdebug jar` 命令据此下载 + sha256 校验）。
+- **Kotlin test DSL / 注解扫描测试入口 / `scanPackages` 配置**——随 Gradle 插件一并移除。
+- **`mc_source/` / `fabric-api_source/`**（反编译源码参考）——`.gitignore` 明确排除，永远不进仓库；需要时本地 `./gradlew genSources` 解压查看。
+
+CLAUDE.md 维护规则：改了仓库结构（新增/移除子系统、改发布通道、改默认端口/协议）必须同步本文件，避免下次又被旧描述带偏。
