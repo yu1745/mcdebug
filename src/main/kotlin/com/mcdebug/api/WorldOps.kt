@@ -30,6 +30,7 @@ import net.minecraft.nbt.NbtCompound
 import net.minecraft.server.MinecraftServer
 import net.minecraft.server.network.ServerPlayerEntity
 import net.minecraft.server.world.ChunkTicketType
+import net.minecraft.server.world.ServerWorld
 import net.minecraft.util.ActionResult
 import net.minecraft.util.Hand
 import net.minecraft.util.hit.BlockHitResult
@@ -1062,7 +1063,7 @@ object WorldOps : RpcHandlerGroup {
         val to = ServerContext.pos(box.getAsJsonArray("to"))
         return ServerContext.boxFrom(from, to)
     }
-    private fun ensureChunkLoaded(world: World, box: BlockBox) {
+    private fun ensureChunkLoaded(world: ServerWorld, box: BlockBox) {
         val minCx = box.minX shr 4
         val maxCx = box.maxX shr 4
         val minCz = box.minZ shr 4

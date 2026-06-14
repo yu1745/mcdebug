@@ -123,6 +123,7 @@ npx -y github:yu1745/mcdebug raw storage.list '{"target":{"kind":"block","pos":[
 ## 8. 提交前验证
 
 - 改 Kotlin：`./gradlew build` 通过（0 warning, 0 error）
+- 改 Kotlin 逻辑（解析器/NBT/谓词）：`./gradlew test` 通过（JUnit5，`src/test/kotlin/`）。现有测试：`PredicateExprTest`（谓词 DSL 解析+求值，~48 例）、`NbtJsonTest`（`#nbt` 标注+往返，~29 例）
 - 改 TS：`pnpm build` 通过
 - 改 entrypoint/资源：手动 `./gradlew runServer` 启动一次确认 mod 加载 + RPC 端口监听
 - 改了 API/CLI 协议：两端一起改，TS 端的 `DebugApi` 强类型签名是契约
