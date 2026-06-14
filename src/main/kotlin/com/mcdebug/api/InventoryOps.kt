@@ -79,7 +79,7 @@ object InventoryOps : RpcHandlerGroup {
                 if (current.isEmpty) {
                     if (!simulate) inv.setStack(targetSlot, stack)
                     remaining = 0
-                } else if (ItemStack.areItemsEqual(current, stack) && current.count < current.maxCount) {
+                } else if (ItemStack.canCombine(current, stack) && current.count < current.maxCount) {
                     val space = current.maxCount - current.count
                     val toAdd = minOf(space, remaining)
                     if (!simulate) {
@@ -94,7 +94,7 @@ object InventoryOps : RpcHandlerGroup {
                 for (i in 0 until inv.size()) {
                     if (remaining <= 0) break
                     val current = inv.getStack(i)
-                    if (current.isEmpty || !ItemStack.areItemsEqual(current, stack)) continue
+                    if (current.isEmpty || !ItemStack.canCombine(current, stack)) continue
                     if (current.count >= current.maxCount) continue
                     val space = current.maxCount - current.count
                     val toAdd = minOf(space, remaining)
@@ -141,18 +141,26 @@ object InventoryOps : RpcHandlerGroup {
             var remaining = maxExtract
             if (targetSlot != null) {
                 val current = inv.getStack(targetSlot)
-                if (!current.isEmpty && ItemStack.areItemsEqual(current, target)) {
+                if (!current.isEmpty && ItemStack.canCombine(current, target)) {
                     val take = minOf(current.count, remaining)
-                    if (!simulate) inv.setStack(targetSlot, ItemStack(current.item, current.count - take))
+                    if (!simulate) {
+                        val newStack = current.copy()
+                        newStack.count = current.count - take
+                        inv.setStack(targetSlot, newStack)
+                    }
                     remaining -= take
                 }
             } else {
                 for (i in 0 until inv.size()) {
                     if (remaining <= 0) break
                     val current = inv.getStack(i)
-                    if (current.isEmpty || !ItemStack.areItemsEqual(current, target)) continue
+                    if (current.isEmpty || !ItemStack.canCombine(current, target)) continue
                     val take = minOf(current.count, remaining)
-                    if (!simulate) inv.setStack(i, ItemStack(current.item, current.count - take))
+                    if (!simulate) {
+                        val newStack = current.copy()
+                        newStack.count = current.count - take
+                        inv.setStack(i, newStack)
+                    }
                     remaining -= take
                 }
             }

@@ -11,6 +11,8 @@ import net.minecraft.server.world.ServerWorld
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import java.util.UUID
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 /**
  * Stable fake ServerPlayerEntity used as the placer for world.placeAsPlayer
@@ -58,6 +60,26 @@ internal object FakePlayerPool {
 
     private val cache = HashMap<Pair<MinecraftServer, ServerWorld>, ServerPlayerEntity>()
 
+    /**
+     * Single global lock serializing all fake-player interactions.
+     *
+     * Why a lock is needed: the cached ServerPlayerEntity is mutated per call
+     * (position, yaw/pitch, hand stack, sneaking, game mode, abilities). The RPC
+     * server dispatches each connection on its own thread inside
+     * `RpcContext.onServer { ... }` (on the MC main thread, but multiple handler
+     * futures can be queued and interleaved). Without serialization, handler A's
+     * state could be overwritten by handler B before A reads it back.
+     *
+     * Deadlock safety: every `withFakePlayer` block runs on the MC main thread
+     * and contains only synchronous vanilla calls — no `server.execute { }`, no
+     * future.get(), no cross-Ops dispatch, no blocking IO. The block never waits
+     * on another main-thread task, so holding this lock can't deadlock.
+     *
+     * The lock is reentrant so a future nested `withFakePlayer` call (e.g. via
+     * a helper) doesn't self-deadlock.
+     */
+    private val interactionLock = ReentrantLock()
+
     fun get(server: MinecraftServer, world: ServerWorld): ServerPlayerEntity =
         cache.getOrPut(server to world) { create(server, world, PROFILE) }
 
@@ -85,4 +107,15 @@ internal object FakePlayerPool {
 
         return p
     }
+
+    /**
+     * Run [block] with the fake player for (server, world) while holding the
+     * interaction lock. Use this instead of `get(...)` for any handler that
+     * mutates fake-player state.
+     */
+    inline fun <T> withFakePlayer(
+        server: MinecraftServer,
+        world: ServerWorld,
+        block: (ServerPlayerEntity) -> T,
+    ): T = interactionLock.withLock { block(get(server, world)) }
 }
