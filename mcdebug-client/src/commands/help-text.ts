@@ -375,6 +375,10 @@ Examples:
   mcdebug wait-until --expr 'be[0,64,0].BurnTime > 0' --poll 20
   mcdebug wait-until --expr 'inv[0,64,0].0.item == "minecraft:iron_ore"'
 
+In TS tests, build predicates with the test-runner helpers (blockId / blockNotId /
+beFieldEquals / invItem / ...) instead of hand-writing strings — see the README
+"Test runner helpers" section.
+
 Output (success):
   { "matched": true, "ranTicks": 145 }
 Output (timeout):

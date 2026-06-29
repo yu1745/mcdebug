@@ -204,6 +204,34 @@ export async function assertBlockId(ctx, pos, expected) {
     if (actual !== expected)
         throw new Error(`expected block ${expected} at ${pos}, got ${actual}`);
 }
+/**
+ * Read the current block id at `pos` (e.g. "minecraft:iron_ore", "minecraft:air").
+ * Unlike [assertBlockId], this never throws — use it when you need the value for
+ * a conditional branch rather than a hard assertion.
+ */
+export async function getBlockId(ctx, pos) {
+    const block = await ctx.api.world.getBlock(pos);
+    return block.state.name;
+}
+/**
+ * Read a block state property (e.g. "facing", "lit") at `pos`, or null if the
+ * block has no such property. The value is the property's string serialization
+ * (e.g. "true", "north", "5" for a pickles count).
+ */
+export async function getBlockProp(ctx, pos, name) {
+    const block = await ctx.api.world.getBlock(pos);
+    return block.state.props[name] ?? null;
+}
+/**
+ * Assert the block at `pos` is NOT `unexpected`. Useful for verifying a block was
+ * removed/changed — e.g. an ore mined away is no longer "minecraft:iron_ore".
+ */
+export async function assertBlockNotId(ctx, pos, unexpected) {
+    const actual = await getBlockId(ctx, pos);
+    if (actual === unexpected) {
+        throw new Error(`expected block at ${pos} to NOT be ${unexpected}, but it was`);
+    }
+}
 export async function setBeField(ctx, pos, path, value) {
     await ctx.api.be.setField(pos, path, value);
 }
@@ -211,6 +239,16 @@ export async function getBeNumber(ctx, pos, path) {
     const result = await ctx.api.be.getField(pos, path);
     if (typeof result.value !== 'number')
         throw new Error(`expected numeric BE field ${path}, got ${JSON.stringify(result.value)}`);
+    return result.value;
+}
+/**
+ * Read a BE field at `path` (dot-notation) as its raw JSON value — number,
+ * string, boolean, null, or nested object/array. Unlike [getBeNumber], this
+ * does not coerce or validate the type, so it works for string/boolean/object
+ * fields (e.g. OwnerUUID string, mode flags, nested NBT).
+ */
+export async function getBeField(ctx, pos, path) {
+    const result = await ctx.api.be.getField(pos, path);
     return result.value;
 }
 export async function insertItem(ctx, pos, item, count, slot) {
@@ -245,6 +283,92 @@ export function invCountLessThan(pos, slot, count) {
 }
 export function beFieldGreaterThan(pos, path, value) {
     return `be[${pos[0]},${pos[1]},${pos[2]}].${path} > ${value}`;
+}
+// ---- predicate builders (string form, passed to waitUntil) ----
+// The server wait.until grammar (WaitOps.kt) accepts:
+//   tick <op> <value>
+//   block[x,y,z].id            <op> <value>      (id is the default path)
+//   block[x,y,z].prop.<name>   <op> <value>
+//   be[x,y,z].<jsonPointer>    <op> <value>
+//   inv[x,y,z].size            <op> <value>
+//   inv[x,y,z].<slot>.item|count|maxCount|nbt.<path>  <op> <value>
+// ops: == != < <= > >=   values: number | "string" | true | false | null
+/** Format a literal for the wait.until predicate grammar. Strings get quoted;
+ *  numbers/booleans/null pass through. */
+function fmtLit(value) {
+    if (typeof value === 'string')
+        return `"${value.replace(/\\/g, '\\\\').replace(/"/g, '\\"')}"`;
+    return String(value);
+}
+// --- block predicates ---
+/** block[x,y,z].id == "<id>" — wait until the block becomes `id`. */
+export function blockId(pos, id) {
+    return `block[${pos[0]},${pos[1]},${pos[2]}].id == ${fmtLit(id)}`;
+}
+/** block[x,y,z].id != "<id>" — wait until the block is no longer `id`
+ *  (e.g. an ore was mined away, a furnace was broken). */
+export function blockNotId(pos, id) {
+    return `block[${pos[0]},${pos[1]},${pos[2]}].id != ${fmtLit(id)}`;
+}
+/** block[x,y,z].prop.<name> == <value> — wait until a block state property
+ *  matches (e.g. furnace lit=true, door open=half=upper). */
+export function blockProp(pos, name, value) {
+    return `block[${pos[0]},${pos[1]},${pos[2]}].prop.${name} == ${fmtLit(value)}`;
+}
+// --- block-entity predicates (full op coverage; previously only > was exposed) ---
+/** be[x,y,z].<path> == <value> */
+export function beFieldEquals(pos, path, value) {
+    return `be[${pos[0]},${pos[1]},${pos[2]}].${path} == ${fmtLit(value)}`;
+}
+/** be[x,y,z].<path> != <value> */
+export function beFieldNotEquals(pos, path, value) {
+    return `be[${pos[0]},${pos[1]},${pos[2]}].${path} != ${fmtLit(value)}`;
+}
+/** be[x,y,z].<path> < <value> */
+export function beFieldLessThan(pos, path, value) {
+    return `be[${pos[0]},${pos[1]},${pos[2]}].${path} < ${value}`;
+}
+/** be[x,y,z].<path> <= <value> */
+export function beFieldLessOrEqual(pos, path, value) {
+    return `be[${pos[0]},${pos[1]},${pos[2]}].${path} <= ${value}`;
+}
+/** be[x,y,z].<path> >= <value> */
+export function beFieldGreaterOrEqual(pos, path, value) {
+    return `be[${pos[0]},${pos[1]},${pos[2]}].${path} >= ${value}`;
+}
+// --- inventory predicates (full op coverage for item/count) ---
+/** inv[x,y,z].<slot>.item == "<id>" — wait until a slot holds this item. */
+export function invItem(pos, slot, itemId) {
+    return `inv[${pos[0]},${pos[1]},${pos[2]}].${slot}.item == ${fmtLit(itemId)}`;
+}
+/** inv[x,y,z].<slot>.item != "<id>" — wait until a slot no longer holds this item. */
+export function invItemNot(pos, slot, itemId) {
+    return `inv[${pos[0]},${pos[1]},${pos[2]}].${slot}.item != ${fmtLit(itemId)}`;
+}
+/** inv[x,y,z].<slot>.count == <n> */
+export function invCountEquals(pos, slot, count) {
+    return `inv[${pos[0]},${pos[1]},${pos[2]}].${slot}.count == ${count}`;
+}
+/** inv[x,y,z].<slot>.count > <n> */
+export function invCountGreaterThan(pos, slot, count) {
+    return `inv[${pos[0]},${pos[1]},${pos[2]}].${slot}.count > ${count}`;
+}
+/** inv[x,y,z].<slot>.count >= <n> */
+export function invCountGreaterOrEqual(pos, slot, count) {
+    return `inv[${pos[0]},${pos[1]},${pos[2]}].${slot}.count >= ${count}`;
+}
+/** inv[x,y,z].<slot>.count <= <n> */
+export function invCountLessOrEqual(pos, slot, count) {
+    return `inv[${pos[0]},${pos[1]},${pos[2]}].${slot}.count <= ${count}`;
+}
+// --- tick predicate ---
+/** tick == <n> — wait until the server reaches this absolute tick. */
+export function tickEquals(tick) {
+    return `tick == ${tick}`;
+}
+/** tick >= <n> — wait until the server reaches at least this tick. */
+export function tickGreaterOrEqual(tick) {
+    return `tick >= ${tick}`;
 }
 export async function waitUntil(ctx, predicate, timeoutTicks) {
     await ctx.api.wait.until(predicate, { timeoutTicks });
