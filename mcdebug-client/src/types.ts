@@ -182,6 +182,66 @@ export interface BlockSnapshot {
   nbt?: JsonNbt;
 }
 
+export interface WorldBoxEditResult {
+  count: number;
+  changed: number;
+  dim: string;
+}
+
+export type Direction = 'up' | 'down' | 'north' | 'south' | 'east' | 'west';
+
+export interface RedstonePowerSnapshot {
+  pos: Pos;
+  dim: string;
+  state: { name: string; props: Record<string, string> };
+  powered: boolean;
+  received: number;
+  inputs: Record<Direction, number>;
+  outputs: Record<Direction, number>;
+  side?: Direction;
+  sideInput?: number;
+  sideOutput?: number;
+}
+
+export interface EntitySnapshot {
+  type: string;
+  uuid: string;
+  dim: string;
+  x: number;
+  y: number;
+  z: number;
+  yaw: number;
+  pitch: number;
+  removed: boolean;
+  health?: number;
+  maxHealth?: number;
+  stack?: ItemStackJson;
+  nbt?: JsonNbt;
+}
+
+export interface EntitySpawnOptions {
+  dim?: string;
+  yaw?: number;
+  pitch?: number;
+  nbt?: JsonNbt;
+  stack?: ItemStackJson;
+  includeNbt?: boolean;
+}
+
+export interface FixtureBlock {
+  rel: Pos;
+  state: { name: string; props: Record<string, string> };
+  nbt?: JsonNbt;
+}
+
+export interface FixtureJson {
+  version: number;
+  dim?: string;
+  origin: Pos;
+  size: Pos;
+  blocks: FixtureBlock[];
+}
+
 export interface ServerStatus {
   mcVersion: string;
   modVersion: string;

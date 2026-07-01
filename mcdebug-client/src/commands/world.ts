@@ -1,6 +1,6 @@
 import type { Command } from 'commander';
 import { DebugApi } from '../api.js';
-import { JsonNbt } from '../types.js';
+import { Box, JsonNbt } from '../types.js';
 import { COUNT_HELP, FIND_HELP, FORCELOAD_HELP, GET_HELP, PLACE_AS_PLAYER_HELP, PLACE_HELP, REMOVE_HELP, UNFORCELOAD_HELP } from './help-text.js';
 import { parseJsonArg, parseTriplet, parseStateProps, requirePos, outputJson, outputOneLineJson } from './util.js';
 
@@ -50,6 +50,52 @@ export function registerWorldCommands(cmd: Command, getApi: () => DebugApi): voi
       const api = getApi();
       const pos = requirePos(opts, 'remove');
       const r = await api.world.setBlock(pos, 'minecraft:air', undefined, { dim: opts.dim });
+      outputOneLineJson(r);
+      await api.close();
+    });
+
+  cmd
+    .command('fill-box')
+    .description('fill a loaded box with one block state')
+    .requiredOption('--from <x,y,z>', 'box minimum corner')
+    .requiredOption('--to <x,y,z>', 'box maximum corner')
+    .requiredOption('--block <id>', 'block id')
+    .option(
+      '--state <k=v>',
+      'state property, repeatable',
+      (value: string, previous: string[]) => previous.concat(value),
+      [],
+    )
+    .option('--dim <id>', 'dimension id')
+    .option('--flags <n>', 'setBlock flags')
+    .option('--max-blocks <n>', 'safety limit', '32768')
+    .action(async (opts: { from: string; to: string; block: string; state?: string[]; dim?: string; flags?: string; maxBlocks: string }) => {
+      const api = getApi();
+      const stateProps = opts.state ? parseStateProps(opts.state) : undefined;
+      const r = await api.world.fillBox(parseBox(opts.from, opts.to), opts.block, stateProps ? { name: opts.block, props: stateProps } : undefined, {
+        dim: opts.dim,
+        flags: opts.flags ? Number(opts.flags) : undefined,
+        maxBlocks: Number(opts.maxBlocks),
+      });
+      outputOneLineJson(r);
+      await api.close();
+    });
+
+  cmd
+    .command('clear-box')
+    .description('clear a loaded box to air')
+    .requiredOption('--from <x,y,z>', 'box minimum corner')
+    .requiredOption('--to <x,y,z>', 'box maximum corner')
+    .option('--dim <id>', 'dimension id')
+    .option('--flags <n>', 'setBlock flags')
+    .option('--max-blocks <n>', 'safety limit', '32768')
+    .action(async (opts: { from: string; to: string; dim?: string; flags?: string; maxBlocks: string }) => {
+      const api = getApi();
+      const r = await api.world.clearBox(parseBox(opts.from, opts.to), {
+        dim: opts.dim,
+        flags: opts.flags ? Number(opts.flags) : undefined,
+        maxBlocks: Number(opts.maxBlocks),
+      });
       outputOneLineJson(r);
       await api.close();
     });
@@ -209,4 +255,8 @@ export function registerWorldCommands(cmd: Command, getApi: () => DebugApi): voi
       outputJson(r);
       await api.close();
     });
+}
+
+function parseBox(from: string, to: string): Box {
+  return { from: parseTriplet(from, '--from'), to: parseTriplet(to, '--to') };
 }

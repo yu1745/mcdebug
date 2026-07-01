@@ -3,9 +3,14 @@ import {
   BlockSnapshot,
   BlockStateSpec,
   Box,
+  Direction,
+  EntitySnapshot,
+  EntitySpawnOptions,
+  FixtureJson,
   ItemStackJson,
   JsonNbt,
   Pos,
+  RedstonePowerSnapshot,
   ScreenSnapshot,
   ServerStatus,
   Side,
@@ -20,6 +25,7 @@ import {
   TraceStartOptions,
   TraceStartResult,
   WaitResult,
+  WorldBoxEditResult,
 } from './types.js';
 
 /**
@@ -54,7 +60,31 @@ export class DebugApi {
       this.rpc.call('world.setBlocks', {
         ops: ops.map((o) => ({ pos: o.pos, block: o.block, stateProps: o.state?.props })),
         flags: opts?.flags,
+          dim: opts?.dim,
+        }),
+    fillBox: (
+      box: Box,
+      block: string,
+      state?: BlockStateSpec,
+      opts?: { flags?: number; dim?: string; maxBlocks?: number },
+    ) =>
+      this.rpc.call<WorldBoxEditResult>('world.fillBox', {
+        box,
+        block,
+        stateProps: state?.props,
+        flags: opts?.flags,
         dim: opts?.dim,
+        maxBlocks: opts?.maxBlocks,
+      }),
+    clearBox: (
+      box: Box,
+      opts?: { flags?: number; dim?: string; maxBlocks?: number },
+    ) =>
+      this.rpc.call<WorldBoxEditResult>('world.clearBox', {
+        box,
+        flags: opts?.flags,
+        dim: opts?.dim,
+        maxBlocks: opts?.maxBlocks,
       }),
     /**
      * Place a block as if a player were clicking the side of an adjacent block.
@@ -445,6 +475,90 @@ export class DebugApi {
       this.rpc.call<ScreenSnapshot>('screen.quickMove', { screenId, slot }),
     close: (screenId: string) =>
       this.rpc.call<{ screenId: string; closed: boolean }>('screen.close', { screenId }),
+  };
+
+  redstone = {
+    getPower: (pos: Pos, opts?: { side?: Direction; dim?: string }) =>
+      this.rpc.call<RedstonePowerSnapshot>('redstone.getPower', { pos, side: opts?.side, dim: opts?.dim }),
+    isPowered: (pos: Pos, opts?: { dim?: string }) =>
+      this.rpc.call<{ pos: Pos; dim: string; powered: boolean; received: number }>('redstone.isPowered', { pos, dim: opts?.dim }),
+    setLever: (pos: Pos, powered: boolean, opts?: { dim?: string }) =>
+      this.rpc.call<{ pos: Pos; dim: string; changed: boolean; powered: boolean; state: BlockSnapshot['state'] }>(
+        'redstone.setLever',
+        { pos, powered, dim: opts?.dim },
+      ),
+    pulse: (pos: Pos, ticks = 2, opts?: { dim?: string }) =>
+      this.rpc.call<{ pos: Pos; dim: string; powered: boolean; offTick: number }>('redstone.pulse', {
+        pos,
+        ticks,
+        dim: opts?.dim,
+      }),
+    notifyNeighbors: (pos: Pos, opts?: { dim?: string }) =>
+      this.rpc.call<{ pos: Pos; dim: string; notified: boolean; state: BlockSnapshot['state'] }>('redstone.notifyNeighbors', {
+        pos,
+        dim: opts?.dim,
+      }),
+  };
+
+  entity = {
+    spawn: (type: string, pos: Pos, opts?: EntitySpawnOptions) =>
+      this.rpc.call<{ spawned: boolean; entity: EntitySnapshot }>('entity.spawn', {
+        type,
+        pos,
+        dim: opts?.dim,
+        yaw: opts?.yaw,
+        pitch: opts?.pitch,
+        nbt: opts?.nbt,
+        stack: opts?.stack,
+        includeNbt: opts?.includeNbt,
+      }),
+    getNbt: (uuid: string, opts?: { dim?: string }) =>
+      this.rpc.call<{ entity: EntitySnapshot; nbt: JsonNbt }>('entity.getNbt', { uuid, dim: opts?.dim }),
+    setNbt: (uuid: string, nbt: JsonNbt, opts?: { dim?: string; replace?: boolean }) =>
+      this.rpc.call<{ entity: EntitySnapshot }>('entity.setNbt', { uuid, nbt, dim: opts?.dim, replace: opts?.replace }),
+    teleport: (uuid: string, pos: Pos, opts?: { dim?: string; toDim?: string; yaw?: number; pitch?: number; includeNbt?: boolean }) =>
+      this.rpc.call<{ teleported: boolean; entity: EntitySnapshot }>('entity.teleport', {
+        uuid,
+        pos,
+        dim: opts?.dim,
+        toDim: opts?.toDim,
+        yaw: opts?.yaw,
+        pitch: opts?.pitch,
+        includeNbt: opts?.includeNbt,
+      }),
+    remove: (uuid: string, opts?: { dim?: string; includeNbt?: boolean }) =>
+      this.rpc.call<{ removed: boolean; entity: EntitySnapshot }>('entity.remove', {
+        uuid,
+        dim: opts?.dim,
+        includeNbt: opts?.includeNbt,
+      }),
+    listItems: (box: Box, opts?: { dim?: string; item?: string; includeNbt?: boolean }) =>
+      this.rpc.call<{ count: number; items: EntitySnapshot[] }>('entity.listItems', {
+        box,
+        dim: opts?.dim,
+        item: opts?.item,
+        includeNbt: opts?.includeNbt,
+      }),
+    collectItems: (box: Box, opts?: { dim?: string; item?: string; remove?: boolean; includeNbt?: boolean }) =>
+      this.rpc.call<{ count: number; removed: boolean; items: EntitySnapshot[] }>('entity.collectItems', {
+        box,
+        dim: opts?.dim,
+        item: opts?.item,
+        remove: opts?.remove,
+        includeNbt: opts?.includeNbt,
+      }),
+  };
+
+  fixture = {
+    capture: (box: Box, opts?: { dim?: string; includeNbt?: boolean }) =>
+      this.rpc.call<FixtureJson>('fixture.capture', { box, dim: opts?.dim, includeNbt: opts?.includeNbt }),
+    load: (fixture: FixtureJson, opts?: { origin?: Pos; dim?: string; flags?: number }) =>
+      this.rpc.call<{ placed: number; blockEntities: number; dim: string; origin: Pos }>('fixture.load', {
+        fixture,
+        origin: opts?.origin,
+        dim: opts?.dim,
+        flags: opts?.flags,
+      }),
   };
 
   fluid = {

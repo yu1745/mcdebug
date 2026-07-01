@@ -24,6 +24,20 @@ export class DebugApi {
             flags: opts?.flags,
             dim: opts?.dim,
         }),
+        fillBox: (box, block, state, opts) => this.rpc.call('world.fillBox', {
+            box,
+            block,
+            stateProps: state?.props,
+            flags: opts?.flags,
+            dim: opts?.dim,
+            maxBlocks: opts?.maxBlocks,
+        }),
+        clearBox: (box, opts) => this.rpc.call('world.clearBox', {
+            box,
+            flags: opts?.flags,
+            dim: opts?.dim,
+            maxBlocks: opts?.maxBlocks,
+        }),
         /**
          * Place a block as if a player were clicking the side of an adjacent block.
          * Goes through the full BlockItem / ItemPlacementContext pipeline with a
@@ -210,6 +224,70 @@ export class DebugApi {
         clickSlot: (screenId, slot, button, actionType) => this.rpc.call('screen.clickSlot', { screenId, slot, button, actionType }),
         quickMove: (screenId, slot) => this.rpc.call('screen.quickMove', { screenId, slot }),
         close: (screenId) => this.rpc.call('screen.close', { screenId }),
+    };
+    redstone = {
+        getPower: (pos, opts) => this.rpc.call('redstone.getPower', { pos, side: opts?.side, dim: opts?.dim }),
+        isPowered: (pos, opts) => this.rpc.call('redstone.isPowered', { pos, dim: opts?.dim }),
+        setLever: (pos, powered, opts) => this.rpc.call('redstone.setLever', { pos, powered, dim: opts?.dim }),
+        pulse: (pos, ticks = 2, opts) => this.rpc.call('redstone.pulse', {
+            pos,
+            ticks,
+            dim: opts?.dim,
+        }),
+        notifyNeighbors: (pos, opts) => this.rpc.call('redstone.notifyNeighbors', {
+            pos,
+            dim: opts?.dim,
+        }),
+    };
+    entity = {
+        spawn: (type, pos, opts) => this.rpc.call('entity.spawn', {
+            type,
+            pos,
+            dim: opts?.dim,
+            yaw: opts?.yaw,
+            pitch: opts?.pitch,
+            nbt: opts?.nbt,
+            stack: opts?.stack,
+            includeNbt: opts?.includeNbt,
+        }),
+        getNbt: (uuid, opts) => this.rpc.call('entity.getNbt', { uuid, dim: opts?.dim }),
+        setNbt: (uuid, nbt, opts) => this.rpc.call('entity.setNbt', { uuid, nbt, dim: opts?.dim, replace: opts?.replace }),
+        teleport: (uuid, pos, opts) => this.rpc.call('entity.teleport', {
+            uuid,
+            pos,
+            dim: opts?.dim,
+            toDim: opts?.toDim,
+            yaw: opts?.yaw,
+            pitch: opts?.pitch,
+            includeNbt: opts?.includeNbt,
+        }),
+        remove: (uuid, opts) => this.rpc.call('entity.remove', {
+            uuid,
+            dim: opts?.dim,
+            includeNbt: opts?.includeNbt,
+        }),
+        listItems: (box, opts) => this.rpc.call('entity.listItems', {
+            box,
+            dim: opts?.dim,
+            item: opts?.item,
+            includeNbt: opts?.includeNbt,
+        }),
+        collectItems: (box, opts) => this.rpc.call('entity.collectItems', {
+            box,
+            dim: opts?.dim,
+            item: opts?.item,
+            remove: opts?.remove,
+            includeNbt: opts?.includeNbt,
+        }),
+    };
+    fixture = {
+        capture: (box, opts) => this.rpc.call('fixture.capture', { box, dim: opts?.dim, includeNbt: opts?.includeNbt }),
+        load: (fixture, opts) => this.rpc.call('fixture.load', {
+            fixture,
+            origin: opts?.origin,
+            dim: opts?.dim,
+            flags: opts?.flags,
+        }),
     };
     fluid = {
         info: (p, opts) => this.rpc.call('fluid.info', { pos: p, side: opts?.side, dim: opts?.dim }),

@@ -7,12 +7,14 @@ import { registerCmdCommand } from './commands/cmd.js';
 import { registerCraftCommands } from './commands/craft.js';
 import { registerEntityCommands } from './commands/entity.js';
 import { registerFluidCommands } from './commands/fluid.js';
+import { registerFixtureCommands } from './commands/fixture.js';
 import { registerInteractEntityCommand } from './commands/interact-entity.js';
 import { registerGuideCommand } from './commands/guide.js';
 import { registerInvCommands } from './commands/inv.js';
 import { registerJarCommand } from './commands/jar.js';
 import { startRepl } from './commands/repl.js';
 import { registerScreenCommands } from './commands/screen.js';
+import { registerRedstoneCommands } from './commands/redstone.js';
 import { registerServerCommand } from './commands/server.js';
 import { registerSnapshotCommands } from './commands/snapshot.js';
 import { registerStorageCommands } from './commands/storage.js';
@@ -66,6 +68,8 @@ registerStorageCommands(program, getApi);
 registerSnapshotCommands(program, getApi);
 registerTraceCommands(program, getApi);
 registerScreenCommands(program, getApi);
+registerRedstoneCommands(program, getApi);
+registerFixtureCommands(program, getApi);
 
 program
   .command('repl')

@@ -18,6 +18,9 @@ Examples:
   mcdebug storage list --x 0 --y 64 --z 0
   mcdebug trace start --from 0,64,0 --to 2,66,2 --include block,inventory
   mcdebug screen open-block --x 0 --y 64 --z 0
+  mcdebug redstone get-power --x 0 --y 64 --z 0
+  mcdebug entity spawn --type minecraft:item --pos 0,65,0 --stack '{"item":"minecraft:diamond","count":3}'
+  mcdebug fixture capture --from 0,64,0 --to 2,66,2
   mcdebug wait-until --expr 'block[0,64,0].id == "minecraft:water"'
   mcdebug raw world.getBlock '{"pos":[0,64,0]}'
   mcdebug craft do --grid @grid.json --recipe-id ic2_120:advanced_batpack
@@ -418,6 +421,11 @@ Available methods:
   dbg.screen.setPlayerSlot(screenId, playerSlot, stack)
   dbg.screen.clickSlot(screenId, slot, button, actionType)
   dbg.screen.quickMove(screenId, slot)   dbg.screen.close(screenId)
+  dbg.redstone.getPower(pos, opts?)      dbg.redstone.setLever(pos, powered, opts?)
+  dbg.redstone.pulse(pos, ticks, opts?)  dbg.redstone.notifyNeighbors(pos, opts?)
+  dbg.entity.spawn(type, pos, opts?)     dbg.entity.teleport(uuid, pos, opts?)
+  dbg.entity.getNbt(uuid, opts?)         dbg.entity.remove(uuid, opts?)
+  dbg.fixture.capture(box, opts?)        dbg.fixture.load(fixture, opts?)
   dbg.wait.until(predicate, opts?)
   dbg.craft.craft(grid, opts?)     dbg.craft.find(grid, opts?)
   dbg.scan.findBlocks(box, block, opts?)     dbg.scan.countByBlock(box, dim?)
@@ -435,6 +443,7 @@ Available RPC methods (namespace.method):
 
   server.status              server.listDimensions
   world.getBlock              world.setBlock               world.setBlocks
+  world.fillBox               world.clearBox
   world.placeAsPlayer        (uses a stable fake player — see 'mcdebug place-as-player --help')
   world.useItem              (right-click an item in air — see 'mcdebug use-item --help')
   world.useOnBlock           (right-click a block — see 'mcdebug use --help')
@@ -456,6 +465,12 @@ Available RPC methods (namespace.method):
   trace.start                 trace.stop                   trace.get
   screen.openBlock            screen.snapshot              screen.clickSlot
   screen.setPlayerSlot        screen.quickMove             screen.close
+  redstone.getPower           redstone.isPowered           redstone.setLever
+  redstone.pulse              redstone.notifyNeighbors
+  entity.spawn                entity.getNbt                entity.setNbt
+  entity.teleport             entity.remove                entity.listItems
+  entity.collectItems
+  fixture.capture             fixture.load
   craft.craft                 craft.find
   server.runCommand
 

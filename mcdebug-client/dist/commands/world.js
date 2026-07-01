@@ -37,6 +37,45 @@ export function registerWorldCommands(cmd, getApi) {
         await api.close();
     });
     cmd
+        .command('fill-box')
+        .description('fill a loaded box with one block state')
+        .requiredOption('--from <x,y,z>', 'box minimum corner')
+        .requiredOption('--to <x,y,z>', 'box maximum corner')
+        .requiredOption('--block <id>', 'block id')
+        .option('--state <k=v>', 'state property, repeatable', (value, previous) => previous.concat(value), [])
+        .option('--dim <id>', 'dimension id')
+        .option('--flags <n>', 'setBlock flags')
+        .option('--max-blocks <n>', 'safety limit', '32768')
+        .action(async (opts) => {
+        const api = getApi();
+        const stateProps = opts.state ? parseStateProps(opts.state) : undefined;
+        const r = await api.world.fillBox(parseBox(opts.from, opts.to), opts.block, stateProps ? { name: opts.block, props: stateProps } : undefined, {
+            dim: opts.dim,
+            flags: opts.flags ? Number(opts.flags) : undefined,
+            maxBlocks: Number(opts.maxBlocks),
+        });
+        outputOneLineJson(r);
+        await api.close();
+    });
+    cmd
+        .command('clear-box')
+        .description('clear a loaded box to air')
+        .requiredOption('--from <x,y,z>', 'box minimum corner')
+        .requiredOption('--to <x,y,z>', 'box maximum corner')
+        .option('--dim <id>', 'dimension id')
+        .option('--flags <n>', 'setBlock flags')
+        .option('--max-blocks <n>', 'safety limit', '32768')
+        .action(async (opts) => {
+        const api = getApi();
+        const r = await api.world.clearBox(parseBox(opts.from, opts.to), {
+            dim: opts.dim,
+            flags: opts.flags ? Number(opts.flags) : undefined,
+            maxBlocks: Number(opts.maxBlocks),
+        });
+        outputOneLineJson(r);
+        await api.close();
+    });
+    cmd
         .command('place-as-player')
         .description('place a block as if a player were clicking the side of an adjacent block (full BlockItem pipeline with a stable fake player)')
         .addHelpText('after', PLACE_AS_PLAYER_HELP)
@@ -147,4 +186,7 @@ export function registerWorldCommands(cmd, getApi) {
         outputJson(r);
         await api.close();
     });
+}
+function parseBox(from, to) {
+    return { from: parseTriplet(from, '--from'), to: parseTriplet(to, '--to') };
 }

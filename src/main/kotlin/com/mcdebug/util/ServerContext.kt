@@ -127,11 +127,15 @@ object ServerContext {
         obj.addProperty("name", Registries.BLOCK.getId(state.block).toString())
         val props = com.google.gson.JsonObject()
         for ((prop, value) in state.entries) {
-            props.addProperty(prop.name, value.toString())
+            props.addProperty(prop.name, propertyValueName(prop, value))
         }
         obj.add("props", props)
         return obj
     }
+
+    @Suppress("UNCHECKED_CAST")
+    private fun propertyValueName(prop: Property<*>, value: Comparable<*>): String =
+        (prop as Property<Comparable<Any>>).name(value as Comparable<Any>)
 
     fun itemStackToJson(stack: ItemStack): com.google.gson.JsonObject {
         val obj = com.google.gson.JsonObject()

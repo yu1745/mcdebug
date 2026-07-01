@@ -31,4 +31,5 @@ object RpcErrors {
     const val SNAPSHOT_NOT_FOUND = -32016
     const val TRACE_NOT_FOUND = -32017
     const val SCREEN_NOT_FOUND = -32018
+    const val ENTITY_NOT_FOUND = -32019
 }

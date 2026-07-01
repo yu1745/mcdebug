@@ -3,8 +3,8 @@
 Fabric 1.20.1 + Kotlin mod that exposes a localhost JSON-RPC server, plus a
 TypeScript CLI / test runner, so mod developers can automate tests of their
 machine blocks by reading/writing the world, block entities, inventories,
-resource storages, snapshots, traces, and screen handlers from an external TS
-process.
+resource storages, snapshots, traces, screen handlers, redstone controls,
+entities, and reusable fixtures from an external TS process.
 
 ```
 ┌─────────────────┐  JSON-RPC 2.0   ┌──────────────────┐
@@ -46,6 +46,7 @@ node mcdebug-client/dist/cli.js raw world.getBlock '{"pos":[0,64,0]}'
 # npx, once the package version is published
 npx -y @yu1745/mcdebug status
 npx -y @yu1745/mcdebug storage list --x 0 --y 64 --z 0
+npx -y @yu1745/mcdebug redstone get-power --x 0 --y 64 --z 0
 
 # npx directly from GitHub, useful before an npm release
 npx -y github:yu1745/mcdebug status
@@ -61,6 +62,9 @@ raw <namespace.method> <json>` for low-level or rarely used RPCs.
 | `snapshot.*` | capture and structurally diff world/resource/entity state |
 | `trace.*` | capture snapshots on natural server ticks for failure diagnosis |
 | `screen.*` | open and drive real server `ScreenHandler`s with a fake player |
+| `redstone.*` | read power, set/pulse vanilla levers, trigger neighbor updates |
+| `entity.*` | spawn, inspect, teleport, remove, and collect item entities |
+| `fixture.*` | capture and load block-region fixtures as JSON |
 
 Examples:
 
@@ -84,6 +88,16 @@ mcdebug screen open-block --x 0 --y 64 --z 0
 mcdebug screen set-player-slot --screen-id "<screen id>" --slot 0 --item minecraft:cobblestone --count 1
 mcdebug screen quick-move --screen-id "<screen id>" --slot 34
 mcdebug screen close --screen-id "<screen id>"
+
+# Redstone and entity controls.
+mcdebug redstone set-lever --x 0 --y 65 --z 0 --powered true
+mcdebug redstone pulse --x 0 --y 65 --z 0 --ticks 4
+mcdebug entity spawn --type minecraft:item --pos 0,65,0 --stack '{"item":"minecraft:diamond","count":3}'
+mcdebug entity collect-items --from -2,63,-2 --to 2,67,2 --item minecraft:diamond
+
+# Capture an area fixture and load it elsewhere.
+mcdebug fixture capture --from 0,64,0 --to 2,66,2 > machine-fixture.json
+mcdebug fixture load --fixture @machine-fixture.json --origin 10,64,10
 ```
 
 The server still never exposes `tick.run` or `tick.runUntil`. `trace.*` and
@@ -122,6 +136,10 @@ Supported RPCs:
 | `snapshot.diff(before, after)` | structural JSON diff, intentionally business-logic agnostic |
 | `trace.start/stop/get(...)` | record snapshot frames every N natural ticks |
 | `screen.openBlock/snapshot/setPlayerSlot/clickSlot/quickMove/close(...)` | drive real server-side GUI handlers |
+| `redstone.getPower/isPowered/setLever/pulse/notifyNeighbors(...)` | observe and drive vanilla redstone inputs without artificial ticks |
+| `entity.spawn/getNbt/setNbt/teleport/remove/listItems/collectItems(...)` | control server entities and dropped item entities |
+| `world.fillBox/clearBox(...)` | bulk edit loaded test regions with a safety block limit |
+| `fixture.capture/load(...)` | serialize and restore block regions, including BE NBT |
 
 TypeScript usage:
 
@@ -136,6 +154,8 @@ const before = await api.snapshot.capture({
   box: { from: [0, 64, 0], to: [0, 64, 0] },
   include: ["block", "inventory", "energy"],
 });
+await api.redstone.pulse([0, 65, 0], 4);
+const fixture = await api.fixture.capture({ from: [0, 64, 0], to: [2, 66, 2] });
 ```
 
 ## Test runner helpers

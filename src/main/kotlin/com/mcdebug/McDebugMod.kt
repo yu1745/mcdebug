@@ -2,8 +2,11 @@ package com.mcdebug
 
 import com.mcdebug.api.BlockEntityOps
 import com.mcdebug.api.CraftingOps
+import com.mcdebug.api.EntityOps
+import com.mcdebug.api.FixtureOps
 import com.mcdebug.api.FluidOps
 import com.mcdebug.api.InventoryOps
+import com.mcdebug.api.RedstoneOps
 import com.mcdebug.api.ScreenOps
 import com.mcdebug.api.ScanOps
 import com.mcdebug.api.ServerOps
@@ -69,6 +72,9 @@ object McDebugMod : DedicatedServerModInitializer {
             registerGroup("snapshot", SnapshotOps)
             registerGroup("trace", TraceOps)
             registerGroup("screen", ScreenOps)
+            registerGroup("redstone", RedstoneOps)
+            registerGroup("entity", EntityOps)
+            registerGroup("fixture", FixtureOps)
         }
         dispatcher = d
         currentServer = server
@@ -76,6 +82,7 @@ object McDebugMod : DedicatedServerModInitializer {
         // Install the tick listener for wait.until. This is passive — it only observes server tick events.
         WaitOps.install()
         TraceOps.install()
+        RedstoneOps.install()
 
         rpcServer = RpcServer(d, ::portFilePath).also { it.start(server) }
         LOGGER.info("mcdebug RPC ready on 127.0.0.1:{}", rpcServer?.boundPort)
@@ -85,6 +92,7 @@ object McDebugMod : DedicatedServerModInitializer {
         try {
             WaitOps.uninstall()
             TraceOps.uninstall()
+            RedstoneOps.uninstall()
             ScreenOps.clear()
             rpcServer?.stop()
         } catch (e: Exception) {

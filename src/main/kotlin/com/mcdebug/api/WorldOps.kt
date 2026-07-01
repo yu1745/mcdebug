@@ -61,6 +61,8 @@ object WorldOps : RpcHandlerGroup {
         "attackEntity" to ::attackEntity,
         "getRegion" to ::getRegion,
         "selectBlocks" to ::selectBlocks,
+        "fillBox" to ::fillBox,
+        "clearBox" to ::clearBox,
         "forceloadChunk" to ::forceloadChunk,
         "unforceloadChunk" to ::unforceloadChunk
     )
@@ -117,6 +119,18 @@ object WorldOps : RpcHandlerGroup {
                 if (world.setBlockState(pos, block, flags)) count++
             }
             JsonObject().apply { addProperty("count", count) }
+        }
+
+    private fun fillBox(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
+        RpcContext.onServer(server) {
+            val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
+            fillBoxNow(server, p, p.requireString("block"), p.getStringMapOrNull("stateProps"))
+        }
+
+    private fun clearBox(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
+        RpcContext.onServer(server) {
+            val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
+            fillBoxNow(server, p, "minecraft:air", null)
         }
 
     /**
@@ -1032,6 +1046,36 @@ object WorldOps : RpcHandlerGroup {
             if (!world.chunkManager.isChunkLoaded(cx, cz)) {
                 throw RpcException(RpcErrors.CHUNK_NOT_LOADED, "chunk not loaded: ($cx, $cz)")
             }
+        }
+    }
+
+    private fun boxBlockCount(box: BlockBox): Int =
+        (box.maxX - box.minX + 1) * (box.maxY - box.minY + 1) * (box.maxZ - box.minZ + 1)
+
+    private fun fillBoxNow(
+        server: MinecraftServer,
+        p: JsonObject,
+        blockId: String,
+        stateProps: Map<String, String>?
+    ): JsonObject {
+        val box = boxFromParams(p)
+        val world = ServerContext.world(server, p.getStringOrNull("dim"))
+        val maxBlocks = p.getIntOr("maxBlocks", 32768)
+        val total = boxBlockCount(box)
+        if (total > maxBlocks) {
+            throw RpcException(RpcErrors.INVALID_PARAMS, "fillBox touches $total blocks; pass maxBlocks >= $total to confirm")
+        }
+        ensureChunkLoaded(world, box)
+        val flags = p.getIntOr("flags", DEFAULT_FLAGS)
+        val state = ServerContext.blockState(server, blockId, stateProps)
+        var changed = 0
+        BlockPos.iterate(box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ).forEach { pos ->
+            if (world.setBlockState(pos, state, flags)) changed++
+        }
+        return JsonObject().apply {
+            addProperty("count", total)
+            addProperty("changed", changed)
+            addProperty("dim", world.registryKey.value.toString())
         }
     }
 }

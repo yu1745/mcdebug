@@ -1,5 +1,5 @@
 import { RpcClient } from './client.js';
-import { BlockSnapshot, BlockStateSpec, Box, ItemStackJson, JsonNbt, Pos, ScreenSnapshot, ServerStatus, Side, SnapshotCaptureOptions, SnapshotDiffResult, StorageGetResult, StorageListResult, StorageMoveResult, StorageResource, Target, TraceResult, TraceStartOptions, TraceStartResult, WaitResult } from './types.js';
+import { BlockSnapshot, BlockStateSpec, Box, Direction, EntitySnapshot, EntitySpawnOptions, FixtureJson, ItemStackJson, JsonNbt, Pos, RedstonePowerSnapshot, ScreenSnapshot, ServerStatus, Side, SnapshotCaptureOptions, SnapshotDiffResult, StorageGetResult, StorageListResult, StorageMoveResult, StorageResource, Target, TraceResult, TraceStartOptions, TraceStartResult, WaitResult, WorldBoxEditResult } from './types.js';
 /**
  * High-level typed API on top of RpcClient.
  * Matches the methods described in C:\Users\wangyu\.claude\plans\typed-wandering-wall.md
@@ -24,6 +24,16 @@ export declare class DebugApi {
             flags?: number;
             dim?: string;
         }) => Promise<unknown>;
+        fillBox: (box: Box, block: string, state?: BlockStateSpec, opts?: {
+            flags?: number;
+            dim?: string;
+            maxBlocks?: number;
+        }) => Promise<WorldBoxEditResult>;
+        clearBox: (box: Box, opts?: {
+            flags?: number;
+            dim?: string;
+            maxBlocks?: number;
+        }) => Promise<WorldBoxEditResult>;
         /**
          * Place a block as if a player were clicking the side of an adjacent block.
          * Goes through the full BlockItem / ItemPlacementContext pipeline with a
@@ -300,6 +310,114 @@ export declare class DebugApi {
         close: (screenId: string) => Promise<{
             screenId: string;
             closed: boolean;
+        }>;
+    };
+    redstone: {
+        getPower: (pos: Pos, opts?: {
+            side?: Direction;
+            dim?: string;
+        }) => Promise<RedstonePowerSnapshot>;
+        isPowered: (pos: Pos, opts?: {
+            dim?: string;
+        }) => Promise<{
+            pos: Pos;
+            dim: string;
+            powered: boolean;
+            received: number;
+        }>;
+        setLever: (pos: Pos, powered: boolean, opts?: {
+            dim?: string;
+        }) => Promise<{
+            pos: Pos;
+            dim: string;
+            changed: boolean;
+            powered: boolean;
+            state: BlockSnapshot["state"];
+        }>;
+        pulse: (pos: Pos, ticks?: number, opts?: {
+            dim?: string;
+        }) => Promise<{
+            pos: Pos;
+            dim: string;
+            powered: boolean;
+            offTick: number;
+        }>;
+        notifyNeighbors: (pos: Pos, opts?: {
+            dim?: string;
+        }) => Promise<{
+            pos: Pos;
+            dim: string;
+            notified: boolean;
+            state: BlockSnapshot["state"];
+        }>;
+    };
+    entity: {
+        spawn: (type: string, pos: Pos, opts?: EntitySpawnOptions) => Promise<{
+            spawned: boolean;
+            entity: EntitySnapshot;
+        }>;
+        getNbt: (uuid: string, opts?: {
+            dim?: string;
+        }) => Promise<{
+            entity: EntitySnapshot;
+            nbt: JsonNbt;
+        }>;
+        setNbt: (uuid: string, nbt: JsonNbt, opts?: {
+            dim?: string;
+            replace?: boolean;
+        }) => Promise<{
+            entity: EntitySnapshot;
+        }>;
+        teleport: (uuid: string, pos: Pos, opts?: {
+            dim?: string;
+            toDim?: string;
+            yaw?: number;
+            pitch?: number;
+            includeNbt?: boolean;
+        }) => Promise<{
+            teleported: boolean;
+            entity: EntitySnapshot;
+        }>;
+        remove: (uuid: string, opts?: {
+            dim?: string;
+            includeNbt?: boolean;
+        }) => Promise<{
+            removed: boolean;
+            entity: EntitySnapshot;
+        }>;
+        listItems: (box: Box, opts?: {
+            dim?: string;
+            item?: string;
+            includeNbt?: boolean;
+        }) => Promise<{
+            count: number;
+            items: EntitySnapshot[];
+        }>;
+        collectItems: (box: Box, opts?: {
+            dim?: string;
+            item?: string;
+            remove?: boolean;
+            includeNbt?: boolean;
+        }) => Promise<{
+            count: number;
+            removed: boolean;
+            items: EntitySnapshot[];
+        }>;
+    };
+    fixture: {
+        capture: (box: Box, opts?: {
+            dim?: string;
+            includeNbt?: boolean;
+        }) => Promise<FixtureJson>;
+        load: (fixture: FixtureJson, opts?: {
+            origin?: Pos;
+            dim?: string;
+            flags?: number;
+        }) => Promise<{
+            placed: number;
+            blockEntities: number;
+            dim: string;
+            origin: Pos;
         }>;
     };
     fluid: {
