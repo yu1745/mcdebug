@@ -27,4 +27,8 @@ object RpcErrors {
     const val INVALID_PREDICATE = -32012
     const val FLUID_NOT_FOUND = -32013
     const val FLUID_INDEX_OUT_OF_RANGE = -32014
+    const val STORAGE_NOT_FOUND = -32015
+    const val SNAPSHOT_NOT_FOUND = -32016
+    const val TRACE_NOT_FOUND = -32017
+    const val SCREEN_NOT_FOUND = -32018
 }

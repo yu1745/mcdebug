@@ -58,30 +58,31 @@ internal object FakePlayerPool {
 
     private val cache = HashMap<Pair<MinecraftServer, ServerWorld>, ServerPlayerEntity>()
 
-    fun get(server: MinecraftServer, world: ServerWorld): ServerPlayerEntity {
-        return cache.getOrPut(server to world) {
-            val p = ServerPlayerEntity(server, world, PROFILE)
-            // creative + invulnerable + flying so:
-            //   - the placed/used stack isn't decremented (creative mode)
-            //   - sound / GameEvent / onPlaced see a "creative" interactor
-            p.abilities.creativeMode = true
-            p.abilities.invulnerable = true
-            p.abilities.flying = true
-            p.setInvulnerable(true)
+    fun get(server: MinecraftServer, world: ServerWorld): ServerPlayerEntity =
+        cache.getOrPut(server to world) { create(server, world, PROFILE) }
 
-            // Install a no-op network handler so mod code that calls
-            // player.openHandledScreen() / player.sendMessageToClient() /
-            // Criteria.trigger() / etc. doesn't NPE on null networkHandler.
-            // Packets are silently dropped — no real client receives them.
-            val connection = ClientConnection(NetworkSide.CLIENTBOUND)
-            val handler = object : ServerPlayNetworkHandler(server, connection, p) {
-                override fun sendPacket(packet: Packet<*>) {
-                    // no-op: silently drop all outbound packets
-                }
+    fun create(server: MinecraftServer, world: ServerWorld, profile: GameProfile): ServerPlayerEntity {
+        val p = ServerPlayerEntity(server, world, profile)
+        // creative + invulnerable + flying so:
+        //   - the placed/used stack isn't decremented (creative mode)
+        //   - sound / GameEvent / onPlaced see a "creative" interactor
+        p.abilities.creativeMode = true
+        p.abilities.invulnerable = true
+        p.abilities.flying = true
+        p.setInvulnerable(true)
+
+        // Install a no-op network handler so mod code that calls
+        // player.openHandledScreen() / player.sendMessageToClient() /
+        // Criteria.trigger() / etc. doesn't NPE on null networkHandler.
+        // Packets are silently dropped — no real client receives them.
+        val connection = ClientConnection(NetworkSide.CLIENTBOUND)
+        val handler = object : ServerPlayNetworkHandler(server, connection, p) {
+            override fun sendPacket(packet: Packet<*>) {
+                // no-op: silently drop all outbound packets
             }
-            p.networkHandler = handler
-
-            p
         }
+        p.networkHandler = handler
+
+        return p
     }
 }

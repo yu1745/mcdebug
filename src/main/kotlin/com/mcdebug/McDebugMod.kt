@@ -4,8 +4,12 @@ import com.mcdebug.api.BlockEntityOps
 import com.mcdebug.api.CraftingOps
 import com.mcdebug.api.FluidOps
 import com.mcdebug.api.InventoryOps
+import com.mcdebug.api.ScreenOps
 import com.mcdebug.api.ScanOps
 import com.mcdebug.api.ServerOps
+import com.mcdebug.api.SnapshotOps
+import com.mcdebug.api.StorageOps
+import com.mcdebug.api.TraceOps
 import com.mcdebug.api.WorldOps
 import com.mcdebug.rpc.RpcDispatcher
 import com.mcdebug.rpc.RpcServer
@@ -61,12 +65,17 @@ object McDebugMod : DedicatedServerModInitializer {
             registerGroup("wait", WaitOps)
             registerGroup("fluid", FluidOps)
             registerGroup("craft", CraftingOps)
+            registerGroup("storage", StorageOps)
+            registerGroup("snapshot", SnapshotOps)
+            registerGroup("trace", TraceOps)
+            registerGroup("screen", ScreenOps)
         }
         dispatcher = d
         currentServer = server
 
         // Install the tick listener for wait.until. This is passive — it only observes server tick events.
         WaitOps.install()
+        TraceOps.install()
 
         rpcServer = RpcServer(d, ::portFilePath).also { it.start(server) }
         LOGGER.info("mcdebug RPC ready on 127.0.0.1:{}", rpcServer?.boundPort)
@@ -75,6 +84,8 @@ object McDebugMod : DedicatedServerModInitializer {
     private fun onServerStopping(server: MinecraftServer) {
         try {
             WaitOps.uninstall()
+            TraceOps.uninstall()
+            ScreenOps.clear()
             rpcServer?.stop()
         } catch (e: Exception) {
             LOGGER.warn("error stopping mcdebug", e)

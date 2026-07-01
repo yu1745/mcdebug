@@ -3,7 +3,22 @@ import { resolve } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { DebugApi } from './api.js';
 import { RpcClient, RpcClientOptions } from './client.js';
-import { ItemStackJson, JsonNbt, Pos, RichPos, pos as makePos } from './types.js';
+import {
+  Box,
+  ItemStackJson,
+  JsonNbt,
+  Pos,
+  RichPos,
+  ScreenSnapshot,
+  Side,
+  SnapshotCaptureOptions,
+  SnapshotDiffResult,
+  StorageGetResult,
+  StorageResource,
+  Target,
+  TraceResult,
+  pos as makePos,
+} from './types.js';
 
 export type TestFn = (ctx: TestContext) => Promise<void>;
 
@@ -485,4 +500,113 @@ export async function fluidGet(ctx: TestContext, pos: Pos, index: number) {
 
 export async function fluidExtract(ctx: TestContext, pos: Pos, amount: number, index: number): Promise<void> {
   await ctx.api.fluid.extract(pos, amount, { index });
+}
+
+export function blockTarget(pos: Pos, dim?: string): Target {
+  return { kind: 'block', pos, dim };
+}
+
+export function entityTarget(uuid: string, dim?: string): Target {
+  return { kind: 'entity', uuid, dim };
+}
+
+export function itemTarget(stack: ItemStackJson): Target {
+  return { kind: 'item', stack };
+}
+
+export async function expectStorageAmount(
+  ctx: TestContext,
+  target: Target,
+  handle: string,
+  expected: number,
+  opts: { side?: Side; resource?: StorageResource } = {},
+): Promise<void> {
+  const storage = await ctx.api.storage.get(target, handle, { side: opts.side });
+  const actual = storageAmount(storage, opts.resource);
+  if (actual !== expected) {
+    throw new Error(`expected ${handle} amount ${expected}, got ${actual}`);
+  }
+}
+
+export async function waitStorageAtLeast(
+  ctx: TestContext,
+  target: Target,
+  handle: string,
+  minimum: number,
+  opts: { side?: Side; resource?: StorageResource; timeoutTicks?: number; pollIntervalTicks?: number } = {},
+): Promise<number> {
+  const start = await ctx.api.server.status();
+  const timeoutTicks = opts.timeoutTicks ?? 200;
+  const pollIntervalTicks = Math.max(1, opts.pollIntervalTicks ?? 1);
+  let last = 0;
+
+  while (true) {
+    const storage = await ctx.api.storage.get(target, handle, { side: opts.side });
+    last = storageAmount(storage, opts.resource);
+    if (last >= minimum) return last;
+
+    const now = await ctx.api.server.status();
+    if (now.tick - start.tick >= timeoutTicks) {
+      throw new Error(`timeout waiting for ${handle} amount >= ${minimum}; last=${last}`);
+    }
+    await waitTicks(ctx, pollIntervalTicks);
+  }
+}
+
+export async function withTrace<T>(
+  ctx: TestContext,
+  options: SnapshotCaptureOptions & { intervalTicks?: number },
+  run: () => Promise<T>,
+): Promise<{ result: T; trace: TraceResult }> {
+  const started = await ctx.api.trace.start(options);
+  try {
+    const result = await run();
+    const trace = await ctx.api.trace.stop(started.traceId);
+    return { result, trace };
+  } catch (error) {
+    try {
+      const trace = await ctx.api.trace.stop(started.traceId);
+      if (error && typeof error === 'object') {
+        (error as { mcdebugTrace?: TraceResult }).mcdebugTrace = trace;
+      }
+    } catch {
+      // Keep the original test failure if trace cleanup also fails.
+    }
+    throw error;
+  }
+}
+
+export async function openMachineScreen(
+  ctx: TestContext,
+  pos: Pos,
+  opts: { dim?: string; side?: Side } = {},
+): Promise<ScreenSnapshot> {
+  return ctx.api.screen.openBlock(pos, { player: 'fake', ...opts });
+}
+
+export async function snapshotDiff(
+  ctx: TestContext,
+  before: JsonNbt,
+  after: JsonNbt,
+): Promise<SnapshotDiffResult> {
+  return ctx.api.snapshot.diff(before, after);
+}
+
+export function traceBoxAround(pos: Pos, radius = 1): Box {
+  return {
+    from: [pos[0] - radius, pos[1] - radius, pos[2] - radius] as const,
+    to: [pos[0] + radius, pos[1] + radius, pos[2] + radius] as const,
+  };
+}
+
+function storageAmount(storage: StorageGetResult, resource?: StorageResource): number {
+  if (storage.kind === 'energy') return storage.amount;
+  if (storage.kind === 'fluid') {
+    return storage.tanks
+      .filter((tank) => !resource || resource.kind !== 'fluid' || tank.fluid === resource.fluid)
+      .reduce((sum, tank) => sum + tank.amount, 0);
+  }
+  return storage.slots
+    .filter((slot) => !resource || resource.kind !== 'item' || slot.stack.item === resource.item)
+    .reduce((sum, slot) => sum + slot.stack.count, 0);
 }

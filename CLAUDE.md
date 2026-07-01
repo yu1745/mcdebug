@@ -1,6 +1,6 @@
 # mcdebug — Minecraft Debug Server Mod
 
-Fabric 1.20.1 + Kotlin Mod，提供 localhost JSON-RPC 服务，让 TypeScript CLI 远程读写世界/方块实体/物品栏，**用于 Mod 开发者用外部 TS runner 自动化测试自己的机器方块**。
+Fabric 1.20.1 + Kotlin Mod，提供 localhost JSON-RPC 服务，让 TypeScript CLI 远程读写世界/方块实体/物品栏/资源存储/快照/GUI，**用于 Mod 开发者用外部 TS runner 自动化测试自己的机器方块**。
 
 ```
 ┌─────────────────┐  JSON-RPC 2.0   ┌──────────────────┐
@@ -35,7 +35,7 @@ mc-debug-server/
     │   ├── McDebugMod.kt         # @Mod 入口，注册 server lifecycle 钩子
     │   ├── rpc/                  # 传输 + 协议层（JsonRpc/RpcServer/RpcDispatcher/RpcErrors/RpcHandler）
     │   ├── api/                  # WorldOps / BlockEntityOps / InventoryOps / CraftingOps / FluidOps
-    │   │                         #   ScanOps / ServerOps
+    │   │                         #   ScanOps / ServerOps / StorageOps / SnapshotOps / TraceOps / ScreenOps
     │   ├── wait/WaitOps.kt       # wait.until — 被动观察
     │   └── util/{NbtJson,ServerContext}.kt
     └── resources/
@@ -54,7 +54,11 @@ mc-debug-server/
   - `WaitOps` ↔ `wait.*`
   - `ScanOps` ↔ `scan.*`
   - `ServerOps` ↔ `server.*`
-- 错误码：JSON-RPC 标准 `-32700..-32603` + 自定义 `-32001..-32012`（在 `RpcErrors` 中）
+  - `StorageOps` ↔ `storage.*`
+  - `SnapshotOps` ↔ `snapshot.*`
+  - `TraceOps` ↔ `trace.*`
+  - `ScreenOps` ↔ `screen.*`
+- 错误码：JSON-RPC 标准 `-32700..-32603` + 自定义 `-32001..-32018`（在 `RpcErrors` 中）
 - 端口：默认 `25580`（高位、避开常用服务）
 
 ## 4. 端口解析顺序（两端统一）
@@ -86,6 +90,10 @@ pnpm install
 pnpm build                 # tsc 编译到 dist/
 node dist/cli.js --help    # 查看所有 CLI 命令
 node dist/cli.js status    # 调用 server.status RPC
+
+# npx 端（发布包或 GitHub 直装）
+npx -y @yu1745/mcdebug status
+npx -y github:yu1745/mcdebug raw storage.list '{"target":{"kind":"block","pos":[0,64,0]}}'
 ```
 
 ## 6. 添加新 RPC 方法的流程
@@ -94,7 +102,7 @@ node dist/cli.js status    # 调用 server.status RPC
 2. 错误抛出 `RpcException(code, message, data?)`（从 `RpcErrors` 选错误码）
 3. 类型在 `RpcHandlerGroup.methods(): Map<String, RpcHandler>` 注册
 4. 对应在 `mcdebug-client/src/api.ts` 的 `DebugApi` 加方法，参数与返回对齐
-5. CLI 命令在 `mcdebug-client/src/commands/<group>.ts` 注册
+5. CLI 命令在 `mcdebug-client/src/commands/<group>.ts` 注册；没有专用 CLI 子命令时，至少更新 `raw`/REPL help 和 README 的 `npx` 示例
 6. 重新 `pnpm build` 和 `./gradlew.bat build` 双端编译
 
 ## 7. Tick 设计原则
@@ -110,6 +118,7 @@ node dist/cli.js status    # 调用 server.status RPC
 - 改 TS：`pnpm build` 通过
 - 改 entrypoint/资源：手动 `./gradlew.bat runServer` 启动一次确认 mod 加载 + RPC 端口监听
 - 改了 API/CLI 协议：两端一起改，TS 端的 `DebugApi` 强类型签名是契约
+- 改了用户可见 RPC：更新 `README.md`、`mcdebug-client/src/commands/help-text.ts`，尤其要给 `npx ... raw namespace.method` 示例
 - 不要新增 Kotlin test DSL / Gradle plugin / 注解扫描测试入口；测试编排放在消费者项目的 TS dispatcher
 - 改 mcdebug 默认端口 / 协议层：先在 plan 文件里讨论再动
 
@@ -119,6 +128,7 @@ node dist/cli.js status    # 调用 server.status RPC
 - 实时看 server 日志：`run/logs/latest.log`（loom 写文件 + stdout）
 - Loom 缓存了旧 remap jar：清 `run/.fabric/processedMods/`，再 `./gradlew.bat build`
 - TS 端快速调试：`node dist/cli.js raw world.getBlock '{"pos":[0,64,0]}'`
+- npx 快速调试：`npx -y github:yu1745/mcdebug raw storage.list '{"target":{"kind":"block","pos":[0,64,0]}}'`
 
 ## 10. 版本更新规则
 
@@ -149,7 +159,7 @@ node scripts/set-version.mjs X.Y.Z
 □ git tag -a vX.Y.Z -m "..."
 □ git push origin main && git push origin vX.Y.Z
 □ gh run watch（确认 CI 成功）
-□ rm -rf ~/.npm/_npx/*mcdebug* && npx yu1745/mcdebug --version ← 确认 X.Y.Z
+□ rm -rf ~/.npm/_npx/*mcdebug* && npx -y github:yu1745/mcdebug --version ← 确认 X.Y.Z
 ```
 
 ### 踩过的坑
@@ -163,5 +173,6 @@ node scripts/set-version.mjs X.Y.Z
 - `wait.until` 在断连时不会主动取消服务端回调，依赖 tick listener 的 `future.isDone` 自检
 - `ScanOps.countByBlock` 在 box 很大时是 O(N)，加 chunk 进度回调再说
 - MCP adapter 没做（对话中"Layer 4"）
-- GUI/FakePlayer 没做（对话中"第二阶段"）
+- 专用 CLI 子命令暂未覆盖 `storage.*` / `snapshot.*` / `trace.*` / `screen.*`，目前通过 `raw`、REPL 和 TS `DebugApi` 调用
+- 自定义 storage adapter SPI 没做；特殊资源类型后续扩展
 - 鉴权 / 远程连接 没做

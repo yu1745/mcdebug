@@ -1,6 +1,6 @@
 import { DebugApi } from './api.js';
 import { RpcClientOptions } from './client.js';
-import { ItemStackJson, JsonNbt, Pos, RichPos } from './types.js';
+import { Box, ItemStackJson, JsonNbt, Pos, RichPos, ScreenSnapshot, Side, SnapshotCaptureOptions, SnapshotDiffResult, StorageResource, Target, TraceResult } from './types.js';
 export type TestFn = (ctx: TestContext) => Promise<void>;
 export interface TestCase {
     name: string;
@@ -127,3 +127,28 @@ export declare function fluidGet(ctx: TestContext, pos: Pos, index: number): Pro
     capacity: number;
 }>;
 export declare function fluidExtract(ctx: TestContext, pos: Pos, amount: number, index: number): Promise<void>;
+export declare function blockTarget(pos: Pos, dim?: string): Target;
+export declare function entityTarget(uuid: string, dim?: string): Target;
+export declare function itemTarget(stack: ItemStackJson): Target;
+export declare function expectStorageAmount(ctx: TestContext, target: Target, handle: string, expected: number, opts?: {
+    side?: Side;
+    resource?: StorageResource;
+}): Promise<void>;
+export declare function waitStorageAtLeast(ctx: TestContext, target: Target, handle: string, minimum: number, opts?: {
+    side?: Side;
+    resource?: StorageResource;
+    timeoutTicks?: number;
+    pollIntervalTicks?: number;
+}): Promise<number>;
+export declare function withTrace<T>(ctx: TestContext, options: SnapshotCaptureOptions & {
+    intervalTicks?: number;
+}, run: () => Promise<T>): Promise<{
+    result: T;
+    trace: TraceResult;
+}>;
+export declare function openMachineScreen(ctx: TestContext, pos: Pos, opts?: {
+    dim?: string;
+    side?: Side;
+}): Promise<ScreenSnapshot>;
+export declare function snapshotDiff(ctx: TestContext, before: JsonNbt, after: JsonNbt): Promise<SnapshotDiffResult>;
+export declare function traceBoxAround(pos: Pos, radius?: number): Box;

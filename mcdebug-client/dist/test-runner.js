@@ -3,7 +3,7 @@ import { resolve } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { DebugApi } from './api.js';
 import { RpcClient } from './client.js';
-import { pos as makePos } from './types.js';
+import { pos as makePos, } from './types.js';
 export function createTestRunner(options = {}) {
     const tests = [];
     return {
@@ -386,4 +386,81 @@ export async function fluidGet(ctx, pos, index) {
 }
 export async function fluidExtract(ctx, pos, amount, index) {
     await ctx.api.fluid.extract(pos, amount, { index });
+}
+export function blockTarget(pos, dim) {
+    return { kind: 'block', pos, dim };
+}
+export function entityTarget(uuid, dim) {
+    return { kind: 'entity', uuid, dim };
+}
+export function itemTarget(stack) {
+    return { kind: 'item', stack };
+}
+export async function expectStorageAmount(ctx, target, handle, expected, opts = {}) {
+    const storage = await ctx.api.storage.get(target, handle, { side: opts.side });
+    const actual = storageAmount(storage, opts.resource);
+    if (actual !== expected) {
+        throw new Error(`expected ${handle} amount ${expected}, got ${actual}`);
+    }
+}
+export async function waitStorageAtLeast(ctx, target, handle, minimum, opts = {}) {
+    const start = await ctx.api.server.status();
+    const timeoutTicks = opts.timeoutTicks ?? 200;
+    const pollIntervalTicks = Math.max(1, opts.pollIntervalTicks ?? 1);
+    let last = 0;
+    while (true) {
+        const storage = await ctx.api.storage.get(target, handle, { side: opts.side });
+        last = storageAmount(storage, opts.resource);
+        if (last >= minimum)
+            return last;
+        const now = await ctx.api.server.status();
+        if (now.tick - start.tick >= timeoutTicks) {
+            throw new Error(`timeout waiting for ${handle} amount >= ${minimum}; last=${last}`);
+        }
+        await waitTicks(ctx, pollIntervalTicks);
+    }
+}
+export async function withTrace(ctx, options, run) {
+    const started = await ctx.api.trace.start(options);
+    try {
+        const result = await run();
+        const trace = await ctx.api.trace.stop(started.traceId);
+        return { result, trace };
+    }
+    catch (error) {
+        try {
+            const trace = await ctx.api.trace.stop(started.traceId);
+            if (error && typeof error === 'object') {
+                error.mcdebugTrace = trace;
+            }
+        }
+        catch {
+            // Keep the original test failure if trace cleanup also fails.
+        }
+        throw error;
+    }
+}
+export async function openMachineScreen(ctx, pos, opts = {}) {
+    return ctx.api.screen.openBlock(pos, { player: 'fake', ...opts });
+}
+export async function snapshotDiff(ctx, before, after) {
+    return ctx.api.snapshot.diff(before, after);
+}
+export function traceBoxAround(pos, radius = 1) {
+    return {
+        from: [pos[0] - radius, pos[1] - radius, pos[2] - radius],
+        to: [pos[0] + radius, pos[1] + radius, pos[2] + radius],
+    };
+}
+function storageAmount(storage, resource) {
+    if (storage.kind === 'energy')
+        return storage.amount;
+    if (storage.kind === 'fluid') {
+        return storage.tanks
+            .filter((tank) => !resource || resource.kind !== 'fluid' || tank.fluid === resource.fluid)
+            .reduce((sum, tank) => sum + tank.amount, 0);
+    }
+    return storage.slots
+        .filter((slot) => !resource || resource.kind !== 'item' || slot.stack.item === resource.item)
+        .reduce((sum, slot) => sum + slot.stack.count, 0);
 }

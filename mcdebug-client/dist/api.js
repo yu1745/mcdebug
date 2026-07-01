@@ -160,6 +160,56 @@ export class DebugApi {
     };
     /** tick is intentionally not exposed: server drives ticks, client never advances them. */
     tick = undefined;
+    storage = {
+        list: (target, opts) => this.rpc.call('storage.list', { target, side: opts?.side }),
+        get: (target, handle, opts) => this.rpc.call('storage.get', { target, handle, side: opts?.side }),
+        insert: (target, handle, resource, amount, opts) => this.rpc.call('storage.insert', {
+            target,
+            handle,
+            resource,
+            amount,
+            side: opts?.side,
+            simulate: opts?.simulate,
+        }),
+        extract: (target, handle, resource, amount, opts) => this.rpc.call('storage.extract', {
+            target,
+            handle,
+            resource,
+            amount,
+            side: opts?.side,
+            simulate: opts?.simulate,
+        }),
+        transfer: (from, to, resource, amount, opts) => this.rpc.call('storage.transfer', {
+            from,
+            to,
+            resource,
+            amount,
+            fromSide: opts?.fromSide,
+            toSide: opts?.toSide,
+            simulate: opts?.simulate,
+        }),
+    };
+    snapshot = {
+        capture: (options) => this.rpc.call('snapshot.capture', options),
+        diff: (before, after) => this.rpc.call('snapshot.diff', { before, after }),
+    };
+    trace = {
+        start: (options) => this.rpc.call('trace.start', options),
+        stop: (traceId) => this.rpc.call('trace.stop', { traceId }),
+        get: (traceId) => this.rpc.call('trace.get', { traceId }),
+    };
+    screen = {
+        openBlock: (pos, opts) => this.rpc.call('screen.openBlock', {
+            pos,
+            dim: opts?.dim,
+            player: opts?.player,
+            side: opts?.side,
+        }),
+        snapshot: (screenId) => this.rpc.call('screen.snapshot', { screenId }),
+        clickSlot: (screenId, slot, button, actionType) => this.rpc.call('screen.clickSlot', { screenId, slot, button, actionType }),
+        quickMove: (screenId, slot) => this.rpc.call('screen.quickMove', { screenId, slot }),
+        close: (screenId) => this.rpc.call('screen.close', { screenId }),
+    };
     fluid = {
         info: (p, opts) => this.rpc.call('fluid.info', { pos: p, side: opts?.side, dim: opts?.dim }),
         get: (p, opts) => this.rpc.call('fluid.get', { pos: p, side: opts?.side, index: opts?.index, dim: opts?.dim }),

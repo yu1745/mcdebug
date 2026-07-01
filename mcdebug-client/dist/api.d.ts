@@ -1,5 +1,5 @@
 import { RpcClient } from './client.js';
-import { BlockSnapshot, BlockStateSpec, Box, ItemStackJson, JsonNbt, Pos, ServerStatus, WaitResult } from './types.js';
+import { BlockSnapshot, BlockStateSpec, Box, ItemStackJson, JsonNbt, Pos, ScreenSnapshot, ServerStatus, Side, SnapshotCaptureOptions, SnapshotDiffResult, StorageGetResult, StorageListResult, StorageMoveResult, StorageResource, Target, TraceResult, TraceStartOptions, TraceStartResult, WaitResult } from './types.js';
 /**
  * High-level typed API on top of RpcClient.
  * Matches the methods described in C:\Users\wangyu\.claude\plans\typed-wandering-wall.md
@@ -257,6 +257,50 @@ export declare class DebugApi {
     };
     /** tick is intentionally not exposed: server drives ticks, client never advances them. */
     tick: never;
+    storage: {
+        list: (target: Target, opts?: {
+            side?: Side;
+        }) => Promise<StorageListResult>;
+        get: (target: Target, handle: string, opts?: {
+            side?: Side;
+        }) => Promise<StorageGetResult>;
+        insert: (target: Target, handle: string, resource: StorageResource, amount: number, opts?: {
+            side?: Side;
+            simulate?: boolean;
+        }) => Promise<StorageMoveResult>;
+        extract: (target: Target, handle: string, resource: StorageResource, amount: number, opts?: {
+            side?: Side;
+            simulate?: boolean;
+        }) => Promise<StorageMoveResult>;
+        transfer: (from: Target, to: Target, resource: StorageResource, amount: number, opts?: {
+            fromSide?: Side;
+            toSide?: Side;
+            simulate?: boolean;
+        }) => Promise<StorageMoveResult>;
+    };
+    snapshot: {
+        capture: (options: SnapshotCaptureOptions) => Promise<JsonNbt>;
+        diff: (before: JsonNbt, after: JsonNbt) => Promise<SnapshotDiffResult>;
+    };
+    trace: {
+        start: (options: TraceStartOptions) => Promise<TraceStartResult>;
+        stop: (traceId: string) => Promise<TraceResult>;
+        get: (traceId: string) => Promise<TraceResult>;
+    };
+    screen: {
+        openBlock: (pos: Pos, opts?: {
+            dim?: string;
+            player?: "fake";
+            side?: Side;
+        }) => Promise<ScreenSnapshot>;
+        snapshot: (screenId: string) => Promise<ScreenSnapshot>;
+        clickSlot: (screenId: string, slot: number, button: number, actionType: "pickup" | "quick_move" | "swap" | "clone" | "throw" | "quick_craft" | "pickup_all") => Promise<ScreenSnapshot>;
+        quickMove: (screenId: string, slot: number) => Promise<ScreenSnapshot>;
+        close: (screenId: string) => Promise<{
+            screenId: string;
+            closed: boolean;
+        }>;
+    };
     fluid: {
         info: (p: Pos, opts?: {
             side?: string;

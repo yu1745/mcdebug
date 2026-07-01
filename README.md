@@ -2,8 +2,9 @@
 
 Fabric 1.20.1 + Kotlin mod that exposes a localhost JSON-RPC server, plus a
 TypeScript CLI / test runner, so mod developers can automate tests of their
-machine blocks by reading/writing the world, block entities, and inventories
-from an external TS process.
+machine blocks by reading/writing the world, block entities, inventories,
+resource storages, snapshots, traces, and screen handlers from an external TS
+process.
 
 ```
 ┌─────────────────┐  JSON-RPC 2.0   ┌──────────────────┐
@@ -31,6 +32,111 @@ node dist/cli.js --help
 For setup of the Fabric project itself, see the
 [Fabric Documentation](https://docs.fabricmc.net/develop/getting-started/creating-a-project#setting-up).
 
+## CLI and npx usage
+
+The CLI talks to a running mcdebug Fabric server over localhost JSON-RPC. It
+finds the port from `--port`, `MCDEBUG_PORT`, `mcdebug/port`, then falls back to
+`25580`.
+
+```bash
+# local checkout
+node mcdebug-client/dist/cli.js status
+node mcdebug-client/dist/cli.js raw world.getBlock '{"pos":[0,64,0]}'
+
+# npx, once the package version is published
+npx -y @yu1745/mcdebug status
+npx -y @yu1745/mcdebug raw storage.list '{"target":{"kind":"block","pos":[0,64,0]}}'
+
+# npx directly from GitHub, useful before an npm release
+npx -y github:yu1745/mcdebug status
+npx -y github:yu1745/mcdebug raw snapshot.capture '{"box":{"from":[0,64,0],"to":[2,66,2]},"include":["block","inventory"]}'
+```
+
+Not every RPC has a dedicated top-level CLI command. Use `mcdebug raw
+<namespace.method> <json>` for the low-level machine testing APIs:
+
+| namespace | purpose |
+|---|---|
+| `storage.*` | unified item/fluid/energy access for blocks, entities, and item stacks |
+| `snapshot.*` | capture and structurally diff world/resource/entity state |
+| `trace.*` | capture snapshots on natural server ticks for failure diagnosis |
+| `screen.*` | open and drive real server `ScreenHandler`s with a fake player |
+
+Examples:
+
+```bash
+# List available storage adapters on a block.
+mcdebug raw storage.list '{"target":{"kind":"block","pos":[0,64,0]},"side":"north"}'
+
+# Insert items through a storage handle.
+mcdebug raw storage.insert '{"target":{"kind":"block","pos":[0,64,0]},"handle":"vanilla:inventory","resource":{"kind":"item","item":"minecraft:coal"},"amount":8}'
+
+# Read a water bucket as an item target and extract its Fabric fluid content.
+mcdebug raw storage.extract '{"target":{"kind":"item","stack":{"item":"minecraft:water_bucket","count":1}},"handle":"fabric:fluid","resource":{"kind":"fluid","fluid":"minecraft:water"},"amount":81000}'
+
+# Start a trace, wait using normal server ticks, then stop it.
+mcdebug raw trace.start '{"box":{"from":[0,64,0],"to":[0,64,0]},"include":["block","inventory","blockEntityNbt"],"intervalTicks":1}'
+mcdebug wait-until --expr 'tick >= 200'
+mcdebug raw trace.stop '{"traceId":"<trace id from start>"}'
+
+# Open a machine/chest/furnace screen and inspect its slots/properties.
+mcdebug raw screen.openBlock '{"pos":[0,64,0],"player":"fake"}'
+mcdebug raw screen.quickMove '{"screenId":"<screen id>","slot":0}'
+mcdebug raw screen.close '{"screenId":"<screen id>"}'
+```
+
+The server still never exposes `tick.run` or `tick.runUntil`. `trace.*` and
+`wait.until` observe natural Minecraft ticks from the real Fabric server.
+
+## Universal machine APIs
+
+New tests should prefer the generic machine-level APIs over mod-specific NBT
+when possible.
+
+```ts
+type Target =
+  | { kind: "block"; pos: Pos; dim?: string }
+  | { kind: "entity"; uuid: string; dim?: string }
+  | { kind: "item"; stack: ItemStackJson };
+
+type Side = "up" | "down" | "north" | "south" | "east" | "west" | null;
+```
+
+`storage.*` uses this adapter order:
+
+1. Vanilla `Inventory`
+2. Fabric Transfer `ItemStorage`
+3. Fabric Transfer `FluidStorage`
+4. Team Reborn `EnergyStorage`
+
+Supported RPCs:
+
+| RPC | summary |
+|---|---|
+| `storage.list(target, opts?)` | enumerate handles such as `vanilla:inventory`, `fabric:item`, `fabric:fluid`, `teamreborn:energy` |
+| `storage.get(target, handle, opts?)` | read slots, tanks, or energy amount/capacity |
+| `storage.insert/extract(...)` | move item/fluid/energy into or out of one target, with `simulate` support |
+| `storage.transfer(...)` | transfer a resource between two targets |
+| `snapshot.capture(...)` | capture `block`, `blockEntityNbt`, `inventory`, `fluid`, `energy`, and/or `entity` state |
+| `snapshot.diff(before, after)` | structural JSON diff, intentionally business-logic agnostic |
+| `trace.start/stop/get(...)` | record snapshot frames every N natural ticks |
+| `screen.openBlock/snapshot/clickSlot/quickMove/close(...)` | drive real server-side GUI handlers |
+
+TypeScript usage:
+
+```ts
+import { DebugApi, RpcClient } from "@yu1745/mcdebug";
+
+const api = new DebugApi(new RpcClient());
+const target = { kind: "block", pos: [0, 64, 0] as const };
+
+const handles = await api.storage.list(target, { side: "north" });
+const before = await api.snapshot.capture({
+  box: { from: [0, 64, 0], to: [0, 64, 0] },
+  include: ["block", "inventory", "energy"],
+});
+```
+
 ## Test runner helpers
 
 The test runner (`mcdebug-client/src/test-runner.ts`) exports helpers that wrap
@@ -41,6 +147,20 @@ with an isolated `origin` and cleared area. Import them in your `*.test.ts`:
 import { defineTest, defineTests, place, setBlocks, waitUntil,
          beFieldGreaterThan, invItemEquals, assertBlockId } from "@yu1745/mcdebug";
 ```
+
+### Generic storage / trace / screen helpers
+
+| helper | description |
+|---|---|
+| `blockTarget(pos, dim?)` | build a block `Target` |
+| `entityTarget(uuid, dim?)` | build an entity `Target` |
+| `itemTarget(stack)` | build an item-stack `Target` |
+| `expectStorageAmount(ctx, target, handle, amount, opts?)` | assert item/fluid/energy amount |
+| `waitStorageAtLeast(ctx, target, handle, amount, opts?)` | poll storage via natural ticks until enough resource exists |
+| `withTrace(ctx, options, fn)` | run `fn` and attach the stopped trace to failures |
+| `openMachineScreen(ctx, pos, opts?)` | open a block screen with the fake player |
+| `snapshotDiff(ctx, before, after)` | call `snapshot.diff` |
+| `traceBoxAround(pos, radius?)` | convenience box for trace/snapshot capture |
 
 ### Block read / assertions
 

@@ -6,7 +6,19 @@ import {
   ItemStackJson,
   JsonNbt,
   Pos,
+  ScreenSnapshot,
   ServerStatus,
+  Side,
+  SnapshotCaptureOptions,
+  SnapshotDiffResult,
+  StorageGetResult,
+  StorageListResult,
+  StorageMoveResult,
+  StorageResource,
+  Target,
+  TraceResult,
+  TraceStartOptions,
+  TraceStartResult,
   WaitResult,
 } from './types.js';
 
@@ -340,6 +352,98 @@ export class DebugApi {
 
   /** tick is intentionally not exposed: server drives ticks, client never advances them. */
   tick = undefined as never;
+
+  storage = {
+    list: (target: Target, opts?: { side?: Side }) =>
+      this.rpc.call<StorageListResult>('storage.list', { target, side: opts?.side }),
+    get: (target: Target, handle: string, opts?: { side?: Side }) =>
+      this.rpc.call<StorageGetResult>('storage.get', { target, handle, side: opts?.side }),
+    insert: (
+      target: Target,
+      handle: string,
+      resource: StorageResource,
+      amount: number,
+      opts?: { side?: Side; simulate?: boolean },
+    ) =>
+      this.rpc.call<StorageMoveResult>('storage.insert', {
+        target,
+        handle,
+        resource,
+        amount,
+        side: opts?.side,
+        simulate: opts?.simulate,
+      }),
+    extract: (
+      target: Target,
+      handle: string,
+      resource: StorageResource,
+      amount: number,
+      opts?: { side?: Side; simulate?: boolean },
+    ) =>
+      this.rpc.call<StorageMoveResult>('storage.extract', {
+        target,
+        handle,
+        resource,
+        amount,
+        side: opts?.side,
+        simulate: opts?.simulate,
+      }),
+    transfer: (
+      from: Target,
+      to: Target,
+      resource: StorageResource,
+      amount: number,
+      opts?: { fromSide?: Side; toSide?: Side; simulate?: boolean },
+    ) =>
+      this.rpc.call<StorageMoveResult>('storage.transfer', {
+        from,
+        to,
+        resource,
+        amount,
+        fromSide: opts?.fromSide,
+        toSide: opts?.toSide,
+        simulate: opts?.simulate,
+      }),
+  };
+
+  snapshot = {
+    capture: (options: SnapshotCaptureOptions) =>
+      this.rpc.call<JsonNbt>('snapshot.capture', options),
+    diff: (before: JsonNbt, after: JsonNbt) =>
+      this.rpc.call<SnapshotDiffResult>('snapshot.diff', { before, after }),
+  };
+
+  trace = {
+    start: (options: TraceStartOptions) =>
+      this.rpc.call<TraceStartResult>('trace.start', options),
+    stop: (traceId: string) =>
+      this.rpc.call<TraceResult>('trace.stop', { traceId }),
+    get: (traceId: string) =>
+      this.rpc.call<TraceResult>('trace.get', { traceId }),
+  };
+
+  screen = {
+    openBlock: (pos: Pos, opts?: { dim?: string; player?: 'fake'; side?: Side }) =>
+      this.rpc.call<ScreenSnapshot>('screen.openBlock', {
+        pos,
+        dim: opts?.dim,
+        player: opts?.player,
+        side: opts?.side,
+      }),
+    snapshot: (screenId: string) =>
+      this.rpc.call<ScreenSnapshot>('screen.snapshot', { screenId }),
+    clickSlot: (
+      screenId: string,
+      slot: number,
+      button: number,
+      actionType: 'pickup' | 'quick_move' | 'swap' | 'clone' | 'throw' | 'quick_craft' | 'pickup_all',
+    ) =>
+      this.rpc.call<ScreenSnapshot>('screen.clickSlot', { screenId, slot, button, actionType }),
+    quickMove: (screenId: string, slot: number) =>
+      this.rpc.call<ScreenSnapshot>('screen.quickMove', { screenId, slot }),
+    close: (screenId: string) =>
+      this.rpc.call<{ screenId: string; closed: boolean }>('screen.close', { screenId }),
+  };
 
   fluid = {
     info: (
