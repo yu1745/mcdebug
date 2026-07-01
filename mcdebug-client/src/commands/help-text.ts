@@ -15,6 +15,9 @@ Examples:
   mcdebug place --x 0 --y 64 --z 0 --block minecraft:furnace --state lit=true
   mcdebug place-as-player --x 0 --y 65 --z 0 --block minecraft:furnace --face down
   mcdebug inv insert --x 0 --y 64 --z 0 --item minecraft:coal --count 8
+  mcdebug storage list --x 0 --y 64 --z 0
+  mcdebug trace start --from 0,64,0 --to 2,66,2 --include block,inventory
+  mcdebug screen open-block --x 0 --y 64 --z 0
   mcdebug wait-until --expr 'block[0,64,0].id == "minecraft:water"'
   mcdebug raw world.getBlock '{"pos":[0,64,0]}'
   mcdebug craft do --grid @grid.json --recipe-id ic2_120:advanced_batpack
@@ -412,6 +415,7 @@ Available methods:
   dbg.snapshot.capture(opts)       dbg.snapshot.diff(before, after)
   dbg.trace.start(opts)            dbg.trace.stop(traceId)        dbg.trace.get(traceId)
   dbg.screen.openBlock(pos, opts?) dbg.screen.snapshot(screenId)
+  dbg.screen.setPlayerSlot(screenId, playerSlot, stack)
   dbg.screen.clickSlot(screenId, slot, button, actionType)
   dbg.screen.quickMove(screenId, slot)   dbg.screen.close(screenId)
   dbg.wait.until(predicate, opts?)
@@ -451,13 +455,12 @@ Available RPC methods (namespace.method):
   snapshot.capture            snapshot.diff
   trace.start                 trace.stop                   trace.get
   screen.openBlock            screen.snapshot              screen.clickSlot
-  screen.quickMove            screen.close
+  screen.setPlayerSlot        screen.quickMove             screen.close
   craft.craft                 craft.find
   server.runCommand
 
 Methods with no dedicated CLI command (use raw to call):
   world.setBlocks   world.getRegion   world.selectBlocks   inv.getSize
-  storage.*         snapshot.*        trace.*               screen.*
 
 Examples:
   mcdebug raw world.getBlock '{"pos":[0,64,0]}'

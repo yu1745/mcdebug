@@ -150,5 +150,6 @@ export declare function openMachineScreen(ctx: TestContext, pos: Pos, opts?: {
     dim?: string;
     side?: Side;
 }): Promise<ScreenSnapshot>;
+export declare function setScreenPlayerSlot(ctx: TestContext, screenId: string, playerSlot: number, stack: ItemStackJson): Promise<ScreenSnapshot>;
 export declare function snapshotDiff(ctx: TestContext, before: JsonNbt, after: JsonNbt): Promise<SnapshotDiffResult>;
 export declare function traceBoxAround(pos: Pos, radius?: number): Box;

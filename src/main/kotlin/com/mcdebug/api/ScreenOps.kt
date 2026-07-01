@@ -27,6 +27,7 @@ object ScreenOps : RpcHandlerGroup {
     override fun methods(): Map<String, RpcHandler> = mapOf(
         "openBlock" to ::openBlock,
         "snapshot" to ::snapshot,
+        "setPlayerSlot" to ::setPlayerSlot,
         "clickSlot" to ::clickSlot,
         "quickMove" to ::quickMove,
         "close" to ::close,
@@ -70,6 +71,22 @@ object ScreenOps : RpcHandlerGroup {
     private fun snapshot(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
         RpcContext.onServer(server) {
             val session = session(params)
+            screenSnapshot(session)
+        }
+
+    private fun setPlayerSlot(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
+        RpcContext.onServer(server) {
+            val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
+            val session = session(p)
+            val slot = p.requireLong("slot").toInt()
+            if (slot !in 0 until 36) {
+                throw RpcException(RpcErrors.INVALID_PARAMS, "player inventory slot must be in 0..35, got $slot")
+            }
+            val stack = itemStackFromJson(server, p.requireObject("stack"))
+            requireUsable(session)
+            session.player.inventory.setStack(slot, stack)
+            session.player.inventory.markDirty()
+            session.handler.sendContentUpdates()
             screenSnapshot(session)
         }
 
@@ -210,6 +227,14 @@ object ScreenOps : RpcHandlerGroup {
                     "invalid actionType: $value (allowed: ${SlotActionType.entries.joinToString { it.name.lowercase() }})"
                 )
             }
+
+    private fun itemStackFromJson(server: MinecraftServer, obj: JsonObject) =
+        ServerContext.itemStackFromJson(
+            server,
+            obj.getStringOrNull("item") ?: "minecraft:air",
+            obj.getIntOr("count", 0),
+            obj.get("nbt"),
+        )
 
     private fun throwScreenNotFound(message: String, screenId: String?): Nothing {
         val data = JsonObject().apply {

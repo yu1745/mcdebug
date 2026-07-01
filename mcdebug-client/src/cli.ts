@@ -12,7 +12,11 @@ import { registerGuideCommand } from './commands/guide.js';
 import { registerInvCommands } from './commands/inv.js';
 import { registerJarCommand } from './commands/jar.js';
 import { startRepl } from './commands/repl.js';
+import { registerScreenCommands } from './commands/screen.js';
 import { registerServerCommand } from './commands/server.js';
+import { registerSnapshotCommands } from './commands/snapshot.js';
+import { registerStorageCommands } from './commands/storage.js';
+import { registerTraceCommands } from './commands/trace.js';
 import { registerUseCommand } from './commands/use.js';
 import { registerWaitCommand } from './commands/wait.js';
 import { registerWorldCommands } from './commands/world.js';
@@ -58,6 +62,10 @@ registerJarCommand(program);
 registerEntityCommands(program, getApi);
 registerInteractEntityCommand(program, getApi);
 registerUseCommand(program, getApi);
+registerStorageCommands(program, getApi);
+registerSnapshotCommands(program, getApi);
+registerTraceCommands(program, getApi);
+registerScreenCommands(program, getApi);
 
 program
   .command('repl')

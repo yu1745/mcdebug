@@ -443,6 +443,9 @@ export async function withTrace(ctx, options, run) {
 export async function openMachineScreen(ctx, pos, opts = {}) {
     return ctx.api.screen.openBlock(pos, { player: 'fake', ...opts });
 }
+export async function setScreenPlayerSlot(ctx, screenId, playerSlot, stack) {
+    return ctx.api.screen.setPlayerSlot(screenId, playerSlot, stack);
+}
 export async function snapshotDiff(ctx, before, after) {
     return ctx.api.snapshot.diff(before, after);
 }

@@ -584,6 +584,15 @@ export async function openMachineScreen(
   return ctx.api.screen.openBlock(pos, { player: 'fake', ...opts });
 }
 
+export async function setScreenPlayerSlot(
+  ctx: TestContext,
+  screenId: string,
+  playerSlot: number,
+  stack: ItemStackJson,
+): Promise<ScreenSnapshot> {
+  return ctx.api.screen.setPlayerSlot(screenId, playerSlot, stack);
+}
+
 export async function snapshotDiff(
   ctx: TestContext,
   before: JsonNbt,

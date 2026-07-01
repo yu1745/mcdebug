@@ -45,15 +45,15 @@ node mcdebug-client/dist/cli.js raw world.getBlock '{"pos":[0,64,0]}'
 
 # npx, once the package version is published
 npx -y @yu1745/mcdebug status
-npx -y @yu1745/mcdebug raw storage.list '{"target":{"kind":"block","pos":[0,64,0]}}'
+npx -y @yu1745/mcdebug storage list --x 0 --y 64 --z 0
 
 # npx directly from GitHub, useful before an npm release
 npx -y github:yu1745/mcdebug status
-npx -y github:yu1745/mcdebug raw snapshot.capture '{"box":{"from":[0,64,0],"to":[2,66,2]},"include":["block","inventory"]}'
+npx -y github:yu1745/mcdebug snapshot capture --from 0,64,0 --to 2,66,2 --include block,inventory
 ```
 
-Not every RPC has a dedicated top-level CLI command. Use `mcdebug raw
-<namespace.method> <json>` for the low-level machine testing APIs:
+Most machine testing APIs have dedicated top-level CLI commands. Use `mcdebug
+raw <namespace.method> <json>` for low-level or rarely used RPCs.
 
 | namespace | purpose |
 |---|---|
@@ -66,23 +66,24 @@ Examples:
 
 ```bash
 # List available storage adapters on a block.
-mcdebug raw storage.list '{"target":{"kind":"block","pos":[0,64,0]},"side":"north"}'
+mcdebug storage list --x 0 --y 64 --z 0 --side north
 
 # Insert items through a storage handle.
-mcdebug raw storage.insert '{"target":{"kind":"block","pos":[0,64,0]},"handle":"vanilla:inventory","resource":{"kind":"item","item":"minecraft:coal"},"amount":8}'
+mcdebug storage insert --x 0 --y 64 --z 0 --handle vanilla:inventory --item minecraft:coal --amount 8
 
 # Read a water bucket as an item target and extract its Fabric fluid content.
-mcdebug raw storage.extract '{"target":{"kind":"item","stack":{"item":"minecraft:water_bucket","count":1}},"handle":"fabric:fluid","resource":{"kind":"fluid","fluid":"minecraft:water"},"amount":81000}'
+mcdebug storage extract --target '{"kind":"item","stack":{"item":"minecraft:water_bucket","count":1}}' --handle fabric:fluid --fluid minecraft:water --amount 81000
 
 # Start a trace, wait using normal server ticks, then stop it.
-mcdebug raw trace.start '{"box":{"from":[0,64,0],"to":[0,64,0]},"include":["block","inventory","blockEntityNbt"],"intervalTicks":1}'
+mcdebug trace start --from 0,64,0 --to 0,64,0 --include block,inventory,blockEntityNbt --interval-ticks 1
 mcdebug wait-until --expr 'tick >= 200'
-mcdebug raw trace.stop '{"traceId":"<trace id from start>"}'
+mcdebug trace stop --trace-id "<trace id from start>"
 
 # Open a machine/chest/furnace screen and inspect its slots/properties.
-mcdebug raw screen.openBlock '{"pos":[0,64,0],"player":"fake"}'
-mcdebug raw screen.quickMove '{"screenId":"<screen id>","slot":0}'
-mcdebug raw screen.close '{"screenId":"<screen id>"}'
+mcdebug screen open-block --x 0 --y 64 --z 0
+mcdebug screen set-player-slot --screen-id "<screen id>" --slot 0 --item minecraft:cobblestone --count 1
+mcdebug screen quick-move --screen-id "<screen id>" --slot 34
+mcdebug screen close --screen-id "<screen id>"
 ```
 
 The server still never exposes `tick.run` or `tick.runUntil`. `trace.*` and
@@ -120,7 +121,7 @@ Supported RPCs:
 | `snapshot.capture(...)` | capture `block`, `blockEntityNbt`, `inventory`, `fluid`, `energy`, and/or `entity` state |
 | `snapshot.diff(before, after)` | structural JSON diff, intentionally business-logic agnostic |
 | `trace.start/stop/get(...)` | record snapshot frames every N natural ticks |
-| `screen.openBlock/snapshot/clickSlot/quickMove/close(...)` | drive real server-side GUI handlers |
+| `screen.openBlock/snapshot/setPlayerSlot/clickSlot/quickMove/close(...)` | drive real server-side GUI handlers |
 
 TypeScript usage:
 
@@ -159,6 +160,7 @@ import { defineTest, defineTests, place, setBlocks, waitUntil,
 | `waitStorageAtLeast(ctx, target, handle, amount, opts?)` | poll storage via natural ticks until enough resource exists |
 | `withTrace(ctx, options, fn)` | run `fn` and attach the stopped trace to failures |
 | `openMachineScreen(ctx, pos, opts?)` | open a block screen with the fake player |
+| `setScreenPlayerSlot(ctx, screenId, playerSlot, stack)` | seed fake-player inventory before `quickMove` / `clickSlot` |
 | `snapshotDiff(ctx, before, after)` | call `snapshot.diff` |
 | `traceBoxAround(pos, radius?)` | convenience box for trace/snapshot capture |
 

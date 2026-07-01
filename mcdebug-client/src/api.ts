@@ -432,6 +432,8 @@ export class DebugApi {
       }),
     snapshot: (screenId: string) =>
       this.rpc.call<ScreenSnapshot>('screen.snapshot', { screenId }),
+    setPlayerSlot: (screenId: string, slot: number, stack: ItemStackJson) =>
+      this.rpc.call<ScreenSnapshot>('screen.setPlayerSlot', { screenId, slot, stack }),
     clickSlot: (
       screenId: string,
       slot: number,

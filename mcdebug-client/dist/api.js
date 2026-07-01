@@ -206,6 +206,7 @@ export class DebugApi {
             side: opts?.side,
         }),
         snapshot: (screenId) => this.rpc.call('screen.snapshot', { screenId }),
+        setPlayerSlot: (screenId, slot, stack) => this.rpc.call('screen.setPlayerSlot', { screenId, slot, stack }),
         clickSlot: (screenId, slot, button, actionType) => this.rpc.call('screen.clickSlot', { screenId, slot, button, actionType }),
         quickMove: (screenId, slot) => this.rpc.call('screen.quickMove', { screenId, slot }),
         close: (screenId) => this.rpc.call('screen.close', { screenId }),

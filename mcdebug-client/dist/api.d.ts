@@ -294,6 +294,7 @@ export declare class DebugApi {
             side?: Side;
         }) => Promise<ScreenSnapshot>;
         snapshot: (screenId: string) => Promise<ScreenSnapshot>;
+        setPlayerSlot: (screenId: string, slot: number, stack: ItemStackJson) => Promise<ScreenSnapshot>;
         clickSlot: (screenId: string, slot: number, button: number, actionType: "pickup" | "quick_move" | "swap" | "clone" | "throw" | "quick_craft" | "pickup_all") => Promise<ScreenSnapshot>;
         quickMove: (screenId: string, slot: number) => Promise<ScreenSnapshot>;
         close: (screenId: string) => Promise<{
