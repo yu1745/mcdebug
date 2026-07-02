@@ -56,11 +56,16 @@ class RpcServer(
         val requestedPort = resolveRequestedPort()
         log.info("mcdebug requested port: {} (sysprop={}, env={})", requestedPort,
             System.getProperty("mcdebug.port"), System.getenv("MCDEBUG_PORT"))
+        // backlog：测试运行器每个并发用例会建一个独立 RPC 连接（128 并行 + trace
+        // 额外请求，瞬时并发远超旧的 50），backlog 太小会导致超出部分的连接被
+        // 内核 RST → 客户端 ECONNREFUSED。提到 1024 给 accept loop 足够缓冲
+        // （实际上限由 OS SOMAXCONN 裁剪，Windows/Linux 现代值都远大于此）。
+        val backlog = 1024
         val ss = try {
-            ServerSocket(requestedPort, 50, InetAddress.getByName("127.0.0.1"))
+            ServerSocket(requestedPort, backlog, InetAddress.getByName("127.0.0.1"))
         } catch (e: java.net.BindException) {
             log.warn("port {} busy, falling back to OS-assigned", requestedPort)
-            ServerSocket(0, 50, InetAddress.getByName("127.0.0.1"))
+            ServerSocket(0, backlog, InetAddress.getByName("127.0.0.1"))
         }
         serverSocket = ss
         boundPort = ss.localPort

@@ -988,6 +988,12 @@ object WorldOps : RpcHandlerGroup {
      * Force-load a chunk so its block entities tick.
      * Uses ServerWorld.setChunkForced (persistent, same as /forceload command).
      * This ensures the chunk stays in getForcedChunks(), which keeps tickBlockEntities() alive.
+     *
+     * 同步等待区块真正加载到 FULL 状态再返回。`setChunkForced` 只是把区块加入
+     * forced 集合（发 ticket），实际加载在 chunk worker 线程异步进行——若 RPC
+     * 立即返回，紧跟而来的 setBlocks/place 可能命中"还在加载"的区块，导致
+     * 方块写入被吞或 BE 未注册（高并行测试下的 `no block entity` 竞态）。
+     * getChunk(..., FULL, create=true) 在主线程会阻塞直到该区块 FULL。
      */
     private fun forceloadChunk(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
         RpcContext.onServer(server) {
@@ -995,10 +1001,17 @@ object WorldOps : RpcHandlerGroup {
             val chunkPos = chunkPosFromParams(p)
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val changed = world.setChunkForced(chunkPos.x, chunkPos.z, true)
+            // 同步等到区块 FULL：在主线程调用，create=true 阻塞直到加载完成。
+            val chunk = world.chunkManager.getChunk(
+                chunkPos.x, chunkPos.z,
+                net.minecraft.world.chunk.ChunkStatus.FULL, true,
+            )
+            val loaded = chunk != null
             JsonObject().apply {
                 add("chunk", JsonArray().apply { add(chunkPos.x); add(chunkPos.z) })
                 addProperty("forced", true)
                 addProperty("changed", changed)
+                addProperty("loaded", loaded)
                 addProperty("dim", world.registryKey.value.toString())
             }
         }
