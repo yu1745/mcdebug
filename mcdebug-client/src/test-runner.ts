@@ -1,4 +1,5 @@
 import { readdir } from 'node:fs/promises';
+import { writeFileSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
 import { DebugApi } from './api.js';
@@ -49,6 +50,8 @@ export interface TestRunnerOptions {
   clearMinOffset?: Pos;
   clearMaxOffset?: Pos;
   batchSize?: number;
+  /** If set, write structured test results (JSON) to this path after the run. */
+  reportFile?: string;
 }
 
 export interface TestRunner {
@@ -233,6 +236,8 @@ async function runTests(tests: readonly TestCase[], options: TestRunnerOptions):
   const concurrency = Number.isFinite(configured) && configured > 0 ? configured : 128;
   const queue = [...tests.entries()];
   let failed = 0;
+  const records: TestRecord[] = [];
+  const runStart = Date.now();
   console.log(`[==========] Running ${tests.length} mcdebug TS test(s)`);
 
   async function worker(): Promise<void> {
@@ -241,11 +246,18 @@ async function runTests(tests: readonly TestCase[], options: TestRunnerOptions):
       if (!next) return;
       const [index, testCase] = next;
       const result = await runOne(testCase, index, options);
+      const record: TestRecord = {
+        name: testCase.name,
+        status: result.ok ? 'pass' : 'fail',
+        durationMs: result.durationMs,
+        error: result.ok ? undefined : result.error instanceof Error ? result.error.stack ?? result.error.message : String(result.error),
+      };
+      records.push(record);
       if (result.ok) {
         console.log(`[       OK ] ${testCase.name} (${result.durationMs}ms)`);
       } else {
         failed++;
-        const message = result.error instanceof Error ? result.error.stack ?? result.error.message : String(result.error);
+        const message = record.error!;
         console.error(`[  FAILED  ] ${testCase.name} (${result.durationMs}ms)`);
         console.error(message);
       }
@@ -254,10 +266,33 @@ async function runTests(tests: readonly TestCase[], options: TestRunnerOptions):
 
   await Promise.all(Array.from({ length: Math.min(concurrency, tests.length) }, () => worker()));
   console.log(`[==========] ${tests.length} test(s) reported`);
+
+  if (options.reportFile) {
+    const reportPath = resolve(options.reportFile);
+    mkdirSync(resolve(reportPath, '..'), { recursive: true });
+    const summary = {
+      total: records.length,
+      passed: records.length - failed,
+      failed,
+      totalDurationMs: Date.now() - runStart,
+      timestamp: new Date().toISOString(),
+      tests: records,
+    };
+    writeFileSync(reportPath, JSON.stringify(summary, null, 2) + '\n', 'utf8');
+    console.log(`[  REPORT  ] ${reportPath}`);
+  }
+
   if (failed > 0) {
     console.error(`[  FAILED  ] ${failed}/${tests.length} test(s) failed`);
     process.exitCode = 1;
   }
+}
+
+interface TestRecord {
+  name: string;
+  status: 'pass' | 'fail';
+  durationMs: number;
+  error?: string;
 }
 
 export async function setBlocks(ctx: TestContext, ops: SetBlockOp[]): Promise<void> {

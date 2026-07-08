@@ -26,6 +26,8 @@ export interface TestRunnerOptions {
     clearMinOffset?: Pos;
     clearMaxOffset?: Pos;
     batchSize?: number;
+    /** If set, write structured test results (JSON) to this path after the run. */
+    reportFile?: string;
 }
 export interface TestRunner {
     readonly tests: readonly TestCase[];
