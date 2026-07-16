@@ -1,6 +1,7 @@
 {
   "name": "@yu1745/mcdebug",
   "version": "0.4.15",
+  "packageManager": "pnpm@9.15.9",
   "description": "TypeScript CLI for the mcdebug Minecraft debug server mod",
   "type": "module",
   "bin": {
@@ -16,8 +17,8 @@
     "typecheck:test": "tsc -p tsconfig.test.json --noEmit",
     "dev": "tsc -p tsconfig.json --watch",
     "clean": "rm -rf dist",
-    "pretest": "npm run build && npm run typecheck:test",
-    "prepublishOnly": "npm run build",
+    "pretest": "pnpm run build && pnpm run typecheck:test",
+    "prepublishOnly": "pnpm run build",
     "test": "tsx --test test/*.test.ts"
   },
   "engines": {

@@ -32,7 +32,7 @@ node dist/cli.js --help
 For setup of the Fabric project itself, see the
 [Fabric Documentation](https://docs.fabricmc.net/develop/getting-started/creating-a-project#setting-up).
 
-## CLI and npx usage
+## CLI and pnpm dlx usage
 
 The CLI talks to a running mcdebug Fabric server over TCP JSON-RPC. The server
 listens on all network interfaces by default; restrict published ports with a
@@ -45,14 +45,14 @@ back to `25580`.
 node mcdebug-client/dist/cli.js status
 node mcdebug-client/dist/cli.js raw world.getBlock '{"pos":[0,64,0]}'
 
-# npx, once the package version is published
-npx -y @yu1745/mcdebug status
-npx -y @yu1745/mcdebug storage list --x 0 --y 64 --z 0
-npx -y @yu1745/mcdebug redstone get-power --x 0 --y 64 --z 0
+# pnpm dlx, once the package version is published
+pnpm dlx @yu1745/mcdebug status
+pnpm dlx @yu1745/mcdebug storage list --x 0 --y 64 --z 0
+pnpm dlx @yu1745/mcdebug redstone get-power --x 0 --y 64 --z 0
 
-# npx directly from GitHub, useful before an npm release
-npx -y github:yu1745/mcdebug status
-npx -y github:yu1745/mcdebug snapshot capture --from 0,64,0 --to 2,66,2 --include block,inventory
+# pnpm directly from the GitHub package subdirectory, useful before a registry release
+pnpm dlx 'github:yu1745/mcdebug#path:mcdebug-client' status
+pnpm dlx 'github:yu1745/mcdebug#path:mcdebug-client' snapshot capture --from 0,64,0 --to 2,66,2 --include block,inventory
 ```
 
 Most machine testing APIs have dedicated top-level CLI commands. Use `mcdebug

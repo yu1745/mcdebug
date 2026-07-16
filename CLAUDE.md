@@ -88,9 +88,9 @@ pnpm build                 # tsc 编译到 dist/
 node dist/cli.js --help    # 查看所有 CLI 命令
 node dist/cli.js status    # 调用 server.status RPC
 
-# npx 端（发布包或 GitHub 直装）
-npx -y @yu1745/mcdebug status
-npx -y github:yu1745/mcdebug raw storage.list '{"target":{"kind":"block","pos":[0,64,0]}}'
+# pnpm dlx（发布包或 GitHub 子目录直装）
+pnpm dlx @yu1745/mcdebug status
+pnpm dlx 'github:yu1745/mcdebug#path:mcdebug-client' raw storage.list '{"target":{"kind":"block","pos":[0,64,0]}}'
 ```
 
 > 反编译 MC / Fabric API 源码（参考用，不参与编译、不进仓库）：`./gradlew genSources`，
@@ -103,7 +103,7 @@ npx -y github:yu1745/mcdebug raw storage.list '{"target":{"kind":"block","pos":[
 2. 错误抛出 `RpcException(code, message, data?)`（从 `RpcErrors` 选错误码）
 3. 类型在 `RpcHandlerGroup.methods(): Map<String, RpcHandler>` 注册
 4. 对应在 `mcdebug-client/src/api.ts` 的 `DebugApi` 加方法，参数与返回对齐
-5. CLI 命令在 `mcdebug-client/src/commands/<group>.ts` 注册；没有专用 CLI 子命令时，至少更新 `raw`/REPL help 和 README 的 `npx` 示例
+5. CLI 命令在 `mcdebug-client/src/commands/<group>.ts` 注册；没有专用 CLI 子命令时，至少更新 `raw`/REPL help 和 README 的 `pnpm dlx` 示例
 6. 重新 `pnpm build` 和 `./gradlew.bat build` 双端编译
 
 ## 7. Tick 设计原则
@@ -127,7 +127,7 @@ npx -y github:yu1745/mcdebug raw storage.list '{"target":{"kind":"block","pos":[
 - 改 TS：`pnpm build` 通过
 - 改 entrypoint/资源：手动 `./gradlew runServer` 启动一次确认 mod 加载 + RPC 端口监听
 - 改了 API/CLI 协议：两端一起改，TS 端的 `DebugApi` 强类型签名是契约
-- 改了用户可见 RPC：更新 `README.md`、`mcdebug-client/src/commands/help-text.ts`，尤其要给 `npx ... raw namespace.method` 示例
+- 改了用户可见 RPC：更新 `README.md`、`mcdebug-client/src/commands/help-text.ts`，尤其要给 `pnpm dlx ... raw namespace.method` 示例
 - 不要新增 Kotlin test DSL / Gradle plugin / 注解扫描测试入口；测试编排放在消费者项目的 TS dispatcher
 - 测试编排统一放在 TS 端 `mcdebug-client/src/test-runner.ts` + `test/*.test.ts`；mod 端不再做任何 test DSL / 注解扫描
 - 改 mcdebug 默认端口 / 协议层：先在 plan 文件里讨论再动
@@ -138,7 +138,7 @@ npx -y github:yu1745/mcdebug raw storage.list '{"target":{"kind":"block","pos":[
 - 实时看 server 日志：`run/logs/latest.log`（loom 写文件 + stdout）
 - Loom 缓存了旧 remap jar：清 `run/.fabric/processedMods/`，再 `./gradlew build`
 - TS 端快速调试：`node dist/cli.js raw world.getBlock '{"pos":[0,64,0]}'`
-- npx 快速调试：`npx -y github:yu1745/mcdebug raw storage.list '{"target":{"kind":"block","pos":[0,64,0]}}'`
+- pnpm 快速调试：`pnpm dlx 'github:yu1745/mcdebug#path:mcdebug-client' raw storage.list '{"target":{"kind":"block","pos":[0,64,0]}}'`
 
 ## 10. 版本更新规则
 
@@ -155,8 +155,7 @@ node scripts/set-version.mjs X.Y.Z
 | 1 | `gradle.properties` | `mod_version=X.Y.Z` | Fabric mod 版本（Gradle → fabric.mod.json `${version}`） |
 | 2 | `mcdebug-client/src/version.ts` | `export const version = 'X.Y.Z'` | **CLI 唯一真相源** — cli.ts 从这里 import |
 | 3 | `mcdebug-client/package.json` | `"version": "X.Y.Z"` | npm 发布（mcdebug-client 子包） |
-| 4 | `package.json`（根） | `"version": "X.Y.Z"` | `npx github:yu1745/mcdebug` 直接安装时读取 |
-| 5 | `mcdebug-client/src/cli.ts` | `.version(version)` | **必须 import from version.ts，不能硬编码字符串** |
+| 4 | `mcdebug-client/src/cli.ts` | `.version(version)` | **必须 import from version.ts，不能硬编码字符串** |
 
 ### 发版检查清单
 
@@ -169,13 +168,13 @@ node scripts/set-version.mjs X.Y.Z
 □ git tag -a vX.Y.Z -m "..."
 □ git push origin main && git push origin vX.Y.Z
 □ gh run watch（确认 CI 成功）
-□ rm -rf ~/.npm/_npx/*mcdebug* && npx -y github:yu1745/mcdebug --version ← 确认 X.Y.Z
+□ pnpm dlx 'github:yu1745/mcdebug#path:mcdebug-client' --version ← 确认 X.Y.Z
 ```
 
 ### 踩过的坑
 
-- **cli.ts 硬编码 version**（v0.3.0、v0.4.0）：cli.ts 的 `.version('0.2.0')` 忘了改成 import，导致 `--version` 和 `npx` 永远显示 0.2.0。**必须从 version.ts import，不允许出现硬编码版本字符串。**
-- **根 package.json 遗漏**（v0.3.0）：只改了 mcdebug-client/package.json 没改根 package.json，导致 `npx github:yu1745/mcdebug` 安装的是旧版本号。两个 package.json 都要改。
+- **cli.ts 硬编码 version**（v0.3.0、v0.4.0）：cli.ts 的 `.version('0.2.0')` 忘了改成 import，导致 `--version` 和包管理器直装永远显示 0.2.0。**必须从 version.ts import，不允许出现硬编码版本字符串。**
+- **根 package.json 兼容壳**：已移除。Node 包唯一入口是 `mcdebug-client/package.json`；GitHub 直装使用 pnpm 的 `#path:mcdebug-client`，不要在根目录重新创建重复包声明。
 
 ## 11. 已知小问题
 

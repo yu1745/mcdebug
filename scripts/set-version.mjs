@@ -35,7 +35,6 @@ await updateText('gradle.properties', (text) =>
   text.replace(/^mod_version=.*$/m, `mod_version=${version}`),
 );
 
-await updatePackage('package.json');
 await updatePackage('mcdebug-client/package.json');
 
 await updateText('mcdebug-client/src/version.ts', (text) =>
@@ -45,7 +44,7 @@ await updateText('mcdebug-client/src/version.ts', (text) =>
   ),
 );
 
-const build = spawnSync('npm', ['run', 'build'], {
+const build = spawnSync('pnpm', ['run', 'build'], {
   cwd: path.join(root, 'mcdebug-client'),
   stdio: 'inherit',
   shell: process.platform === 'win32',

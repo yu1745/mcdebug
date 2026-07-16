@@ -46,6 +46,4 @@ fabric-api_source/
 
 # node
 
-mcdebug-client/node_modules/
-# pnpm 9+ "approve builds" prompt artifact (see https://pnpm.io/settings#approve-builds)
-mcdebug-client/pnpm-workspace.yaml
+node_modules/
