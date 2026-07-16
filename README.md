@@ -1,6 +1,6 @@
 # mcdebug — Minecraft Debug Server Mod
 
-Fabric 1.20.1 + Kotlin mod that exposes a localhost JSON-RPC server, plus a
+Fabric 1.20.1 + Kotlin mod that exposes a JSON-RPC server, plus a
 TypeScript CLI / test runner, so mod developers can automate tests of their
 machine blocks by reading/writing the world, block entities, inventories,
 resource storages, snapshots, traces, screen handlers, redstone controls,
@@ -9,7 +9,7 @@ entities, and reusable fixtures from an external TS process.
 ```
 ┌─────────────────┐  JSON-RPC 2.0   ┌──────────────────┐
 │  mcdebug (TS)   │  NDJSON over    │  DebugServerMod  │
-│  CLI / runner   │  TCP 127.0.0.1  │  (Kotlin/Fabric) │
+│  CLI / runner   │  TCP 0.0.0.0    │  (Kotlin/Fabric) │
 └─────────────────┘  default 25580  └──────────────────┘
 ```
 
@@ -34,9 +34,11 @@ For setup of the Fabric project itself, see the
 
 ## CLI and npx usage
 
-The CLI talks to a running mcdebug Fabric server over localhost JSON-RPC. It
-finds the port from `--port`, `MCDEBUG_PORT`, `mcdebug/port`, then falls back to
-`25580`.
+The CLI talks to a running mcdebug Fabric server over TCP JSON-RPC. The server
+listens on all network interfaces by default; restrict published ports with a
+firewall or container port-binding rules when remote access is not required.
+The CLI finds the port from `--port`, `MCDEBUG_PORT`, `mcdebug/port`, then falls
+back to `25580`.
 
 ```bash
 # local checkout

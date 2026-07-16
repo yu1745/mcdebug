@@ -23,7 +23,7 @@ import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * TCP server bound to 127.0.0.1:0 (OS-assigned port).
+ * TCP server bound to 0.0.0.0 (all network interfaces).
  * Wire format: NDJSON — one JSON object per line, '\n' as the delimiter.
  * Maximum frame size: 64 MiB (lines longer than this are rejected as parse errors).
  */
@@ -63,15 +63,15 @@ class RpcServer(
         // （实际上限由 OS SOMAXCONN 裁剪，Windows/Linux 现代值都远大于此）。
         val backlog = 1024
         val ss = try {
-            ServerSocket(requestedPort, backlog, InetAddress.getByName("127.0.0.1"))
+            ServerSocket(requestedPort, backlog, InetAddress.getByName(DEFAULT_BIND_ADDRESS))
         } catch (e: java.net.BindException) {
             log.warn("port {} busy, falling back to OS-assigned", requestedPort)
-            ServerSocket(0, backlog, InetAddress.getByName("127.0.0.1"))
+            ServerSocket(0, backlog, InetAddress.getByName(DEFAULT_BIND_ADDRESS))
         }
         serverSocket = ss
         boundPort = ss.localPort
         ss.soTimeout = 1000  // allow periodic accept-loop checks for shutdown
-        log.info("mcdebug RPC server listening on 127.0.0.1:{}", boundPort)
+        log.info("mcdebug RPC server listening on {}:{}", DEFAULT_BIND_ADDRESS, boundPort)
 
         // Write port file (best effort)
         try {
@@ -103,14 +103,9 @@ class RpcServer(
         while (!ss.isClosed) {
             try {
                 val client = ss.accept()
-                if (client.inetAddress.isLoopbackAddress) {
-                    val id = connectionIdGen.incrementAndGet()
-                    clientSockets[id] = client
-                    connectionExecutor.submit { handleConnection(client, id, minecraftServer) }
-                } else {
-                    log.warn("rejected non-loopback connection from {}", client.remoteSocketAddress)
-                    client.close()
-                }
+                val id = connectionIdGen.incrementAndGet()
+                clientSockets[id] = client
+                connectionExecutor.submit { handleConnection(client, id, minecraftServer) }
             } catch (e: Exception) {
                 if (ss.isClosed) break
                 // swallow timeouts so we can re-check isClosed
@@ -285,6 +280,7 @@ class RpcServer(
 
     companion object {
         const val MAX_FRAME_BYTES = 64 * 1024 * 1024  // 64 MiB
+        const val DEFAULT_BIND_ADDRESS = "0.0.0.0"
         const val DEFAULT_PORT = 25580
     }
 }

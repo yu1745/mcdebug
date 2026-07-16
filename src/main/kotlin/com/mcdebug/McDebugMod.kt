@@ -27,9 +27,9 @@ import java.nio.file.Path
 import java.nio.file.Paths
 
 /**
- * mcdebug — localhost JSON-RPC debug server for mod development automation.
+ * mcdebug — JSON-RPC debug server for mod development automation.
  *
- * The RPC server binds 127.0.0.1:0 (OS-assigned port) and writes the bound port to
+ * The RPC server binds 0.0.0.0 and writes the bound port to
  * `<run_dir>/mcdebug/port` so the TypeScript CLI can find it.
  */
 object McDebugMod : DedicatedServerModInitializer {
@@ -85,7 +85,7 @@ object McDebugMod : DedicatedServerModInitializer {
         RedstoneOps.install()
 
         rpcServer = RpcServer(d, ::portFilePath).also { it.start(server) }
-        LOGGER.info("mcdebug RPC ready on 127.0.0.1:{}", rpcServer?.boundPort)
+        LOGGER.info("mcdebug RPC ready on {}:{}", RpcServer.DEFAULT_BIND_ADDRESS, rpcServer?.boundPort)
     }
 
     private fun onServerStopping(server: MinecraftServer) {

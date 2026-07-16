@@ -1,11 +1,11 @@
 # mcdebug — Minecraft Debug Server Mod
 
-Fabric 1.20.1 + Kotlin Mod，提供 localhost JSON-RPC 服务，让 TypeScript CLI 远程读写世界/方块实体/物品栏/资源存储/快照/GUI，**用于 Mod 开发者用外部 TS runner 自动化测试自己的机器方块**。
+Fabric 1.20.1 + Kotlin Mod，提供 JSON-RPC 服务，让 TypeScript CLI 远程读写世界/方块实体/物品栏/资源存储/快照/GUI，**用于 Mod 开发者用外部 TS runner 自动化测试自己的机器方块**。
 
 ```
 ┌─────────────────┐  JSON-RPC 2.0   ┌──────────────────┐
 │  mcdebug (TS)   │  NDJSON over    │  DebugServerMod  │
-│  CLI / Script   │  TCP 127.0.0.1  │  (Kotlin/Fabric) │
+│  CLI / Script   │  TCP 0.0.0.0    │  (Kotlin/Fabric) │
 └─────────────────┘  default 25580  └──────────────────┘
 ```
 
@@ -13,7 +13,7 @@ Fabric 1.20.1 + Kotlin Mod，提供 localhost JSON-RPC 服务，让 TypeScript C
 
 - **绝对不要**把 `build/libs/*.jar` 复制到 `run/mods/`。Loom dev-launch-injector 会自动从 `build/classes/kotlin/main` 注入 classpath，副本会和注入版本冲突，源码改了也不生效。
 - **绝对不要**暴露 `tick.run` / `tick.runUntil` 之类主动推进 server tick 的 RPC。tick 由游戏引擎驱动，mod 只观察不控制。断言统一走 `wait.until`（注册 `ServerTickEvents.END_SERVER_TICK` 回调检查条件）。
-- 不要给客户端加远程连接能力（v1 绑 127.0.0.1，假设本机可信）。
+- 服务端默认监听 `0.0.0.0`，容器部署时通过端口发布规则或防火墙限制访问范围。
 - 不要在 `src/main/resources/assets/mcdebug/` 之外加资源（避免污染上游资源命名空间）。
 
 ## 2. 目录结构
@@ -207,7 +207,7 @@ node scripts/set-version.mjs X.Y.Z
   `wait.until` 谓词从 v1 单比较正则升级为手写 DSL（语法见 §7）。**无 eval/脚本/反射**，纯词法器 + 递归下降解析器 + 求值器，绝对避免 RCE。v1 单比较是 v2 的子集，完全向后兼容。`PredicateExpr` 刻意不依赖任何 Minecraft 类型（pos 用 `Triple<Int,Int,Int>`，server 通过闭包传入），便于将来单测。已通过 14 例自测（v1 兼容 5 + v2 新 6 + 负面 3）。
 
 不在计划内（已决定不做，不要再加回来）：
-- 鉴权 / 远程连接：v1 绑 127.0.0.1 假设本机可信。
+- 鉴权：当前协议没有鉴权；服务端监听所有接口，部署时必须通过端口发布规则或防火墙限制访问范围。
 - `scan.countByBlock` chunk 进度回调：O(N) 可接受。
 - MCP adapter。
 
@@ -216,10 +216,10 @@ node scripts/set-version.mjs X.Y.Z
 下列内容在历史 commit / 旧版 CLAUDE.md 中出现过，但**当前已不在仓库**，不要再加回来：
 
 - **Gradle 插件**（`gradle-plugin/` 子项目，曾含 `McDebugPlugin` / `McDebugExtension` / `McDebugTestTask` / `mcdebugTest` task）——已移除。`settings.gradle` 是单项目，无 `include`。测试编排改由 TS 端 `mcdebug-client/src/test-runner.ts` 承担。
-- **JitPack 发布**（`jitpack.yml` + JitPack 坐标相关 commit）——已废弃。仓库不再通过 JitPack 发布任何构件。
-  - `jitpack.yml` 已删除。
-  - ⚠️ `build.gradle` 里 `maven { url "https://jitpack.io" }` 是**依赖拉取**用的（很多 Fabric mod 只在 jitpack 发版），**不是发布**，保留。
-  - 当前发布通道只有 GitHub Release（`.github/workflows/release.yml` 把 remapped jar 上传到 tag release，CLI 的 `mcdebug jar` 命令据此下载 + sha256 校验）。
+- **Gradle 插件的 JitPack 构件**——已随 `gradle-plugin/` 子项目移除，不要恢复该插件或其坐标。
+- **Server mod jar 的 JitPack 构建仍在使用**。根项目是当前唯一的 Gradle 项目，`jitpack.yml` 通过 `publishToMavenLocal` 发布根项目的 `mavenJava` 构件。不要因为 Gradle 插件已移除而删除此配置。
+  - `build.gradle` 里的 `maven { url "https://jitpack.io" }` 用于拉取第三方依赖，与本项目发布配置是两个不同用途。
+  - GitHub Release（`.github/workflows/release.yml`）同时提供 remapped jar，CLI 的 `mcdebug jar` 命令从 Release 下载并校验 sha256；它不取代 JitPack server jar 构建。
 - **Kotlin test DSL / 注解扫描测试入口 / `scanPackages` 配置**——随 Gradle 插件一并移除。
 - **`mc_source/` / `fabric-api_source/`**（反编译源码参考）——`.gitignore` 明确排除，永远不进仓库；需要时本地 `./gradlew genSources` 解压查看。
 
