@@ -361,6 +361,41 @@ Output (success):
 Output (timeout):
   { "matched": false, "ranTicks": 24000 }
   (exits with code 2 and stderr: error [-32006] wait.until timeout ...)`;
+export const REFLECT_HELP = `
+Inspect or invoke arbitrary Java/Kotlin classes at runtime on the live server.
+Because the runtime uses intermediary names (class_1309, method_6076,
+field_6222), yarn and mojang names are accepted too via the bundled mapping
+tables:
+  - classes: "LivingEntity", "net.minecraft.entity.LivingEntity" (yarn),
+    "net.minecraft.world.entity.LivingEntity" (mojang),
+    "net.minecraft.class_1309" (intermediary),
+    "ic2_120.content.item.MiningLaserItem" (mod class)
+  - fields/methods: "itemUseTimeLeft" or "field_6222" (yarn/intermediary),
+    "health" or "getHealth" (mojang)
+
+Examples:
+  # Inspect a class (fields + methods with --members)
+  mcdebug reflect net.minecraft.entity.LivingEntity --members
+  # Read a static field (e.g. MinecraftServer field on some class)
+  mcdebug reflect ic2_120.content.item.MiningLaserItem --field MAX_RANGE
+  # Read an instance field via an object ref (walk into nested objects)
+  mcdebug reflect net.minecraft.class_1309 --field useItemRemaining
+  mcdebug reflect --ref 1 --field someNestedField
+  # Invoke a static method
+  mcdebug reflect net.minecraft.util.Identifier --method tryParse --args '["minecraft:stone"]'
+  # List held object references
+  mcdebug refs
+
+Object references: when a field/method returns a non-primitive object, the
+server stores it in a reference table and the response includes { "$ref": N }.
+Pass --ref N as the target in later calls to walk deeper. Release with
+mcdebug raw reflect.release '{"ref":1}'. Refs are per-server and live until
+released or the server stops.
+
+Note: method invocation can have side effects — you are calling real code.
+The Minecraft server thread is blocked while the call runs.
+
+Source: ${REPO_URL}`;
 export const REPL_HELP = `
 The REPL exposes a DebugApi instance as the global variable 'dbg'.
 
@@ -371,6 +406,8 @@ Available methods:
   dbg.world.setBlocks(ops, opts?)  dbg.world.placeAsPlayer(pos, block, face, opts?)
   dbg.world.useItem(item, opts?)   dbg.world.useOnBlock(pos, face, opts?)
   dbg.world.attackBlock(pos, face, opts?)
+  dbg.world.useItemHold(item, opts?)   dbg.world.attackEntity(uuid, opts?)
+  dbg.world.interactEntity(uuid, opts?)
   dbg.world.getRegion(box, opts?)
   dbg.world.selectBlocks(box, pred, opts?)
   dbg.world.forceloadChunk(cx, cz, opts?)   dbg.world.unforceloadChunk(cx, cz, opts?)
@@ -400,6 +437,10 @@ Available methods:
   dbg.craft.craft(grid, opts?)     dbg.craft.find(grid, opts?)
   dbg.scan.findBlocks(box, block, opts?)     dbg.scan.countByBlock(box, dim?)
   dbg.scan.findEntities(box, opts?)
+  dbg.reflect.resolve(class, opts?)     dbg.reflect.get(target, field, opts?)
+  dbg.reflect.call(target, method, args?, opts?)     dbg.reflect.refs()
+  dbg.reflect.release(ref)    dbg.reflect.mappings()
+  (or dbg.rpc.call('reflect.*', params) for full control)
 
 pos = [x, y, z] (integer tuple). opts can include { dim: "minecraft:the_nether" }.
 All methods return promises — use await.
@@ -415,8 +456,11 @@ Available RPC methods (namespace.method):
   world.fillBox               world.clearBox
   world.placeAsPlayer        (uses a stable fake player — see 'mcdebug place-as-player --help')
   world.useItem              (right-click an item in air — see 'mcdebug use-item --help')
+  world.useItemHold          (fire a ranged weapon — see 'mcdebug shoot --help')
   world.useOnBlock           (right-click a block — see 'mcdebug use --help')
   world.attackBlock          (left-click / break a block — see 'mcdebug attack --help')
+  world.attackEntity         (attack an entity — see 'mcdebug attack-entity --help')
+  world.interactEntity       (right-click an entity — see 'mcdebug interact-entity --help')
   world.getRegion             world.selectBlocks
   world.forceloadChunk        world.unforceloadChunk
   be.getNbt                   be.setNbt                    be.getField
@@ -441,6 +485,8 @@ Available RPC methods (namespace.method):
   entity.collectItems
   fixture.capture             fixture.load
   craft.craft                 craft.find
+  reflect.resolve             reflect.get                  reflect.call
+  reflect.refs                reflect.release             reflect.mappings
   server.runCommand
 
 Methods with no dedicated CLI command (use raw to call):
@@ -665,7 +711,6 @@ Notes:
 export const USE_ITEM_HELP = `
 Simulate right-clicking (using) the held item in air, with no block or entity
 target. This triggers Item.use(world, player, hand).
-
 Use this for items whose right-click behavior is not tied to a target:
   - toggle tools such as ic2_120:nano_saber
   - bows, food, potions, scrolls, scanners, or other mod items that act on use
@@ -691,6 +736,63 @@ Notes:
   This is different from 'mcdebug use', which right-clicks a block face, and
   from 'mcdebug interact-entity', which right-clicks an entity.
   itemAfter shows changed NBT, transformed stacks, or consumed items.`;
+export const SHOOT_HELP = `
+Simulate firing a ranged weapon: right-click, optionally hold for a while, then
+release. This drives the full vanilla item-use lifecycle that bows, crossbows,
+tridents and most modded ranged weapons implement:
+
+  Item.use -> (usageTick x holdTicks) -> Item.onStoppedUsing
+
+The fake player aims at the target entity's eyes (or a fixed direction), so the
+weapon's shot vector derived from the player's yaw/pitch points at the target.
+Projectiles are real entities and fly on normal server ticks afterwards.
+
+--target and --direction are mutually exclusive: pass exactly one.
+
+Examples:
+  # Fire a vanilla bow at a chicken, fully drawn (20 ticks)
+  mcdebug shoot --item minecraft:bow --ammo minecraft:arrow \\
+    --target <chicken-uuid> --hold 20
+  # Short-tap a bow (barely drawn, weak shot)
+  mcdebug shoot --item minecraft:bow --ammo minecraft:arrow \\
+    --target <chicken-uuid> --hold 5
+  # Crossbow: load (cycle 0) then fire (cycle 1) — always --repeat 2
+  mcdebug shoot --item minecraft:crossbow --ammo minecraft:arrow \\
+    --target <chicken-uuid> --hold 30 --repeat 2
+  # IC2 mining laser: direct-fire weapon, no hold; needs Energy NBT
+  mcdebug shoot --item ic2_120:mining_laser --nbt '{"Energy":200000}' \\
+    --target <chicken-uuid> --hold 0
+  # TConstruct shuriken: direct throw, no hold
+  mcdebug shoot --item tconstruct:shuriken --nbt @shuriken.json \\
+    --target <chicken-uuid> --hold 0
+  # Fixed direction, no target
+  mcdebug shoot --item minecraft:bow --ammo minecraft:arrow \\
+    --direction north --pos 0,64,0 --hold 20
+
+Output:
+  {
+    "cycles": [ { "cycle": 0, "useResult": "consume", "usingItem": true,
+                   "stopped": true, "itemAfter": { ... } } ],
+    "projectiles": [ { "type": "minecraft:arrow", "uuid": "...",
+                        "pos": [x,y,z], "velocity": [vx,vy,vz] } ],
+    "ammo": { "item": "minecraft:arrow", "count": 64 }
+  }
+
+Notes:
+  - --hold 0 = short tap. Direct-fire weapons (IC2 mining laser, shuriken,
+    throwing axe) fire on use() and IGNORE the hold; charge weapons (bow,
+    crossbow) need hold >= 10 to fire at all, 20 for full power.
+  - Crossbows must be loaded before they can fire: always use --repeat 2
+    (cycle 0 loads while held, cycle 1 fires on the next use).
+  - Ammo is placed in the offhand and hotbar slot 8 (hotbar slot 0 is the
+    main hand, so it must stay free for the weapon). Both vanilla
+    getProjectileType and mod ammo searches (e.g. TConstruct) find it.
+  - The fake player stands 5 blocks in front of the target by default; use
+    --pos to override. IC2's mining laser is a straight line with limited
+    range; if the shot misses, move closer with --pos.
+  - Charge-based weapons (IC2 electric tools) need their Energy NBT set via
+    --nbt, otherwise use() returns pass and nothing fires.
+`;
 export const ATTACK_HELP = `
 Simulate left-clicking (attacking) a block. Triggers Block.onBlockBreakStart
 (the "start mining" event), and in creative mode immediately breaks the block.
@@ -701,6 +803,9 @@ This fires block-break events, loot drops, and onBroken callbacks — unlike
 Examples:
   # Break a block (creative mode — instant break with drops)
   mcdebug attack --x 0 --y 64 --z 0 --face north
+  # Break a block in survival mode (tool durability and loot apply)
+  mcdebug attack --x 0 --y 64 --z 0 --face up --item minecraft:iron_pickaxe \\
+    --gamemode survival
   # Left-click with a sword (triggers sweep attack particles, etc.)
   mcdebug attack --x 5 --y 64 --z 3 --face up --item minecraft:diamond_sword
 
@@ -715,7 +820,9 @@ Output:
   }
 
 Notes:
-  The fake player is in creative mode, so blocks break instantly.
+  The fake player is in creative mode, so blocks break instantly by default.
+  --gamemode survival runs the break as a survival player; --armor temporarily
+  equips the fake player for this call so armor effects apply to the break.
   broken=true means the block was destroyed (creative mode break).
   itemAfter may show durability changes if the held item was affected.`;
 export const INTERACT_ENTITY_HELP = `
@@ -758,6 +865,9 @@ Simulate left-clicking (attacking) an entity. Mirrors PlayerEntity.attack():
 Examples:
   # Punch a cow (empty hand, 1 damage in survival)
   mcdebug attack-entity --uuid <cow-uuid>
+  # Attack with a weapon while the fake player wears armor
+  mcdebug attack-entity --uuid <zombie-uuid> --item minecraft:diamond_sword \\
+    --armor @armor.json
   # Attack with a diamond sword (sweep + extra damage)
   mcdebug attack-entity --uuid <zombie-uuid> --item minecraft:diamond_sword
 
@@ -774,7 +884,9 @@ Output:
 Notes:
   Use 'find-entities' to get the UUID of the target entity.
   The fake player temporarily switches to survival mode with full attack
-  cooldown, so weapon damage should match a normal fully charged attack.
+  cooldown. --armor temporarily equips the fake player for this attack, so
+  armor-based effects (e.g. Looting/Luck from worn armor) can be tested
+  without state leaking into other calls.
   entityDead=true means the entity was killed by the attack.`;
 // ---- Guide sections ----
 const GUIDE_CONNECTION = `

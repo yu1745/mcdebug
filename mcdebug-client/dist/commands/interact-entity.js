@@ -40,6 +40,7 @@ export function registerInteractEntityCommand(cmd, getApi) {
         .option('--item <id>', 'item id to hold (omit for empty hand)')
         .option('--count <n>', 'stack size (default 1)', '1')
         .option('--nbt <json>', 'item NBT, or @file')
+        .option('--armor <json>', 'armor stacks object, or @file (head/chest/legs/feet)')
         .option('--player-facing <dir>', 'player facing: north|south|east|west (default: south)')
         .option('--dim <id>', 'dimension id (default minecraft:overworld)')
         .action(async (opts) => {
@@ -51,10 +52,12 @@ export function registerInteractEntityCommand(cmd, getApi) {
             }
         }
         const nbt = opts.nbt ? await parseJsonArg(opts.nbt) : undefined;
+        const armor = opts.armor ? await parseJsonArg(opts.armor) : undefined;
         const r = await api.world.attackEntity(opts.uuid, {
             item: opts.item,
             count: Number(opts.count),
             nbt: nbt,
+            armor: armor,
             playerFacing: opts.playerFacing,
             dim: opts.dim,
         });

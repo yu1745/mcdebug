@@ -114,6 +114,7 @@ export declare class DebugApi {
             nbt?: JsonNbt;
             sneaking?: boolean;
             playerFacing?: "north" | "south" | "east" | "west";
+            gamemode?: string;
             dim?: string;
         }) => Promise<{
             success: boolean;
@@ -150,6 +151,45 @@ export declare class DebugApi {
             itemAfter: ItemStackJson;
         }>;
         /**
+         * Simulate right-clicking a ranged weapon and holding it for `holdTicks`
+         * before releasing — the full vanilla item-use lifecycle used by bows,
+         * crossbows, tridents and any modded ranged weapon (use → usageTick × N →
+         * onStoppedUsing). Weapons that fire directly from use() (IC2 mining laser,
+         * TConstruct shuriken/throwing axe) need holdTicks=0.
+         *
+         * Projectiles are real entities spawned into the world; observe them with
+         * find-entities / wait-until.
+         */
+        useItemHold: (item: string, opts?: {
+            count?: number;
+            nbt?: JsonNbt;
+            ammo?: string;
+            ammoCount?: number;
+            targetUuid?: string;
+            direction?: "north" | "south" | "east" | "west" | "up" | "down";
+            holdTicks?: number;
+            repeat?: number;
+            playerPos?: Pos;
+            dim?: string;
+        }) => Promise<{
+            cycles: Array<{
+                cycle: number;
+                useResult: string;
+                usingItem: boolean;
+                stopped: boolean;
+                stillUsingAfterRelease: boolean;
+                itemAfter: ItemStackJson;
+            }>;
+            projectiles: Array<{
+                type: string;
+                uuid: string;
+                pos: [number, number, number];
+                velocity: [number, number, number];
+            }>;
+            ammo: ItemStackJson;
+            itemBefore: ItemStackJson;
+        }>;
+        /**
          * Simulate left-clicking (attacking) a block.
          * Mirrors the full ServerPlayerInteractionManager.processBlockBreakingAction pipeline:
          *   0. Fabric API AttackBlockCallback (mod handlers like IC2 wrench disassembly)
@@ -159,6 +199,12 @@ export declare class DebugApi {
             item?: string;
             count?: number;
             nbt?: JsonNbt;
+            armor?: Partial<Record<"head" | "chest" | "legs" | "feet", {
+                item: string;
+                count?: number;
+                nbt?: JsonNbt;
+            }>>;
+            gamemode?: "survival" | "creative";
             dim?: string;
         }) => Promise<{
             broken: boolean;
@@ -210,6 +256,11 @@ export declare class DebugApi {
             item?: string;
             count?: number;
             nbt?: JsonNbt;
+            armor?: Partial<Record<"head" | "chest" | "legs" | "feet", {
+                item: string;
+                count?: number;
+                nbt?: JsonNbt;
+            }>>;
             playerFacing?: "north" | "south" | "east" | "west";
             dim?: string;
         }) => Promise<{

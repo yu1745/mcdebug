@@ -1,6 +1,53 @@
-import { USE_HELP, USE_ITEM_HELP, ATTACK_HELP } from './help-text.js';
+import { USE_HELP, USE_ITEM_HELP, ATTACK_HELP, SHOOT_HELP } from './help-text.js';
 import { parseJsonArg, requirePos, outputJson } from './util.js';
+function parsePos(s) {
+    const parts = s.split(',').map((v) => Number(v.trim()));
+    if (parts.length !== 3 || parts.some((v) => Number.isNaN(v))) {
+        throw new Error(`--pos must be x,y,z, got: ${s}`);
+    }
+    return parts;
+}
 export function registerUseCommand(cmd, getApi) {
+    cmd
+        .command('shoot')
+        .description('right-click (use) a ranged weapon, hold it for a while, then release — vanilla item-use lifecycle for bows/crossbows/modded guns')
+        .addHelpText('after', SHOOT_HELP)
+        .requiredOption('--item <id>', 'ranged weapon item id')
+        .option('--count <n>', 'stack size (default 1)', '1')
+        .option('--nbt <json>', 'item NBT, or @file (tool data, charge, mode, ...)')
+        .option('--ammo <id>', 'ammo item id to place in offhand/inventory (arrows, bolts)')
+        .option('--ammo-count <n>', 'ammo stack size (default 64)', '64')
+        .option('--target <uuid>', 'UUID of the entity to aim at (looks at its eyes; get it via find-entities)')
+        .option('--direction <dir>', 'fixed facing when no target: north|south|east|west|up|down')
+        .option('--hold <n>', 'ticks to hold right-click before release (0 = short tap)', '20')
+        .option('--repeat <n>', 'full use cycles (crossbows need 2: load then fire)', '1')
+        .option('--pos <x,y,z>', 'fake player position (default 5 blocks in front of target)')
+        .option('--dim <id>', 'dimension id (default minecraft:overworld)')
+        .action(async (opts) => {
+        const api = getApi();
+        if (!opts.target && !opts.direction) {
+            throw new Error('one of --target or --direction is required (pass exactly one)');
+        }
+        if (opts.target && opts.direction) {
+            throw new Error('--target and --direction are mutually exclusive (pass exactly one)');
+        }
+        const nbt = opts.nbt ? await parseJsonArg(opts.nbt) : undefined;
+        const pos = opts.pos ? parsePos(opts.pos) : undefined;
+        const r = await api.world.useItemHold(opts.item, {
+            count: Number(opts.count),
+            nbt: nbt,
+            ammo: opts.ammo,
+            ammoCount: Number(opts.ammoCount),
+            targetUuid: opts.target,
+            direction: opts.direction,
+            holdTicks: Number(opts.hold),
+            repeat: Number(opts.repeat),
+            playerPos: pos,
+            dim: opts.dim,
+        });
+        outputJson(r);
+        await api.close();
+    });
     cmd
         .command('use-item')
         .description('right-click (use) an item in air — calls Item.use without a block/entity target')
@@ -35,6 +82,7 @@ export function registerUseCommand(cmd, getApi) {
         .option('--nbt <json>', 'item NBT, or @file')
         .option('--sneaking', 'simulate shift+right-click')
         .option('--player-facing <dir>', 'which direction the player is facing: north|south|east|west (default: face.opposite)')
+        .option('--gamemode <mode>', 'interaction game mode: survival (held item is consumed / containers drain properly) or creative (default)')
         .option('--dim <id>', 'dimension id (default minecraft:overworld)')
         .action(async (opts) => {
         const api = getApi();
@@ -56,6 +104,7 @@ export function registerUseCommand(cmd, getApi) {
             nbt: nbt,
             sneaking: opts.sneaking,
             playerFacing: opts.playerFacing,
+            gamemode: opts.gamemode,
             dim: opts.dim,
         });
         outputJson(r);
@@ -72,6 +121,8 @@ export function registerUseCommand(cmd, getApi) {
         .option('--item <id>', 'item id to hold (omit for empty hand)')
         .option('--count <n>', 'stack size (default 1)', '1')
         .option('--nbt <json>', 'item NBT, or @file')
+        .option('--armor <json>', 'armor stacks object, or @file (head/chest/legs/feet)')
+        .option('--gamemode <mode>', 'interaction game mode: survival or creative (default creative)')
         .option('--dim <id>', 'dimension id (default minecraft:overworld)')
         .action(async (opts) => {
         const api = getApi();
@@ -81,10 +132,16 @@ export function registerUseCommand(cmd, getApi) {
             throw new Error(`--face must be one of up|down|north|south|east|west, got: ${opts.face}`);
         }
         const nbt = opts.nbt ? await parseJsonArg(opts.nbt) : undefined;
+        const armor = opts.armor ? await parseJsonArg(opts.armor) : undefined;
+        if (opts.gamemode && !['survival', 'creative'].includes(opts.gamemode)) {
+            throw new Error(`--gamemode must be survival or creative, got: ${opts.gamemode}`);
+        }
         const r = await api.world.attackBlock(pos, face, {
             item: opts.item,
             count: Number(opts.count),
             nbt: nbt,
+            armor: armor,
+            gamemode: opts.gamemode,
             dim: opts.dim,
         });
         outputJson(r);

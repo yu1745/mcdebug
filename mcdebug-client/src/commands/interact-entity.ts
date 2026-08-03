@@ -4,6 +4,8 @@ import { JsonNbt } from '../types.js';
 import { ATTACK_ENTITY_HELP, INTERACT_ENTITY_HELP } from './help-text.js';
 import { parseJsonArg, outputJson } from './util.js';
 
+type ArmorSpec = Partial<Record<'head' | 'chest' | 'legs' | 'feet', { item: string; count?: number; nbt?: JsonNbt }>>;
+
 export function registerInteractEntityCommand(cmd: Command, getApi: () => DebugApi): void {
   cmd
     .command('interact-entity')
@@ -55,6 +57,7 @@ export function registerInteractEntityCommand(cmd: Command, getApi: () => DebugA
     .option('--item <id>', 'item id to hold (omit for empty hand)')
     .option('--count <n>', 'stack size (default 1)', '1')
     .option('--nbt <json>', 'item NBT, or @file')
+    .option('--armor <json>', 'armor stacks object, or @file (head/chest/legs/feet)')
     .option('--player-facing <dir>', 'player facing: north|south|east|west (default: south)')
     .option('--dim <id>', 'dimension id (default minecraft:overworld)')
     .action(
@@ -63,6 +66,7 @@ export function registerInteractEntityCommand(cmd: Command, getApi: () => DebugA
         item?: string;
         count: string;
         nbt?: string;
+        armor?: string;
         playerFacing?: string;
         dim?: string;
       }) => {
@@ -74,10 +78,12 @@ export function registerInteractEntityCommand(cmd: Command, getApi: () => DebugA
           }
         }
         const nbt = opts.nbt ? await parseJsonArg(opts.nbt) : undefined;
+        const armor = opts.armor ? await parseJsonArg(opts.armor) : undefined;
         const r = await api.world.attackEntity(opts.uuid, {
           item: opts.item,
           count: Number(opts.count),
           nbt: nbt as JsonNbt | undefined,
+          armor: armor as ArmorSpec | undefined,
           playerFacing: opts.playerFacing as 'north' | 'south' | 'east' | 'west' | undefined,
           dim: opts.dim,
         });
