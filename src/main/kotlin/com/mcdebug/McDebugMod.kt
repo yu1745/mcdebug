@@ -7,6 +7,7 @@ import com.mcdebug.api.FixtureOps
 import com.mcdebug.api.FluidOps
 import com.mcdebug.api.InventoryOps
 import com.mcdebug.api.RedstoneOps
+import com.mcdebug.api.ReflectOps
 import com.mcdebug.api.ScreenOps
 import com.mcdebug.api.ScanOps
 import com.mcdebug.api.ServerOps
@@ -75,6 +76,7 @@ object McDebugMod : DedicatedServerModInitializer {
             registerGroup("redstone", RedstoneOps)
             registerGroup("entity", EntityOps)
             registerGroup("fixture", FixtureOps)
+            registerGroup("reflect", ReflectOps)
         }
         dispatcher = d
         currentServer = server
