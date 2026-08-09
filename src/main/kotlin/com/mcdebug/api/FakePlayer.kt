@@ -1,6 +1,11 @@
 package com.mcdebug.api
 
+import com.google.gson.JsonObject
+import com.mcdebug.rpc.RpcErrors
+import com.mcdebug.rpc.RpcException
 import com.mojang.authlib.GameProfile
+import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents
+import net.minecraft.entity.Entity
 import net.minecraft.network.ClientConnection
 import net.minecraft.network.NetworkSide
 import net.minecraft.network.packet.Packet
@@ -8,6 +13,7 @@ import net.minecraft.server.MinecraftServer
 import net.minecraft.server.network.ServerPlayNetworkHandler
 import net.minecraft.server.network.ServerPlayerEntity
 import net.minecraft.server.world.ServerWorld
+import net.minecraft.world.GameMode
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import java.util.UUID
@@ -15,38 +21,32 @@ import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 
 /**
- * Stable fake ServerPlayerEntity used as the placer for world.placeAsPlayer
- * and the interactor for world.useOnBlock / world.attackBlock.
+ * Fake ServerPlayerEntity used by the interaction RPCs (world.placeAsPlayer,
+ * world.useOnBlock, world.attackBlock, world.breakBlock, world.useItem,
+ * world.useItemHold, world.interactEntity, world.attackEntity, ...).
  *
- * Why a real ServerPlayerEntity (not null):
- *   - The vanilla BlockItem.place pipeline calls onPlaced(world, pos, state, placer, stack)
- *     and Criteria.PLACED_BLOCK.trigger(placer, ...). With a null placer, mod code that
- *     branches on context.getPlayer() != null sees the wrong branch and stats/advancements
- *     are never credited.
- *   - The "stable" requirement is just a stable UUID. The same GameProfile is reused
- *     across all calls, so any mod that records "placed by" sees a consistent identity
- *     instead of a fresh null every time.
+ * The fake player is SPAWNED into the world: it is created through the same path
+ * real players use (`ServerWorld.onPlayerConnected`), so it is registered in the
+ * world's entity manager and ticked every server tick. Consequences:
+ *   - `world.getPlayers()`, `getEntitiesByClass(ServerPlayerEntity...)`, mob
+ *     targeting and per-player tick hooks all see it — mods that initialize
+ *     per-player state in join/tick hooks no longer crash on null state.
+ *   - It is NOT registered in PlayerManager: invisible to /list, @a, tab list
+ *     and permission plugins, and no packets are ever sent to a real client
+ *     (the network handler is a no-op that drops all outbound packets, so
+ *     openHandledScreen / sendMessageToClient / Criteria.trigger() don't NPE).
+ *   - Its presence in `world.players` keeps the world ticking even with no real
+ *     players online (desirable for a debug tool).
  *
- * One instance is kept per (server, world) pair:
- *   - ServerPlayerEntity's constructor calls moveToSpawn(world) which does an O(N) spawn
- *     search; caching amortizes this to a one-time cost per (server, world).
- *   - We never call world.spawnEntity on the player, so it never enters the world's
- *     entity list and is never ticked.
- *   - Per call we set its position to the placement pos (for sound falloff) and
- *     yaw/pitch from the playerFacing param. The cached instance is mutated, not cloned.
+ * Because it is spawned, the player must never die or drift: it is kept
+ * invulnerable, gravity-less and velocity-reset every tick (see
+ * [ensureProtected] and the keepalive registered by [install]). The resting
+ * game mode is SURVIVAL; every RPC applies its own mode via the optional
+ * `gamemode` param (default survival) and restores afterwards.
  *
- * Network handler:
- *   - The fake player has a no-op ServerPlayNetworkHandler that silently drops all
- *     outbound packets. This allows mod code that calls player.openHandledScreen(),
- *     player.sendMessageToClient(), Criteria.trigger(), etc. to work without NPE.
- *   - The handler is NOT ticked (the player is never spawned), so no keep-alive or
- *     position-sync packets are sent.
- *
- * Limitations vs a real player:
- *   - Packets are silently dropped — no real client receives them. This means GUI
- *     screens open server-side but the fake player can't interact with them.
- *   - Advancement triggers fire on the fake player's tracker, not visible to real players.
- *   - The player's inventory is managed per-call (set before use, cleared after).
+ * One instance is kept per (server, world) pair, plus one per screen session
+ * (ScreenOps). All interaction state (position, yaw/pitch, hand stacks) is set
+ * per call and cleaned up afterwards, so calls are isolated.
  */
 internal object FakePlayerPool {
     private val LOGGER: Logger = LoggerFactory.getLogger("mcdebug-fakeplayer")
@@ -59,6 +59,9 @@ internal object FakePlayerPool {
     )
 
     private val cache = HashMap<Pair<MinecraftServer, ServerWorld>, ServerPlayerEntity>()
+
+    /** Every player created through this pool (cached + per-screen-session), for keepalive/pruning. */
+    private val allSpawned = HashSet<ServerPlayerEntity>()
 
     /**
      * Single global lock serializing all fake-player interactions.
@@ -80,18 +83,22 @@ internal object FakePlayerPool {
      */
     private val interactionLock = ReentrantLock()
 
-    fun get(server: MinecraftServer, world: ServerWorld): ServerPlayerEntity =
-        cache.getOrPut(server to world) { create(server, world, PROFILE) }
+    fun get(server: MinecraftServer, world: ServerWorld): ServerPlayerEntity {
+        val key = server to world
+        cache[key]?.let { if (!it.isRemoved) return it }
+        val p = create(server, world, PROFILE)
+        cache[key] = p
+        return p
+    }
 
     fun create(server: MinecraftServer, world: ServerWorld, profile: GameProfile): ServerPlayerEntity {
         val p = ServerPlayerEntity(server, world, profile)
-        // creative + invulnerable + flying so:
-        //   - the placed/used stack isn't decremented (creative mode)
-        //   - sound / GameEvent / onPlaced see a "creative" interactor
-        p.abilities.creativeMode = true
-        p.abilities.invulnerable = true
-        p.abilities.flying = true
-        p.setInvulnerable(true)
+        // Resting state: survival + protected (a spawned player must never die or drift).
+        p.abilities.creativeMode = false
+        p.abilities.allowModifyWorld = true
+        p.abilities.flying = false
+        p.abilities.allowFlying = false
+        ensureProtected(p)
 
         // Install a no-op network handler so mod code that calls
         // player.openHandledScreen() / player.sendMessageToClient() /
@@ -105,17 +112,158 @@ internal object FakePlayerPool {
         }
         p.networkHandler = handler
 
+        // Spawn into the world through the same path real players use
+        // (world.players list + entity manager): the player is ticked every server
+        // tick, visible to world.getPlayers() / entity queries, and fires
+        // entity-load / join hooks. It is NOT in PlayerManager and never receives
+        // packets.
+        world.onPlayerConnected(p)
+        allSpawned.add(p)
+
         return p
     }
 
     /**
      * Run [block] with the fake player for (server, world) while holding the
-     * interaction lock. Use this instead of `get(...)` for any handler that
-     * mutates fake-player state.
+     * interaction lock. Applies [gamemode] (default SURVIVAL) for the duration
+     * of the block and restores the resting state afterwards.
      */
-    inline fun <T> withFakePlayer(
+    fun <T> withFakePlayer(
         server: MinecraftServer,
         world: ServerWorld,
+        gamemode: GameMode = GameMode.SURVIVAL,
         block: (ServerPlayerEntity) -> T,
-    ): T = interactionLock.withLock { block(get(server, world)) }
+    ): T = interactionLock.withLock {
+        val player = get(server, world)
+        val oldAbilities = AbilitiesSnapshot.capture(player)
+        val oldGameMode = player.interactionManager.gameMode
+        try {
+            applyGameMode(player, gamemode)
+            block(player)
+        } finally {
+            oldAbilities.restore(player)
+            player.changeGameMode(oldGameMode)
+            ensureProtected(player)
+        }
+    }
+
+    /**
+     * Parse the optional `gamemode` param of a fake-player command.
+     * Default: survival. Override: "creative".
+     */
+    fun gameModeFrom(p: JsonObject?): GameMode {
+        val s = p?.getStringOrNull("gamemode") ?: return GameMode.SURVIVAL
+        return when (s.lowercase()) {
+            "survival" -> GameMode.SURVIVAL
+            "creative" -> GameMode.CREATIVE
+            else -> throw RpcException(
+                RpcErrors.INVALID_PARAMS,
+                "invalid gamemode: $s (allowed: survival, creative)"
+            )
+        }
+    }
+
+    /**
+     * Set the fake player's game mode through the vanilla API
+     * (ServerPlayerInteractionManager.changeGameMode) so game-mode hooks fire,
+     * then re-assert the protection flags survival mode clears.
+     */
+    fun applyGameMode(player: ServerPlayerEntity, mode: GameMode) {
+        player.changeGameMode(mode)
+        player.abilities.allowModifyWorld = true
+        ensureProtected(player)
+    }
+
+    /** Keep the spawned fake player from dying, falling or drifting. */
+    fun ensureProtected(player: ServerPlayerEntity) {
+        player.setInvulnerable(true)
+        player.abilities.invulnerable = true
+        player.setNoGravity(true)
+        player.setVelocity(0.0, 0.0, 0.0)
+        player.fallDistance = 0f
+        player.setOnGround(true)
+    }
+
+    /** Remove a fake player from its world (used by ScreenOps session teardown). */
+    fun discard(player: ServerPlayerEntity) {
+        allSpawned.remove(player)
+        cache.entries.removeIf { (_, p) -> p === player }
+        val w = player.world
+        if (!player.isRemoved && w is ServerWorld) {
+            w.removePlayer(player, Entity.RemovalReason.DISCARDED)
+        }
+    }
+
+    /** Register the keepalive tick. Called from McDebugMod's onServerStarted hook. */
+    fun install() {
+        if (installed) return
+        installed = true
+        ServerTickEvents.END_SERVER_TICK.register {
+            // Prune removed players (killed / world unloaded) and pin the rest in place.
+            cache.entries.removeIf { (_, p) ->
+                if (p.isRemoved) { allSpawned.remove(p); true } else { pin(p); false }
+            }
+            allSpawned.removeIf { p ->
+                if (p.isRemoved) true else { pin(p); false }
+            }
+        }
+    }
+
+    /** Called on server stopping: discard every spawned fake player. */
+    fun shutdown() {
+        installed = false
+        allSpawned.forEach { p ->
+            runCatching {
+                if (!p.isRemoved) {
+                    val w = p.world
+                    if (w is ServerWorld) w.removePlayer(p, Entity.RemovalReason.DISCARDED)
+                }
+            }
+        }
+        allSpawned.clear()
+        cache.clear()
+    }
+
+    private var installed = false
+
+    private fun pin(player: ServerPlayerEntity) {
+        player.setNoGravity(true)
+        player.setVelocity(0.0, 0.0, 0.0)
+        player.fallDistance = 0f
+        player.setOnGround(true)
+        player.setInvulnerable(true)
+        player.abilities.invulnerable = true
+    }
+
+    private data class AbilitiesSnapshot(
+        val invulnerable: Boolean,
+        val flying: Boolean,
+        val allowFlying: Boolean,
+        val creativeMode: Boolean,
+        val allowModifyWorld: Boolean,
+        val flySpeed: Float,
+        val walkSpeed: Float
+    ) {
+        fun restore(player: ServerPlayerEntity) {
+            player.abilities.invulnerable = invulnerable
+            player.abilities.flying = flying
+            player.abilities.allowFlying = allowFlying
+            player.abilities.creativeMode = creativeMode
+            player.abilities.allowModifyWorld = allowModifyWorld
+            player.abilities.setFlySpeed(flySpeed)
+            player.abilities.setWalkSpeed(walkSpeed)
+        }
+
+        companion object {
+            fun capture(player: ServerPlayerEntity): AbilitiesSnapshot = AbilitiesSnapshot(
+                invulnerable = player.abilities.invulnerable,
+                flying = player.abilities.flying,
+                allowFlying = player.abilities.allowFlying,
+                creativeMode = player.abilities.creativeMode,
+                allowModifyWorld = player.abilities.allowModifyWorld,
+                flySpeed = player.abilities.flySpeed,
+                walkSpeed = player.abilities.walkSpeed
+            )
+        }
+    }
 }

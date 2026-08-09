@@ -54,13 +54,7 @@ object ServerOps : RpcHandlerGroup {
             var traceJson: JsonObject? = null
             var methodDesc = ""
             var setItemInHandTest = ""
-            FakePlayerPool.withFakePlayer(server, world) { fp ->
-                val oldGM = fp.interactionManager.gameMode
-                val oldInv = fp.isInvulnerable
-                fp.changeGameMode(GameMode.SURVIVAL)
-                fp.abilities.creativeMode = false
-                fp.abilities.invulnerable = false
-                fp.setInvulnerable(false)
+            FakePlayerPool.withFakePlayer(server, world, FakePlayerPool.gameModeFrom(p)) { fp ->
                 fp.setStackInHand(Hand.MAIN_HAND, stack.copy())
                 fp.refreshPositionAndAngles(pos.x + 0.5, pos.y + 1.5, pos.z + 0.5, 0f, 90f)
                 try {
@@ -210,8 +204,6 @@ object ServerOps : RpcHandlerGroup {
                 } finally {
                     fp.setStackInHand(Hand.MAIN_HAND, ItemStack.EMPTY)
                     fp.isSneaking = false
-                    fp.setInvulnerable(oldInv)
-                    fp.changeGameMode(oldGM)
                 }
             }
             JsonObject().apply {

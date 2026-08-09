@@ -10,9 +10,6 @@ import com.mcdebug.rpc.RpcHandler
 import com.mcdebug.rpc.RpcHandlerGroup
 import com.mcdebug.util.NbtJson
 import com.mcdebug.util.ServerContext
-import net.fabricmc.fabric.api.event.player.AttackBlockCallback
-import net.fabricmc.fabric.api.event.player.AttackEntityCallback
-import net.fabricmc.fabric.api.event.player.UseBlockCallback
 import net.fabricmc.fabric.api.event.player.UseEntityCallback
 import net.minecraft.block.Block
 import net.minecraft.block.BlockState
@@ -22,14 +19,12 @@ import net.minecraft.entity.LivingEntity
 import net.minecraft.entity.attribute.EntityAttributes
 import net.minecraft.entity.player.PlayerEntity
 import net.minecraft.item.BlockItem
-import net.minecraft.registry.Registries
-import net.minecraft.item.ItemPlacementContext
 import net.minecraft.item.ItemStack
-import net.minecraft.item.ItemUsageContext
 import net.minecraft.nbt.NbtCompound
+import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket
+import net.minecraft.registry.Registries
 import net.minecraft.server.MinecraftServer
 import net.minecraft.server.network.ServerPlayerEntity
-import net.minecraft.server.world.ChunkTicketType
 import net.minecraft.server.world.ServerWorld
 import net.minecraft.util.ActionResult
 import net.minecraft.util.Hand
@@ -40,7 +35,6 @@ import net.minecraft.util.math.BlockPos
 import net.minecraft.util.math.ChunkPos
 import net.minecraft.util.math.Direction
 import net.minecraft.util.math.Vec3d
-import net.minecraft.world.GameMode
 import kotlin.math.ceil
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
@@ -59,6 +53,7 @@ object WorldOps : RpcHandlerGroup {
         "useItemHold" to ::useItemHold,
         "useOnBlock" to ::useOnBlock,
         "attackBlock" to ::attackBlock,
+        "breakBlock" to ::breakBlock,
         "interactEntity" to ::interactEntity,
         "attackEntity" to ::attackEntity,
         "getRegion" to ::getRegion,
@@ -145,12 +140,12 @@ object WorldOps : RpcHandlerGroup {
      * if the target pos is non-replaceable.
      *
      * The placer is a stable fake ServerPlayerEntity (UUID 8c0a4d6e-..., name
-     * "[mcdebug_fake_player]"). This is shared across all calls and all dims, so
-     * mods that record "placed by" see a consistent identity. The player is in
-     * creative + invulnerable + flying mode, so the placed stack is not decremented
-     * and survival-mode interceptions don't fire. Advancement / stat triggers fire
-     * but on the fake player's tracker (not a real player's), so they have no
-     * observable effect.
+     * "[mcdebug_fake_player]"), spawned into the world and shared across all calls
+     * and all dims, so mods that record "placed by" see a consistent identity.
+     * Game mode defaults to SURVIVAL (the placed item is consumed from the hand);
+     * pass `gamemode=creative` to place without consuming. Advancement / stat
+     * triggers fire but on the fake player's tracker (not a real player's), so
+     * they have no observable effect.
      *
      * Semantics of `playerFacing`: it is the direction the player is LOOKING when
      * they click — NOT the direction you want the placed block to face. Vanilla
@@ -172,6 +167,7 @@ object WorldOps : RpcHandlerGroup {
      *                                    horizontal, else north
      *   nbt            object  optional   ItemStack NBT (BlockEntityTag for chest,
      *                                    BlockStateTag for forcing state, etc.)
+     *   gamemode       string  optional   survival (default) or creative
      *   dim            string  optional
      */
     private fun placeAsPlayer(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
@@ -201,14 +197,15 @@ object WorldOps : RpcHandlerGroup {
                 stack.nbt = NbtJson.fromJson(nbtEl) as? NbtCompound
             }
 
-            // Place the stable fake player at the placement pos with rotation set from
-            // playerFacing. Real Entity.getYaw/getPitch flow into ItemPlacementContext's
-            // getPlayerLookDirection / getHorizontalPlayerFacing / getPlayerYaw, so we
-            // don't need to override those anymore.
-            FakePlayerPool.withFakePlayer(server, world) { fakePlayer ->
-                fakePlayer.refreshPositionAndAngles(
-                    pos.x + 0.5, pos.y + 0.5, pos.z + 0.5,
-                    yawFor(playerFacing), pitchFor(playerFacing)
+            val gamemode = FakePlayerPool.gameModeFrom(p)
+            var ok = false
+            var itemAfter = ItemStack.EMPTY
+            FakePlayerPool.withFakePlayer(server, world, gamemode) { fakePlayer ->
+                // Auto-position: keep the current spot if it can reach the click and does
+                // not obstruct the placement target; otherwise teleport out of the way.
+                positionForPlacement(
+                    fakePlayer, pos, neighbor, face,
+                    yawFor(playerFacing), pitchFor(playerFacing),
                 )
 
                 // Click point: center of the neighbor face that was hit, offset by face*0.5
@@ -219,13 +216,22 @@ object WorldOps : RpcHandlerGroup {
                     neighbor.z + 0.5 + face.offsetZ * 0.5
                 )
                 val hitResult = BlockHitResult(hitPos, face, neighbor, false)
-                // Use the player-taking ctor so context.getPlayer() returns the fake player.
-                val ctx = FixedTargetPlacementContext(fakePlayer, Hand.MAIN_HAND, stack, hitResult)
+                fakePlayer.setStackInHand(Hand.MAIN_HAND, stack.copy())
 
+                // Real path: the full right-click pipeline
+                // (ServerPlayerInteractionManager.interactBlock) — the exact method a real
+                // player's click goes through: UseBlockCallback (fabric mixin at HEAD) →
+                // BlockState.onUse on the clicked neighbor → ItemStack.useOnBlock →
+                // BlockItem.place, plus cooldown check and Criteria.ITEM_USED_ON_BLOCK.
+                // Note: if the neighbor block consumes the click itself (button, lever,
+                // chest, ...), the placement is skipped — exactly like a real player.
                 val before = world.getBlockState(pos)
-                val result: ActionResult = blockItem.place(ctx)
+                val result: ActionResult = fakePlayer.interactionManager.interactBlock(
+                    fakePlayer, world, fakePlayer.getStackInHand(Hand.MAIN_HAND), Hand.MAIN_HAND, hitResult
+                )
                 val after = world.getBlockState(pos)
-                val ok = result.isAccepted
+                ok = result.isAccepted
+                itemAfter = fakePlayer.getStackInHand(Hand.MAIN_HAND)
 
                 JsonObject().apply {
                     add("pos", ServerContext.posAsJson(pos))
@@ -235,6 +241,8 @@ object WorldOps : RpcHandlerGroup {
                     addProperty("playerFacing", playerFacing.asString())
                     addProperty("placer", fakePlayer.name.string)
                     addProperty("placerUuid", fakePlayer.uuidAsString)
+                    addProperty("gamemode", gamemode.name.lowercase())
+                    add("itemAfter", ServerContext.itemStackToJson(itemAfter))
                     add("previous", ServerContext.blockStateToJson(before))
                     add("state", ServerContext.blockStateToJson(after))
                 }
@@ -256,44 +264,34 @@ object WorldOps : RpcHandlerGroup {
             val itemBefore = ServerContext.itemStackFromJson(server, itemId, count, p.get("nbt"))
 
             val sneaking = p.getBoolOrFalse("sneaking")
+            val gamemode = FakePlayerPool.gameModeFrom(p)
 
             var result: ActionResult = ActionResult.PASS
             var itemAfter = ItemStack.EMPTY
 
-            FakePlayerPool.withFakePlayer(server, world) { fakePlayer ->
-                val oldAbilities = FakePlayerAbilities.capture(fakePlayer)
-                val oldInvulnerable = fakePlayer.isInvulnerable
-                val oldGameMode = fakePlayer.interactionManager.gameMode
+            FakePlayerPool.withFakePlayer(server, world, gamemode) { fakePlayer ->
+                fakePlayer.isSneaking = sneaking
+                fakePlayer.setStackInHand(Hand.MAIN_HAND, itemBefore.copy())
 
-                try {
-                    fakePlayer.changeGameMode(GameMode.SURVIVAL)
-                    fakePlayer.abilities.creativeMode = false
-                    fakePlayer.abilities.invulnerable = false
-                    fakePlayer.abilities.flying = false
-                    fakePlayer.abilities.allowFlying = false
-                    fakePlayer.abilities.allowModifyWorld = true
-                    fakePlayer.setInvulnerable(false)
-                    fakePlayer.isSneaking = sneaking
-                    fakePlayer.setStackInHand(Hand.MAIN_HAND, itemBefore.copy())
+                // Real path: ServerPlayerInteractionManager.interactItem — the exact
+                // method a real right-click (use item) goes through: UseItemCallback
+                // (fabric mixin at HEAD), cooldown check, ItemStack.use, creative
+                // count/damage restore, inventory sync.
+                result = fakePlayer.interactionManager.interactItem(
+                    fakePlayer, world, fakePlayer.getStackInHand(Hand.MAIN_HAND), Hand.MAIN_HAND
+                )
+                itemAfter = fakePlayer.getStackInHand(Hand.MAIN_HAND).copy()
 
-                    val typedResult = fakePlayer.getStackInHand(Hand.MAIN_HAND).use(world, fakePlayer, Hand.MAIN_HAND)
-                    result = typedResult.result
-                    fakePlayer.setStackInHand(Hand.MAIN_HAND, typedResult.value)
-                    itemAfter = fakePlayer.getStackInHand(Hand.MAIN_HAND).copy()
-                } finally {
-                    fakePlayer.setStackInHand(Hand.MAIN_HAND, ItemStack.EMPTY)
-                    fakePlayer.isSneaking = false
-                    fakePlayer.isSprinting = false
-                    fakePlayer.setInvulnerable(oldInvulnerable)
-                    oldAbilities.restore(fakePlayer)
-                    fakePlayer.changeGameMode(oldGameMode)
-                }
+                fakePlayer.setStackInHand(Hand.MAIN_HAND, ItemStack.EMPTY)
+                fakePlayer.isSneaking = false
+                fakePlayer.isSprinting = false
             }
 
             JsonObject().apply {
                 addProperty("success", result.isAccepted)
                 addProperty("action", result.name.lowercase())
                 addProperty("sneaking", sneaking)
+                addProperty("gamemode", gamemode.name.lowercase())
                 add("itemBefore", ServerContext.itemStackToJson(itemBefore))
                 add("itemAfter", ServerContext.itemStackToJson(itemAfter))
             }
@@ -306,7 +304,8 @@ object WorldOps : RpcHandlerGroup {
      * protocol (use → usageTick × N → onStoppedUsing).
      *
      * Mirrors what a real client does on the server side:
-     *   1. Item.use(world, player, hand) — the "right-click press". A ranged weapon
+     *   1. ServerPlayerInteractionManager.interactItem — the "right-click press"
+     *      (UseItemCallback, cooldown check, creative count restore). A ranged weapon
      *      either starts using (setCurrentHand) or fires directly (IC2 mining
      *      laser, TConstruct shuriken/throwing axe).
      *   2. For weapons that entered the using state: usageTick is invoked once per
@@ -383,24 +382,15 @@ object WorldOps : RpcHandlerGroup {
             val projFilter: (net.minecraft.entity.Entity) -> Boolean = { it is net.minecraft.entity.projectile.ProjectileEntity }
             val projectilesBefore = world.getOtherEntities(null, worldBox, projFilter).map { it.uuid }.toSet()
 
+            val gamemode = FakePlayerPool.gameModeFrom(p)
             val cycles = JsonArray()
             var ammoStack = ItemStack.EMPTY
 
-            FakePlayerPool.withFakePlayer(server, world) { fakePlayer ->
-                val oldAbilities = FakePlayerAbilities.capture(fakePlayer)
-                val oldInvulnerable = fakePlayer.isInvulnerable
-                val oldGameMode = fakePlayer.interactionManager.gameMode
+            FakePlayerPool.withFakePlayer(server, world, gamemode) { fakePlayer ->
                 val oldMainHand = fakePlayer.getStackInHand(Hand.MAIN_HAND)
                 val oldOffHand = fakePlayer.getStackInHand(Hand.OFF_HAND)
 
                 try {
-                    fakePlayer.changeGameMode(GameMode.SURVIVAL)
-                    fakePlayer.abilities.creativeMode = false
-                    fakePlayer.abilities.invulnerable = false
-                    fakePlayer.abilities.flying = false
-                    fakePlayer.abilities.allowFlying = false
-                    fakePlayer.abilities.allowModifyWorld = true
-                    fakePlayer.setInvulnerable(false)
                     // Main hand = hotbar selectedSlot; pin it to 0 so the held
                     // weapon is always written to a known slot (and ammo in slot 8
                     // can never collide with it).
@@ -469,11 +459,14 @@ object WorldOps : RpcHandlerGroup {
                     var held = itemBefore.copy()
                     for (cycle in 0 until repeat) {
                         val cycleJson = JsonObject()
-                        // 1. Right-click press.
-                        val typed = held.use(world, fakePlayer, Hand.MAIN_HAND)
-                        held = typed.value
+                        // 1. Right-click press — through the real interaction-manager
+                        //    path (UseItemCallback, cooldown check, creative count restore).
+                        val useResult = fakePlayer.interactionManager.interactItem(
+                            fakePlayer, world, fakePlayer.getStackInHand(Hand.MAIN_HAND), Hand.MAIN_HAND
+                        )
+                        held = fakePlayer.getStackInHand(Hand.MAIN_HAND)
                         cycleJson.addProperty("cycle", cycle)
-                        cycleJson.addProperty("useResult", typed.result.name.lowercase())
+                        cycleJson.addProperty("useResult", useResult.name.lowercase())
                         cycleJson.addProperty("usingItem", fakePlayer.isUsingItem())
                         cycleJson.addProperty("mainHand", fakePlayer.getStackInHand(Hand.MAIN_HAND).item.toString())
                         cycleJson.addProperty("offHand", fakePlayer.getStackInHand(Hand.OFF_HAND).item.toString())
@@ -529,15 +522,13 @@ object WorldOps : RpcHandlerGroup {
                     fakePlayer.setStackInHand(Hand.OFF_HAND, oldOffHand)
                     fakePlayer.inventory.setStack(8, ItemStack.EMPTY)
                     fakePlayer.isSneaking = false
-                    fakePlayer.setInvulnerable(oldInvulnerable)
-                    oldAbilities.restore(fakePlayer)
-                    fakePlayer.changeGameMode(oldGameMode)
 
                     JsonObject().apply {
                         add("cycles", cycles)
                         add("projectiles", projectiles)
                         add("ammo", ServerContext.itemStackToJson(ammoStack))
                         add("itemBefore", ServerContext.itemStackToJson(itemBefore))
+                        addProperty("gamemode", gamemode.name.lowercase())
                     }
                 } catch (e: Throwable) {
                     // Best-effort cleanup so the pooled fake player stays sane.
@@ -547,9 +538,6 @@ object WorldOps : RpcHandlerGroup {
                         fakePlayer.setStackInHand(Hand.OFF_HAND, oldOffHand)
                         fakePlayer.inventory.setStack(8, ItemStack.EMPTY)
                         fakePlayer.isSneaking = false
-                        fakePlayer.setInvulnerable(oldInvulnerable)
-                        oldAbilities.restore(fakePlayer)
-                        fakePlayer.changeGameMode(oldGameMode)
                     }
                     throw e
                 }
@@ -559,21 +547,21 @@ object WorldOps : RpcHandlerGroup {
     /**
      * Simulate right-clicking (using) a block with an item in hand.
      *
-     * Mirrors the full interaction pipeline of ServerPlayerInteractionManager.interactBlock,
-     * including Fabric API event callbacks (UseBlockCallback) that mod handlers
-     * (e.g. IC2 wrench rotation) register on. The pipeline is:
-     *   0. UseBlockCallback.EVENT.invoker().interact(player, world, hand, hitResult)
-     *      — Fabric API event. Mod handlers (wrench, etc.) register here. If non-PASS,
-     *        the interaction is consumed and vanilla phases are skipped.
+     * Routes through the real ServerPlayerInteractionManager.interactBlock — the exact
+     * method a real player's right-click goes through. The pipeline is:
+     *   0. UseBlockCallback (fabric mixin at HEAD of interactBlock) — mod handlers
+     *      (wrench, etc.) register here. If non-PASS, the interaction is consumed and
+     *      vanilla phases are skipped.
      *   1. BlockState.onUse(world, player, hand, hit) — the block handles the interaction
      *      (e.g. lever toggles, button presses, door opens, chest/furnace opens GUI).
-     *      Skipped if the player is sneaking with an item in hand (vanilla sneaking check).
+     *      Skipped if the player is sneaking with an item in hand (vanilla sneaking rule).
      *   2. If the block returns PASS, ItemStack.useOnBlock(context) — the item handles it
      *      (e.g. bucket picks up water, flint-and-steel ignites, fluid cell injects fluid).
      *
      * The fake player is positioned just outside the target face. Its facing direction
      * is controlled by the `playerFacing` param (default: looking at the clicked face).
-     * It is in creative mode so the stack is NOT decremented.
+     * Game mode defaults to SURVIVAL (stacks are consumed / containers drain properly);
+     * pass `gamemode=creative` to preserve stacks.
      *
      * Params:
      *   pos            [x,y,z] required   block being right-clicked
@@ -586,17 +574,21 @@ object WorldOps : RpcHandlerGroup {
      *                                    north|south|east|west). Controls player.horizontalFacing
      *                                    which mods read for rotation. Default: face.opposite
      *                                    (player looks at the clicked face).
+     *   gamemode       string  optional   survival (default) or creative
      *   dim            string  optional
      *
      * Returns:
      *   success         boolean  true if any handler consumed the interaction
      *   action          string   "success" | "fail" | "pass"
-     *   eventConsumed   boolean  true if a Fabric API UseBlockCallback handler consumed
-     *                             the interaction (e.g. IC2 wrench rotation)
-     *   blockConsumed   boolean  true if BlockState.onUse returned accepted
-     *   itemConsumed    boolean  true if ItemStack.useOnBlock returned accepted
+     *   eventConsumed   boolean  the UseBlockCallback consumed the click with no vanilla
+     *                             side effect (e.g. a protection mod denying). Heuristic:
+     *                             non-PASS result with item/state/screen unchanged.
+     *   blockConsumed   boolean  BlockState.onUse handled it (lever, chest, ...) or the
+     *                             block state changed. Heuristic, see code.
+     *   itemConsumed    boolean  ItemStack.useOnBlock handled it and changed the stack.
      *   sneaking        boolean  the effective sneaking state used
      *   playerFacing    string   the effective player facing direction used
+     *   gamemode        string   the resolved game mode
      *   itemBefore      object   item stack before interaction
      *   itemAfter       object   item stack after interaction
      *   blockState      object   block state AFTER the interaction
@@ -620,11 +612,9 @@ object WorldOps : RpcHandlerGroup {
 
             // Set up fake player with the item in main hand
             val sneaking = p.getBoolOrFalse("sneaking")
-            // Interaction game mode: "survival" runs the interaction as a survival player
-            // (held item is consumed / containers are properly drained), any other value
-            // keeps the default creative fake player. Needed to reproduce bucket/basin
-            // interactions where the container item must actually change hands.
-            val gamemode = p.getStringOrNull("gamemode")
+            // Interaction game mode: default survival (held item is consumed / containers
+            // are properly drained); "creative" preserves stacks (vanilla creative rules).
+            val gamemode = FakePlayerPool.gameModeFrom(p)
 
             // Player facing: explicit override or default to looking at the clicked face
             val playerFacing = p.getDirectionOrNull("playerFacing")
@@ -636,17 +626,17 @@ object WorldOps : RpcHandlerGroup {
             var itemAfter: ItemStack = ItemStack.EMPTY
             var creativeModeSnapshot: Boolean? = null
 
-            FakePlayerPool.withFakePlayer(server, world) { fakePlayer ->
+            FakePlayerPool.withFakePlayer(server, world, gamemode) { fakePlayer ->
                 fakePlayer.setStackInHand(Hand.MAIN_HAND, itemBefore.copy())
                 fakePlayer.isSneaking = sneaking
 
-                // Position player outside the block face; yaw follows playerFacing so that
-                // player.horizontalFacing (= Direction.fromRotation(yaw)) matches playerFacing.
-                fakePlayer.refreshPositionAndAngles(
-                    pos.x + 0.5 + face.offsetX * 1.0,
-                    pos.y + 0.5 + face.offsetY * 1.0,
-                    pos.z + 0.5 + face.offsetZ * 1.0,
-                    yawFor(playerFacing), pitchFor(face.opposite)
+                // Auto-position: keep the current spot if it can reach the click and does
+                // not obstruct the block this interaction may place (pos + face);
+                // otherwise teleport to the far side of the clicked block. yaw follows
+                // playerFacing so player.horizontalFacing matches it.
+                positionForPlacement(
+                    fakePlayer, pos.offset(face), pos, face,
+                    yawFor(playerFacing), pitchFor(face.opposite),
                 )
 
                 // Hit point: center of the target face
@@ -657,80 +647,48 @@ object WorldOps : RpcHandlerGroup {
                 )
                 val hitResult = BlockHitResult(hitPos, face, pos, false)
 
-                // Phase 0: Fabric API UseBlockCallback — mod handlers (wrench, etc.) register here.
-                // Mirrors the Fabric mixin at HEAD of ServerPlayerInteractionManager.interactBlock:
-                //   if result != PASS → cancel, return result.
-                eventResult = UseBlockCallback.EVENT.invoker()
-                    .interact(fakePlayer, world, Hand.MAIN_HAND, hitResult)
+                val stateBefore = world.getBlockState(pos)
+                val itemBeforeSnapshot = fakePlayer.getStackInHand(Hand.MAIN_HAND).copy()
 
-                val oldAbilities = FakePlayerAbilities.capture(fakePlayer)
-                val oldInvulnerable = fakePlayer.isInvulnerable
-                val oldGameMode = fakePlayer.interactionManager.gameMode
+                // Real path: ServerPlayerInteractionManager.interactBlock — the exact method
+                // a real right-click goes through: UseBlockCallback (fabric mixin at HEAD)
+                // → BlockState.onUse (with the vanilla sneaking rule) → ItemStack.useOnBlock,
+                // plus the cooldown check and Criteria.ITEM_USED_ON_BLOCK.
+                val result = fakePlayer.interactionManager.interactBlock(
+                    fakePlayer, world, fakePlayer.getStackInHand(Hand.MAIN_HAND), Hand.MAIN_HAND, hitResult
+                )
 
-                try {
-                    if (gamemode == "survival") {
-                        fakePlayer.changeGameMode(GameMode.SURVIVAL)
-                        fakePlayer.abilities.creativeMode = false
-                        fakePlayer.abilities.invulnerable = false
-                        fakePlayer.abilities.flying = false
-                        fakePlayer.abilities.allowFlying = false
-                        fakePlayer.abilities.allowModifyWorld = true
-                        fakePlayer.setInvulnerable(false)
-                    }
+                val stateAfter = world.getBlockState(pos)
+                itemAfter = fakePlayer.getStackInHand(Hand.MAIN_HAND).copy()
+                creativeModeSnapshot = fakePlayer.abilities.creativeMode
 
-                    if (eventResult.isAccepted || eventResult == ActionResult.FAIL) {
-                        // Fabric event consumed the interaction — skip vanilla phases entirely
-                        blockResult = ActionResult.PASS
-                        itemResult = ActionResult.PASS
-                    } else {
-                        // Vanilla pipeline: mirrors ServerPlayerInteractionManager.interactBlock
-                        val state = world.getBlockState(pos)
-
-                        // Vanilla sneaking check: if player is sneaking with an item in hand,
-                        // skip block.onUse and go directly to item.useOnBlock.
-                        // Matches vanilla: bl2 = player.shouldCancelInteraction() && hasItemInHand
-                        val hasItemInHand = !fakePlayer.getMainHandStack().isEmpty || !fakePlayer.getOffHandStack().isEmpty
-                        val skipBlockUse = sneaking && hasItemInHand
-
-                        // Phase 1: BlockState.onUse (block handles interaction)
-                        blockResult = if (!skipBlockUse) {
-                            state.onUse(world, fakePlayer, Hand.MAIN_HAND, hitResult)
-                        } else {
-                            ActionResult.PASS
-                        }
-
-                        // Phase 2: If block didn't consume, try ItemStack.useOnBlock
-                        itemResult = if (!blockResult.isAccepted) {
-                            val stack = fakePlayer.getStackInHand(Hand.MAIN_HAND)
-                            if (stack.isEmpty) {
-                                ActionResult.PASS
-                            } else {
-                                // Creative mode: preserve original count (same as vanilla interactBlock)
-                                val originalCount = stack.count
-                                val ctx = ItemUsageContext(fakePlayer, Hand.MAIN_HAND, hitResult)
-                                val result = stack.useOnBlock(ctx)
-                                stack.count = originalCount
-                                result
-                            }
-                        } else {
-                            ActionResult.PASS
-                        }
-                    }
-
-                    // Read back the (possibly modified) item stack
-                    itemAfter = fakePlayer.getStackInHand(Hand.MAIN_HAND)
-                    creativeModeSnapshot = fakePlayer.abilities.creativeMode
-                } finally {
-                    // Clean up: clear hand, reset sneaking, and restore the fake player's
-                    // game mode / abilities so the next call starts fresh.
-                    fakePlayer.setStackInHand(Hand.MAIN_HAND, ItemStack.EMPTY)
-                    fakePlayer.isSneaking = false
-                    if (gamemode == "survival") {
-                        fakePlayer.setInvulnerable(oldInvulnerable)
-                        oldAbilities.restore(fakePlayer)
-                        fakePlayer.changeGameMode(oldGameMode)
-                    }
+                // The phase breakdown is inferred from observable side effects (the vanilla
+                // method does not expose per-phase results):
+                //   - eventConsumed: the callback consumed the click with no vanilla side
+                //     effect (e.g. a protection mod denying → FAIL, nothing changed).
+                //   - itemConsumed: the held stack changed (bucket pickup, survival placement...).
+                //   - blockConsumed: block.onUse handled it (lever, chest...) or the block
+                //     state changed (creative placement).
+                val itemChanged = !ItemStack.areEqual(itemBeforeSnapshot, itemAfter)
+                val stateChanged = stateBefore != stateAfter
+                val screenOpened = fakePlayer.currentScreenHandler !== fakePlayer.playerScreenHandler
+                if (screenOpened) {
+                    // block.onUse opened a container GUI — close it so the shared fake
+                    // player does not keep a stale open screen between calls.
+                    fakePlayer.closeHandledScreen()
                 }
+
+                eventResult = if (result != ActionResult.PASS && !itemChanged && !stateChanged && !screenOpened) {
+                    result
+                } else {
+                    ActionResult.PASS
+                }
+                blockResult = if (result.isAccepted && !itemChanged && eventResult == ActionResult.PASS) result else ActionResult.PASS
+                itemResult = if (result.isAccepted && itemChanged) result else ActionResult.PASS
+
+                // Clean up: clear hand and reset sneaking (mode/abilities restored by the pool).
+                fakePlayer.setStackInHand(Hand.MAIN_HAND, ItemStack.EMPTY)
+                fakePlayer.isSneaking = false
             }
 
             val success = eventResult.isAccepted || blockResult.isAccepted || itemResult.isAccepted
@@ -748,7 +706,7 @@ object WorldOps : RpcHandlerGroup {
                 addProperty("face", face.asString())
                 addProperty("sneaking", sneaking)
                 addProperty("playerFacing", playerFacing.asString())
-                addProperty("gamemode", gamemode ?: "creative")
+                addProperty("gamemode", gamemode.name.lowercase())
                 addProperty("creativeMode", creativeModeSnapshot ?: false)
                 addProperty("eventConsumed", eventResult.isAccepted || eventResult == ActionResult.FAIL)
                 addProperty("blockConsumed", blockResult.isAccepted)
@@ -760,17 +718,20 @@ object WorldOps : RpcHandlerGroup {
         }
 
     /**
-     * Simulate left-clicking (attacking) a block.
+     * Simulate left-clicking (attacking) a block — the full real mining gesture.
      *
-     * Mirrors the full interaction pipeline of ServerPlayerInteractionManager
-     * processBlockBreakingAction(START_DESTROY_BLOCK), including Fabric API
-     * event callbacks (AttackBlockCallback) that mod handlers (e.g. IC2 wrench
-     * disassembly) register on. The pipeline is:
-     *   0. AttackBlockCallback.EVENT.invoker().interact(player, world, hand, pos, direction)
-     *      — Fabric API event. If non-PASS, skips vanilla phases.
-     *   1. Block.onBlockBreakStart — the "start mining" / "hit" action
-     *   2. If the block is not already broken, break it directly (creative mode),
-     *      firing Block.onBroken and loot drops
+     * Routes through ServerPlayerInteractionManager.processBlockBreakingAction with
+     * the exact sequence a real player sends: START_DESTROY_BLOCK → (hold: the same
+     * interactionManager.update() the server tick runs, fast-forwarded until the
+     * vanilla >= 70% stop-check passes) → STOP_DESTROY_BLOCK. AttackBlockCallback
+     * fires automatically (fabric mixin at HEAD of processBlockBreakingAction); a
+     * consuming handler cancels everything.
+     *
+     * Semantics:
+     *   - creative: the block breaks instantly (vanilla creative destroy).
+     *   - survival: the block breaks when the stop-check passes; the held tool is
+     *     used for mining speed and the final tryBreakBlock loot/damage.
+     *   - unbreakable blocks (bedrock, barrier): nothing happens; the block is kept.
      *
      * Params:
      *   pos            [x,y,z] required   block being left-clicked
@@ -780,15 +741,100 @@ object WorldOps : RpcHandlerGroup {
      *   nbt            object  optional   item NBT
      *   armor          object  optional   armor stacks keyed by head/chest/legs/feet;
      *                                    each value is {item,count,nbt}
-     *   gamemode       string  optional   survival or creative (default creative)
+     *   gamemode       string  optional   survival (default) or creative
      *   dim            string  optional
      *
      * Returns:
      *   broken           boolean  true if the block was broken
      *   eventConsumed    boolean  true if a Fabric API AttackBlockCallback handler
      *                              consumed the interaction (e.g. IC2 wrench disassembly)
+     *                              — inferred: not broken and block state unchanged
+     *   pos, face, gamemode, itemBefore, itemAfter, blockState
+     */
+    /**
+     * Simulate a player breaking a block through the real server-side break
+     * pipeline (ServerPlayerInteractionManager.tryBreakBlock).
+     *
+     * Unlike `attackBlock` (which simulates the mining gesture START→hold→STOP), this
+     * breaks the block immediately through the vanilla tryBreakBlock path: canMine
+     * check, creative instant break / survival drops + tool postMine, break events.
+     * A cancelled break (protection mods) returns broken=false and the block is kept.
+     *
+     * Params (same shape as attackBlock):
+     *   pos            [x,y,z] required
+     *   face           string  required   which face was hit (used for aim/placement)
+     *   item           string  optional   item id to hold (default: empty hand)
+     *   count          int     optional
+     *   nbt            object  optional
+     *   armor          object  optional
+     *   gamemode       string  optional   survival or creative (default survival)
+     *   dim            string  optional
+     *
+     * Returns:
+     *   broken           boolean  true if the block was actually broken
      *   pos, face, itemBefore, itemAfter, blockState
      */
+    private fun breakBlock(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
+        RpcContext.onServer(server) {
+            val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
+            val pos = ServerContext.pos(p.getAsJsonArray("pos"))
+            val face = p.requireDirection("face")
+            val world = ServerContext.world(server, p.getStringOrNull("dim"))
+            val gamemode = FakePlayerPool.gameModeFrom(p)
+
+            val itemBefore: ItemStack = if (p.has("item") && !p.get("item").isJsonNull) {
+                val itemId = p.requireString("item")
+                val count = p.getIntOr("count", 1)
+                val nbtEl = p.get("nbt")
+                ServerContext.itemStackFromJson(server, itemId, count, nbtEl)
+            } else {
+                ItemStack.EMPTY
+            }
+
+            var broken = false
+            var itemAfter = ItemStack.EMPTY
+
+            FakePlayerPool.withFakePlayer(server, world, gamemode) { fakePlayer ->
+                val oldArmor = installArmor(server, fakePlayer, p)
+
+                try {
+                    fakePlayer.setStackInHand(Hand.MAIN_HAND, itemBefore.copy())
+                    primeStackForGameplay(world, fakePlayer, fakePlayer.getStackInHand(Hand.MAIN_HAND), 0, true)
+
+                    val lookDir = face.opposite
+                    fakePlayer.refreshPositionAndAngles(
+                        pos.x + 0.5 + face.offsetX * 1.0,
+                        pos.y + 0.5 + face.offsetY * 1.0,
+                        pos.z + 0.5 + face.offsetZ * 1.0,
+                        yawFor(lookDir), pitchFor(lookDir)
+                    )
+
+                    // Real path: ServerPlayerInteractionManager.tryBreakBlock — the full
+                    // server-side break pipeline (canMine check, creative instant break /
+                    // survival drops + tool postMine, break events).
+                    if (!world.getBlockState(pos).isAir) {
+                        broken = fakePlayer.interactionManager.tryBreakBlock(pos)
+                    }
+
+                    itemAfter = fakePlayer.getStackInHand(Hand.MAIN_HAND).copy()
+                } finally {
+                    fakePlayer.setStackInHand(Hand.MAIN_HAND, ItemStack.EMPTY)
+                    restoreArmor(fakePlayer, oldArmor)
+                    fakePlayer.isSneaking = false
+                }
+            }
+
+            JsonObject().apply {
+                add("pos", ServerContext.posAsJson(pos))
+                addProperty("face", face.asString())
+                addProperty("broken", broken)
+                addProperty("gamemode", gamemode.name.lowercase())
+                add("itemBefore", ServerContext.itemStackToJson(itemBefore))
+                add("itemAfter", ServerContext.itemStackToJson(itemAfter))
+                add("blockState", ServerContext.blockStateToJson(world.getBlockState(pos)))
+            }
+        }
+
     private fun attackBlock(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
         RpcContext.onServer(server) {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
@@ -805,27 +851,15 @@ object WorldOps : RpcHandlerGroup {
                 ItemStack.EMPTY
             }
 
-            lateinit var eventResult: ActionResult
             var broken = false
+            var eventConsumed = false
             var itemAfter = ItemStack.EMPTY
-            val gamemode = p.getStringOrNull("gamemode")
+            val gamemode = FakePlayerPool.gameModeFrom(p)
 
-            FakePlayerPool.withFakePlayer(server, world) { fakePlayer ->
-                val oldAbilities = FakePlayerAbilities.capture(fakePlayer)
-                val oldInvulnerable = fakePlayer.isInvulnerable
-                val oldGameMode = fakePlayer.interactionManager.gameMode
+            FakePlayerPool.withFakePlayer(server, world, gamemode) { fakePlayer ->
                 val oldArmor = installArmor(server, fakePlayer, p)
 
                 try {
-                    if (gamemode == "survival") {
-                        fakePlayer.changeGameMode(GameMode.SURVIVAL)
-                        fakePlayer.abilities.creativeMode = false
-                        fakePlayer.abilities.invulnerable = false
-                        fakePlayer.abilities.flying = false
-                        fakePlayer.abilities.allowFlying = false
-                        fakePlayer.abilities.allowModifyWorld = true
-                        fakePlayer.setInvulnerable(false)
-                    }
                     fakePlayer.setStackInHand(Hand.MAIN_HAND, itemBefore.copy())
                     primeStackForGameplay(world, fakePlayer, fakePlayer.getStackInHand(Hand.MAIN_HAND), 0, true)
 
@@ -838,48 +872,38 @@ object WorldOps : RpcHandlerGroup {
                     )
 
                     val stateBefore = world.getBlockState(pos)
-                    val hitPos = Vec3d(
-                        pos.x + 0.5 + face.offsetX * 0.5,
-                        pos.y + 0.5 + face.offsetY * 0.5,
-                        pos.z + 0.5 + face.offsetZ * 0.5
-                    )
-                    val hitResult = BlockHitResult(hitPos, face, pos, false)
-
-                    // Phase 0: Fabric API AttackBlockCallback — mod handlers register here.
-                    // Mirrors the Fabric mixin at HEAD of processBlockBreakingAction(START_DESTROY_BLOCK):
-                    //   if result != PASS → sync block state to client, cancel.
-                    eventResult = AttackBlockCallback.EVENT.invoker()
-                        .interact(fakePlayer, world, Hand.MAIN_HAND, pos, face)
-
-                    if (eventResult.isAccepted || eventResult == ActionResult.FAIL) {
-                        // Fabric event consumed the interaction (e.g. IC2 wrench disassembly
-                        // breaks the block itself and spawns drops). Don't break again.
-                        broken = true
-                    } else {
-                        // Vanilla pipeline: onBlockBreakStart, then break the block.
-                        stateBefore.onBlockBreakStart(world, pos, fakePlayer)
-                        val heldTool = fakePlayer.getStackInHand(Hand.MAIN_HAND)
-                        if (!broken) {
-                            broken = if (!stateBefore.isAir) {
-                                val blockEntity = world.getBlockEntity(pos)
-                                stateBefore.block.onBroken(world, pos, stateBefore)
-                                // Pass the actual held stack into the loot context. The previous
-                                // empty tool bypassed Fortune and other tool-dependent loot logic
-                                // for this CLI path, even though the fake player held an item.
-                                Block.dropStacks(stateBefore, world, pos, blockEntity, fakePlayer, heldTool)
-                                world.setBlockState(pos, stateBefore.fluidState.blockState, Block.NOTIFY_ALL)
-                                true
-                            } else false
+                    if (!stateBefore.isAir) {
+                        val im = fakePlayer.interactionManager
+                        // Real mining gesture: START → hold (fast-forwarded through the same
+                        // interactionManager.update() the server tick runs) → STOP.
+                        // AttackBlockCallback fires automatically (fabric mixin at HEAD of
+                        // processBlockBreakingAction); a consuming handler cancels everything.
+                        im.processBlockBreakingAction(
+                            pos, PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, face, world.topY, 0
+                        )
+                        if (!world.getBlockState(pos).isAir) {
+                            // Survival: mine until the vanilla stop-check (>= 70% progress) passes.
+                            val delta = stateBefore.calcBlockBreakingDelta(fakePlayer, world, pos)
+                            val holdTicks = if (delta > 0f) {
+                                ceil(0.7 / delta - 1.0).toInt().coerceAtLeast(0)
+                            } else 0
+                            repeat(holdTicks) { im.update() }
+                            im.processBlockBreakingAction(
+                                pos, PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, face, world.topY, 0
+                            )
                         }
                     }
 
+                    val stateAfter = world.getBlockState(pos)
+                    broken = !stateBefore.isAir && stateAfter.isAir
+                    // A consuming AttackBlockCallback cancels the whole method, leaving the
+                    // block untouched (same observable as a refused break).
+                    eventConsumed = !broken && stateAfter == stateBefore
                     itemAfter = fakePlayer.getStackInHand(Hand.MAIN_HAND).copy()
                 } finally {
                     fakePlayer.setStackInHand(Hand.MAIN_HAND, ItemStack.EMPTY)
                     restoreArmor(fakePlayer, oldArmor)
-                    fakePlayer.setInvulnerable(oldInvulnerable)
-                    oldAbilities.restore(fakePlayer)
-                    fakePlayer.changeGameMode(oldGameMode)
+                    fakePlayer.isSneaking = false
                 }
             }
 
@@ -887,7 +911,8 @@ object WorldOps : RpcHandlerGroup {
                 add("pos", ServerContext.posAsJson(pos))
                 addProperty("face", face.asString())
                 addProperty("broken", broken)
-                addProperty("eventConsumed", eventResult.isAccepted || eventResult == ActionResult.FAIL)
+                addProperty("eventConsumed", eventConsumed)
+                addProperty("gamemode", gamemode.name.lowercase())
                 add("itemBefore", ServerContext.itemStackToJson(itemBefore))
                 add("itemAfter", ServerContext.itemStackToJson(itemAfter))
                 add("blockState", ServerContext.blockStateToJson(world.getBlockState(pos)))
@@ -897,15 +922,14 @@ object WorldOps : RpcHandlerGroup {
     /**
      * Simulate right-clicking (using) an entity with an item in hand.
      *
-     * Mirrors the server-side entity interaction pipeline from
-     * PlayerEntity.interact(entity, hand):
-     *   0. UseEntityCallback.EVENT.invoker().interact(player, world, hand, entity, hitResult)
-     *      — Fabric API event. If non-PASS, skip vanilla phases.
-     *   1. entity.interact(player, hand) — entity handles (e.g. villager opens trade,
-     *      sheep sets color, etc.)
-     *   2. If entity returns PASS and entity is LivingEntity:
-     *      itemStack.useOnEntity(player, livingEntity, hand) — item handles
-     *      (e.g. bucket milks cow, shears shear sheep, food feeds animal, etc.)
+     * Routes through the real PlayerEntity.interact(entity, hand) — the method a real
+     * player's right-click on an entity goes through:
+     *   0. UseEntityCallback — fired here manually at the same position the fabric
+     *      mixin fires it (HEAD of the packet handler's interact, before the real call).
+     *   1. entity.interact(player, hand) — entity handles (villager opens trade,
+     *      sheep sets color, ...)
+     *   2. If the entity returns PASS and is a LivingEntity: itemStack.useOnEntity —
+     *      the item handles (bucket milks cow, shears shear sheep, food feeds, ...)
      *
      * Params:
      *   entityUuid    string  required   UUID of the target entity
@@ -954,69 +978,54 @@ object WorldOps : RpcHandlerGroup {
             val sneaking = p.getBoolOrFalse("sneaking")
 
             val playerFacing = p.getDirectionOrNull("playerFacing") ?: Direction.SOUTH
+            val gamemode = FakePlayerPool.gameModeFrom(p)
             var eventResult: ActionResult = ActionResult.PASS
             var entityResult: ActionResult = ActionResult.PASS
             var itemResult: ActionResult = ActionResult.PASS
             var itemAfter = ItemStack.EMPTY
 
-            FakePlayerPool.withFakePlayer(server, world) { fakePlayer ->
-                val oldAbilities = FakePlayerAbilities.capture(fakePlayer)
-                val oldInvulnerable = fakePlayer.isInvulnerable
-                val oldGameMode = fakePlayer.interactionManager.gameMode
+            FakePlayerPool.withFakePlayer(server, world, gamemode) { fakePlayer ->
+                fakePlayer.setStackInHand(Hand.MAIN_HAND, itemBefore.copy())
+                fakePlayer.isSneaking = sneaking
 
-                try {
-                    // Entity interactions should reflect normal survival item results
-                    // such as bucket -> milk bucket and shears durability changes.
-                    fakePlayer.changeGameMode(GameMode.SURVIVAL)
-                    fakePlayer.abilities.creativeMode = false
-                    fakePlayer.abilities.invulnerable = false
-                    fakePlayer.abilities.flying = false
-                    fakePlayer.abilities.allowFlying = false
-                    fakePlayer.abilities.allowModifyWorld = true
-                    fakePlayer.setInvulnerable(false)
+                // Position player near the entity, looking at it
+                val eyePos = entity.eyePos
+                fakePlayer.refreshPositionAndAngles(
+                    eyePos.x, eyePos.y, eyePos.z,
+                    yawFor(playerFacing), 0f
+                )
 
-                    fakePlayer.setStackInHand(Hand.MAIN_HAND, itemBefore.copy())
-                    fakePlayer.isSneaking = sneaking
+                // Hit result pointing at entity center
+                val hitResult = EntityHitResult(entity, eyePos)
+                val itemBeforeSnapshot = fakePlayer.getStackInHand(Hand.MAIN_HAND).copy()
 
-                    // Position player near the entity, looking at it
-                    val eyePos = entity.eyePos
-                    fakePlayer.refreshPositionAndAngles(
-                        eyePos.x, eyePos.y, eyePos.z,
-                        yawFor(playerFacing), 0f
+                // UseEntityCallback is fired by the fabric mixin on the PACKET handler
+                // (ServerPlayNetworkHandler.onPlayerInteractEntity), not by
+                // PlayerEntity.interact — fire it here at the same position (before the
+                // real interact call, mirroring the mixin's order).
+                eventResult = UseEntityCallback.EVENT.invoker()
+                    .interact(fakePlayer, world, Hand.MAIN_HAND, entity, hitResult)
+
+                if (eventResult.isAccepted || eventResult == ActionResult.FAIL) {
+                    entityResult = ActionResult.PASS
+                    itemResult = ActionResult.PASS
+                } else {
+                    // Real path: PlayerEntity.interact — the method a real right-click on
+                    // an entity goes through: entity.interact(hand), then for living
+                    // entities ItemStack.useOnEntity, creative count restore, GameEvent.
+                    val result = fakePlayer.interact(entity, Hand.MAIN_HAND)
+                    val itemChanged = !ItemStack.areEqual(
+                        itemBeforeSnapshot, fakePlayer.getStackInHand(Hand.MAIN_HAND)
                     )
-
-                    // Hit result pointing at entity center
-                    val hitResult = EntityHitResult(entity, eyePos)
-
-                    // Phase 0: Fabric API UseEntityCallback
-                    eventResult = UseEntityCallback.EVENT.invoker()
-                        .interact(fakePlayer, world, Hand.MAIN_HAND, entity, hitResult)
-
-                    if (eventResult.isAccepted || eventResult == ActionResult.FAIL) {
-                        entityResult = ActionResult.PASS
-                        itemResult = ActionResult.PASS
-                    } else {
-                        // Phase 1: entity.interact(player, hand)
-                        entityResult = entity.interact(fakePlayer, Hand.MAIN_HAND)
-
-                        // Phase 2: if entity returned PASS and is LivingEntity, try item.useOnEntity
-                        itemResult = if (!entityResult.isAccepted && entity is LivingEntity) {
-                            val stack = fakePlayer.getStackInHand(Hand.MAIN_HAND)
-                            if (stack.isEmpty) ActionResult.PASS else stack.useOnEntity(fakePlayer, entity, Hand.MAIN_HAND)
-                        } else {
-                            ActionResult.PASS
-                        }
-                    }
-
-                    itemAfter = fakePlayer.getStackInHand(Hand.MAIN_HAND).copy()
-                } finally {
-                    fakePlayer.setStackInHand(Hand.MAIN_HAND, ItemStack.EMPTY)
-                    fakePlayer.isSneaking = false
-                    fakePlayer.isSprinting = false
-                    fakePlayer.setInvulnerable(oldInvulnerable)
-                    oldAbilities.restore(fakePlayer)
-                    fakePlayer.changeGameMode(oldGameMode)
+                    entityResult = if (result.isAccepted && !itemChanged) result else ActionResult.PASS
+                    itemResult = if (result.isAccepted && itemChanged) result else ActionResult.PASS
                 }
+
+                itemAfter = fakePlayer.getStackInHand(Hand.MAIN_HAND).copy()
+
+                fakePlayer.setStackInHand(Hand.MAIN_HAND, ItemStack.EMPTY)
+                fakePlayer.isSneaking = false
+                fakePlayer.isSprinting = false
             }
 
             val success = eventResult.isAccepted || entityResult.isAccepted || itemResult.isAccepted
@@ -1034,6 +1043,7 @@ object WorldOps : RpcHandlerGroup {
                 addProperty("entityUuid", entity.uuidAsString)
                 addProperty("sneaking", sneaking)
                 addProperty("playerFacing", playerFacing.asString())
+                addProperty("gamemode", gamemode.name.lowercase())
                 addProperty("eventConsumed", eventResult.isAccepted || eventResult == ActionResult.FAIL)
                 addProperty("entityConsumed", entityResult.isAccepted)
                 addProperty("itemConsumed", itemResult.isAccepted)
@@ -1093,30 +1103,17 @@ object WorldOps : RpcHandlerGroup {
                 ItemStack.EMPTY
             }
 
-            var eventResult: ActionResult = ActionResult.PASS
+            var eventConsumed = false
             var itemAfter = ItemStack.EMPTY
             var attackDamageBefore = 0.0
             var attackSpeedBefore = 0.0
             var attackCooldownBefore = 0f
+            val gamemode = FakePlayerPool.gameModeFrom(p)
 
-            FakePlayerPool.withFakePlayer(server, world) { fakePlayer ->
-                val oldAbilities = FakePlayerAbilities.capture(fakePlayer)
-                val oldInvulnerable = fakePlayer.isInvulnerable
-                val oldGameMode = fakePlayer.interactionManager.gameMode
+            FakePlayerPool.withFakePlayer(server, world, gamemode) { fakePlayer ->
                 val oldArmor = installArmor(server, fakePlayer, p)
 
                 try {
-                    // Entity attacks should match a normal survival player. The cached
-                    // fake player is creative for block placement/use, so scope the mode
-                    // and abilities to this attack only.
-                    fakePlayer.changeGameMode(GameMode.SURVIVAL)
-                    fakePlayer.abilities.creativeMode = false
-                    fakePlayer.abilities.invulnerable = false
-                    fakePlayer.abilities.flying = false
-                    fakePlayer.abilities.allowFlying = false
-                    fakePlayer.abilities.allowModifyWorld = true
-                    fakePlayer.setInvulnerable(false)
-
                     fakePlayer.setStackInHand(Hand.MAIN_HAND, itemBefore.copy())
                     primeStackForGameplay(world, fakePlayer, fakePlayer.getStackInHand(Hand.MAIN_HAND), 0, true)
                     addMainHandModifiers(fakePlayer, fakePlayer.getStackInHand(Hand.MAIN_HAND))
@@ -1139,16 +1136,13 @@ object WorldOps : RpcHandlerGroup {
                     attackSpeedBefore = fakePlayer.getAttributeValue(EntityAttributes.GENERIC_ATTACK_SPEED)
                     attackCooldownBefore = fakePlayer.getAttackCooldownProgress(0.5f)
 
-                    val hitResult = EntityHitResult(entity, eyePos)
-
-                    // Phase 0: Fabric API AttackEntityCallback
-                    eventResult = AttackEntityCallback.EVENT.invoker()
-                        .interact(fakePlayer, world, Hand.MAIN_HAND, entity, hitResult)
-
-                    if (!(eventResult.isAccepted || eventResult == ActionResult.FAIL)) {
-                        // Phase 1: vanilla PlayerEntity.attack(entity)
-                        fakePlayer.attack(entity)
-                    }
+                    // Real path: ServerPlayerEntity.attack. AttackEntityCallback fires
+                    // automatically (fabric mixin at HEAD of this method) — a consuming
+                    // handler cancels the whole attack. Detection: a real attack resets
+                    // the attack cooldown (resetLastAttackedTicks), a canceled one leaves
+                    // it primed.
+                    fakePlayer.attack(entity)
+                    eventConsumed = fakePlayer.getAttackCooldownProgress(0.5f) >= attackCooldownBefore - 0.05f
 
                     itemAfter = fakePlayer.getStackInHand(Hand.MAIN_HAND).copy()
                 } finally {
@@ -1157,9 +1151,6 @@ object WorldOps : RpcHandlerGroup {
                     restoreArmor(fakePlayer, oldArmor)
                     fakePlayer.isSneaking = false
                     fakePlayer.isSprinting = false
-                    fakePlayer.setInvulnerable(oldInvulnerable)
-                    oldAbilities.restore(fakePlayer)
-                    fakePlayer.changeGameMode(oldGameMode)
                 }
             }
 
@@ -1167,7 +1158,8 @@ object WorldOps : RpcHandlerGroup {
                 addProperty("success", true)
                 addProperty("entityType", Registries.ENTITY_TYPE.getId(entity.type).toString())
                 addProperty("entityUuid", entity.uuidAsString)
-                addProperty("eventConsumed", eventResult.isAccepted || eventResult == ActionResult.FAIL)
+                addProperty("eventConsumed", eventConsumed)
+                addProperty("gamemode", gamemode.name.lowercase())
                 add("entityPos", JsonArray().apply {
                     add(entity.pos.x); add(entity.pos.y); add(entity.pos.z)
                 })
@@ -1316,38 +1308,6 @@ object WorldOps : RpcHandlerGroup {
         return null
     }
 
-    private data class FakePlayerAbilities(
-        val invulnerable: Boolean,
-        val flying: Boolean,
-        val allowFlying: Boolean,
-        val creativeMode: Boolean,
-        val allowModifyWorld: Boolean,
-        val flySpeed: Float,
-        val walkSpeed: Float
-    ) {
-        fun restore(player: ServerPlayerEntity) {
-            player.abilities.invulnerable = invulnerable
-            player.abilities.flying = flying
-            player.abilities.allowFlying = allowFlying
-            player.abilities.creativeMode = creativeMode
-            player.abilities.allowModifyWorld = allowModifyWorld
-            player.abilities.setFlySpeed(flySpeed)
-            player.abilities.setWalkSpeed(walkSpeed)
-        }
-
-        companion object {
-            fun capture(player: ServerPlayerEntity): FakePlayerAbilities = FakePlayerAbilities(
-                invulnerable = player.abilities.invulnerable,
-                flying = player.abilities.flying,
-                allowFlying = player.abilities.allowFlying,
-                creativeMode = player.abilities.creativeMode,
-                allowModifyWorld = player.abilities.allowModifyWorld,
-                flySpeed = player.abilities.flySpeed,
-                walkSpeed = player.abilities.walkSpeed
-            )
-        }
-    }
-
     /** that, when passed
      * to Entity.setYaw, makes getYaw() → getEntityFacingOrder produce the same
      * direction. Matches vanilla: south=0, west=90, north=180, east=-90.
@@ -1370,6 +1330,52 @@ object WorldOps : RpcHandlerGroup {
         Direction.UP -> -90f
         Direction.DOWN -> 90f
         else -> 0f
+    }
+
+    /**
+     * Position the fake player for a placement-style interaction (placeAsPlayer,
+     * or useOnBlock with a block item in hand).
+     *
+     * Rules:
+     *   - If the player's current position already has the click point within
+     *     reach (4.5 blocks survival / 5.0 creative, measured from the eye) AND
+     *     its bounding box does not intersect the block being placed, stay put
+     *     (no teleport — keeps position continuity across calls).
+     *   - Otherwise teleport to the far side of the clicked block
+     *     (`clickedPos + face.opposite * 1.5`, feet at the block center): for
+     *     every face this spot is within reach and never overlaps the placement
+     *     target. This is required because the spawned fake player is a real
+     *     entity — standing inside the target block makes vanilla's canPlace
+     *     entity-collision check reject the placement.
+     */
+    private fun positionForPlacement(
+        fakePlayer: ServerPlayerEntity,
+        targetPos: BlockPos,
+        clickedPos: BlockPos,
+        face: Direction,
+        yaw: Float,
+        pitch: Float,
+    ) {
+        val clickPoint = Vec3d(
+            clickedPos.x + 0.5 + face.offsetX * 0.5,
+            clickedPos.y + 0.5 + face.offsetY * 0.5,
+            clickedPos.z + 0.5 + face.offsetZ * 0.5,
+        )
+        val targetBox = net.minecraft.util.math.Box(
+            targetPos.x.toDouble(), targetPos.y.toDouble(), targetPos.z.toDouble(),
+            targetPos.x + 1.0, targetPos.y + 1.0, targetPos.z + 1.0,
+        )
+        val reach = if (fakePlayer.abilities.creativeMode) 5.0 else 4.5
+        val inReach = fakePlayer.getEyePos().squaredDistanceTo(clickPoint) <= reach * reach
+        val obstructs = fakePlayer.boundingBox.intersects(targetBox)
+        if (inReach && !obstructs) return
+
+        val stand = Vec3d(
+            clickedPos.x + 0.5 + face.opposite.offsetX * 1.5,
+            clickedPos.y + 0.5 + face.opposite.offsetY * 1.5,
+            clickedPos.z + 0.5 + face.opposite.offsetZ * 1.5,
+        )
+        fakePlayer.refreshPositionAndAngles(stand.x, stand.y, stand.z, yaw, pitch)
     }
 
     private fun getRegion(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
@@ -1582,28 +1588,3 @@ internal fun JsonObject.getDirectionOrNull(name: String): Direction? {
     return DIRECTION_NAMES[s.lowercase()]
 }
 
-/**
- * ItemPlacementContext that always places at the caller-supplied placement pos,
- * ignoring the vanilla "replace neighbor if it's air" branch. Without this override,
- * placing on top of an air neighbor shifts the block to the neighbor's position,
- * which is wrong for our automation use case (callers always pass the intended
- * placement pos, not the neighbor).
- *
- * The vanilla parent class stores `placementPos = hitResult.blockPos.offset(hitResult.side)`
- * and `getBlockPos()` returns it when `canReplaceExisting` is false. We flip the
- * field in init, so the parent's getBlockPos() / canPlace() / getPlacementDirections()
- * all see the correct target without us having to override any of them.
- *
- * Uses the parent ctor that takes a ServerPlayerEntity so context.getPlayer()
- * returns the fake player (real placer for onPlaced / Criteria / GameEvent).
- */
-private class FixedTargetPlacementContext(
-    player: ServerPlayerEntity,
-    hand: Hand,
-    stack: ItemStack,
-    hitResult: BlockHitResult,
-) : ItemPlacementContext(player, hand, stack, hitResult) {
-    init {
-        canReplaceExisting = false
-    }
-}

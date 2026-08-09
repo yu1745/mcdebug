@@ -1,6 +1,6 @@
 {
   "name": "@yu1745/mcdebug",
-  "version": "0.4.15",
+  "version": "0.4.16",
   "packageManager": "pnpm@9.15.9",
   "description": "TypeScript CLI for the mcdebug Minecraft debug server mod",
   "type": "module",

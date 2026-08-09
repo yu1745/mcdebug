@@ -164,6 +164,9 @@ object ScreenOps : RpcHandlerGroup {
         } else {
             session.handler.onClosed(session.player)
         }
+        // The session player was spawned into the world (FakePlayerPool.create) —
+        // remove it so it stops ticking.
+        FakePlayerPool.discard(session.player)
     }
 
     private fun closeSessionsForPlayer(player: ServerPlayerEntity) {

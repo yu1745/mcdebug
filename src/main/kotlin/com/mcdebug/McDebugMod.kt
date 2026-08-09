@@ -3,6 +3,7 @@ package com.mcdebug
 import com.mcdebug.api.BlockEntityOps
 import com.mcdebug.api.CraftingOps
 import com.mcdebug.api.EntityOps
+import com.mcdebug.api.FakePlayerPool
 import com.mcdebug.api.FixtureOps
 import com.mcdebug.api.FluidOps
 import com.mcdebug.api.InventoryOps
@@ -85,6 +86,7 @@ object McDebugMod : DedicatedServerModInitializer {
         WaitOps.install()
         TraceOps.install()
         RedstoneOps.install()
+        FakePlayerPool.install()
 
         rpcServer = RpcServer(d, ::portFilePath).also { it.start(server) }
         LOGGER.info("mcdebug RPC ready on {}:{}", RpcServer.DEFAULT_BIND_ADDRESS, rpcServer?.boundPort)
@@ -96,6 +98,7 @@ object McDebugMod : DedicatedServerModInitializer {
             TraceOps.uninstall()
             RedstoneOps.uninstall()
             ScreenOps.clear()
+            FakePlayerPool.shutdown()
             rpcServer?.stop()
         } catch (e: Exception) {
             LOGGER.warn("error stopping mcdebug", e)
