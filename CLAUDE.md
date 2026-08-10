@@ -192,6 +192,7 @@ node scripts/set-version.mjs X.Y.Z
 - 专用 CLI 子命令暂未覆盖 `storage.*` / `snapshot.*` / `trace.*` / `screen.*`，目前通过 `raw`、REPL 和 TS `DebugApi` 调用
 - 自定义 storage adapter SPI 没做；特殊资源类型后续扩展
 - `modid.mixins.json` 是 Fabric 模板遗留，且 mod 当前未写任何 mixin 代码，发版前可清理
+- `inv.insert` / `inv.extract` 对目标方块已消失（如过压爆炸成 air）时报 `-32004 no block entity`，错误不够友好；改进：目标无 BE 时返回 `INVALID_TARGET`/`STORAGE_NOT_FOUND` 类错误并带 `reason`（ic2-fabric 过压测试曾踩中：机器放下即炸后 insertItem 必然撞上）
 
 ## 11b. v2 已完成（变更记录）
 
