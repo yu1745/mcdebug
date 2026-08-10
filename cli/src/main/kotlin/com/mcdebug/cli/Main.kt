@@ -12,7 +12,13 @@ import kotlin.system.exitProcess
 fun main(args: Array<String>) {
     try {
         McDebugCli()
-            .subcommands(StatusCmd(), RawCmd(), ReplCmd())
+            .subcommands(
+                StatusCmd(), RawCmd(), ReplCmd(),
+                WorldCommands().subcommands(*worldSubcommands().toTypedArray()),
+                BeCommands().subcommands(*beSubcommands().toTypedArray()),
+                InvCommands().subcommands(*invSubcommands().toTypedArray()),
+                WaitCommands().subcommands(*waitSubcommands().toTypedArray()),
+            )
             .main(args)
     } catch (e: RpcException) {
         val data = e.data?.let { " data=${it}" } ?: ""
@@ -46,7 +52,7 @@ class StatusCmd : CliktCommand(name = "status", help = "show server status") {
     override fun run() {
         val cli = requireNotNull(currentContext.parent?.command as? McDebugCli)
         RpcClient(cli.clientOptions()).use { client ->
-            printJson(DebugApi(client).status())
+            printJson(DebugApi(client).server.status())
         }
     }
 }
@@ -87,7 +93,7 @@ class ReplCmd : CliktCommand(
                 when {
                     cmd == "exit" || cmd == "quit" -> break
                     cmd == "help" -> echo("commands: status | raw <method> [json] | help | exit")
-                    cmd == "status" -> printJson(api.status())
+                    cmd == "status" -> printJson(api.server.status())
                     cmd.startsWith("raw ") -> {
                         val parts = cmd.removePrefix("raw ").split(Regex("\\s+"), limit = 2)
                         val method = parts[0]
