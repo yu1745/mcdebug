@@ -47,3 +47,4 @@ fabric-api_source/
 # node
 
 node_modules/
+logs/
