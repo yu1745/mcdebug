@@ -105,9 +105,10 @@ pnpm dlx 'github:yu1745/mcdebug#path:mcdebug-client' raw storage.list '{"target"
 1. 在对应的 `*Ops.kt` 里加一个 `RpcHandler`（签名 `(MinecraftServer, JsonObject?) -> CompletableFuture<JsonElement>`），handler body 通过 `RpcContext.onServer(server) { ... }` 切到 server 线程
 2. 错误抛出 `RpcException(code, message, data?)`（从 `RpcErrors` 选错误码）
 3. 类型在 `RpcHandlerGroup.methods(): Map<String, RpcHandler>` 注册
-4. 对应在 `mcdebug-client/src/api.ts` 的 `DebugApi` 加方法，参数与返回对齐
-5. CLI 命令在 `mcdebug-client/src/commands/<group>.ts` 注册；没有专用 CLI 子命令时，至少更新 `raw`/REPL help 和 README 的 `pnpm dlx` 示例
-6. 重新 `pnpm build` 和 `./gradlew.bat build` 双端编译
+4. **同步 `contract/src/main/kotlin/com/mcdebug/contract/Methods.kt`**：在对应组 setOf 中加方法名（`RpcContractTest` 会双向校验，漏加或写错直接构建失败）；有需要时同时补充 DTO 到 `contract/.../<Group>Dtos.kt`（字段名 = JSON 字段名，服务端 Gson 与未来 Kotlin 客户端共用）
+5. 对应在 `mcdebug-client/src/api.ts` 的 `DebugApi` 加方法，参数与返回对齐
+6. CLI 命令在 `mcdebug-client/src/commands/<group>.ts` 注册；没有专用 CLI 子命令时，至少更新 `raw`/REPL help 和 README 的 `pnpm dlx` 示例
+7. 重新 `pnpm build` 和 `./gradlew.bat build` 双端编译
 
 ## 7. Tick 设计原则
 
