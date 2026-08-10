@@ -6,6 +6,7 @@ import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.arguments.optional
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.option
+import com.github.ajalt.clikt.parameters.options.versionOption
 import com.github.ajalt.clikt.parameters.types.int
 import kotlin.system.exitProcess
 
@@ -46,6 +47,10 @@ class McDebugCli : CliktCommand(
     name = "mcdebug",
     help = "CLI for the mcdebug Minecraft debug server mod (JSON-RPC over unix socket)",
 ) {
+    init {
+        versionOption(McDebugCli::class.java.`package`.implementationVersion ?: "dev")
+    }
+
     val socket by option("--socket", help = "unix socket path (overrides MCDEBUG_SOCKET and discovery file)")
     val portFile by option("--port-file", help = "socket discovery file path")
     val timeout by option("--timeout", help = "connection timeout in ms").int().default(5000)

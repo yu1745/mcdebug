@@ -39,6 +39,7 @@ tasks.shadowJar {
 	mergeServiceFiles()
 	manifest {
 		attributes 'Main-Class': application.mainClass.get()
+		attributes 'Implementation-Version': project.version
 	}
 }
 

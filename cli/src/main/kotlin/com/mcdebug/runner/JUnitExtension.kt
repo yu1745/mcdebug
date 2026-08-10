@@ -13,6 +13,9 @@ import org.junit.jupiter.api.extension.ExtensionContext
 import org.junit.jupiter.api.extension.ParameterContext
 import org.junit.jupiter.api.extension.ParameterResolver
 import org.junit.jupiter.api.extension.TestWatcher
+import org.opentest4j.TestAbortedException
+import java.nio.file.Files
+import java.nio.file.Path
 import java.util.concurrent.atomic.AtomicInteger
 import kotlin.math.min
 
@@ -64,6 +67,11 @@ class McDebugExtension : BeforeAllCallback, AfterAllCallback, BeforeEachCallback
     override fun beforeEach(context: ExtensionContext) {
         val ann = context.requiredTestClass.getAnnotation(McDebugTest::class.java)
             ?: return
+        // socket 不可达时跳过（abort → 测试标记 skipped）：`./gradlew build` 无 server 也能通过，
+        // 只有真正连上 server 的跑（CI/本地起 server 后）。
+        if (!socketReachable()) {
+            throw TestAbortedException("mcdebug server not reachable; start it with ./gradlew runServer first")
+        }
         val api = DebugApi(RpcClient(RpcClientOptions()))
         val idx = originCounter.getAndIncrement()
         val col = idx % ann.gridColumns
@@ -103,6 +111,22 @@ class McDebugExtension : BeforeAllCallback, AfterAllCallback, BeforeEachCallback
 
     override fun testFailed(context: ExtensionContext, cause: Throwable) {
         // withTrace 已把 trace 帧附加到异常上；这里无需额外处理。
+    }
+
+    /** 发现逻辑与 RpcClient 一致：任一候选 socket 文件存在即视为可达。 */
+    private fun socketReachable(): Boolean {
+        System.getenv("MCDEBUG_SOCKET")?.takeIf { it.isNotBlank() }?.let { return Files.exists(Path.of(it)) }
+        val candidates = listOf(
+            "mcdebug/port", "run/mcdebug/port", "../run/mcdebug/port", "../../run/mcdebug/port",
+        )
+        return candidates.any { p ->
+            try {
+                val txt = Files.readString(Path.of(p)).trim()
+                txt.isNotEmpty() && Files.exists(Path.of(txt))
+            } catch (_: Exception) {
+                false
+            }
+        }
     }
 }
 
