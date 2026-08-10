@@ -11,24 +11,16 @@ const DEFAULT_PORT_FILE_CANDIDATES = [
     path.join(process.cwd(), '..', '..', 'run', 'mcdebug', 'port'),
 ];
 /**
- * Default port mcdebug server binds to (high, unlikely to conflict with other services).
- * Both client and server hardcode this; either side can be overridden via env/CLI/system property.
+ * Discover the unix socket path the mcdebug server is listening on.
+ * Order: explicit option → MCDEBUG_SOCKET env → discovery file.
  */
-export const DEFAULT_PORT = 25580;
-/**
- * Discover the port the mcdebug server is listening on.
- * Order: explicit option → MCDEBUG_PORT env → port file → DEFAULT_PORT.
- */
-export async function discoverPort(opts = {}) {
-    if (typeof opts.port === 'number')
-        return opts.port;
-    const envName = opts.portEnv ?? 'MCDEBUG_PORT';
+export async function discoverSocket(opts = {}) {
+    if (opts.socket)
+        return opts.socket;
+    const envName = opts.socketEnv ?? 'MCDEBUG_SOCKET';
     const envVal = process.env[envName];
-    if (envVal) {
-        const n = Number(envVal);
-        if (Number.isFinite(n) && n > 0)
-            return n;
-    }
+    if (envVal)
+        return envVal;
     const candidates = [
         ...(opts.portFile ? [opts.portFile] : []),
         ...DEFAULT_PORT_FILE_CANDIDATES,
@@ -36,19 +28,17 @@ export async function discoverPort(opts = {}) {
     for (const p of candidates) {
         try {
             const txt = fs.readFileSync(p, 'utf8').trim();
-            const n = Number(txt);
-            if (Number.isFinite(n) && n > 0) {
-                return n;
-            }
+            if (txt.length > 0)
+                return txt;
         }
         catch {
             // try next
         }
     }
-    return DEFAULT_PORT;
+    throw new Error('cannot discover mcdebug socket: pass --socket, set MCDEBUG_SOCKET, or run from a directory with a mcdebug/port discovery file');
 }
 /**
- * Low-level JSON-RPC 2.0 client over TCP/NDJSON.
+ * Low-level JSON-RPC 2.0 client over unix socket/NDJSON.
  * Auto-connects on first call; supports concurrent requests with an id-correlator.
  */
 export class RpcClient {
@@ -71,14 +61,13 @@ export class RpcClient {
         if (this.connectPromise)
             return this.connectPromise;
         this.connectPromise = (async () => {
-            const port = await discoverPort(this.opts);
-            const host = this.opts.host ?? '127.0.0.1';
+            const socketPath = await discoverSocket(this.opts);
             await new Promise((resolve, reject) => {
-                const sock = net.createConnection({ host, port });
+                const sock = net.createConnection(socketPath);
                 const timeout = this.opts.timeoutMs ?? 5000;
                 const timer = setTimeout(() => {
                     sock.destroy();
-                    reject(new Error(`connect timeout to ${host}:${port}`));
+                    reject(new Error(`connect timeout to ${socketPath}`));
                 }, timeout);
                 sock.setEncoding('utf8');
                 sock.once('connect', () => {

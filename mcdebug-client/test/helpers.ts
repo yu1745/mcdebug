@@ -2,15 +2,14 @@ import { RpcClient } from '../src/client.js';
 import { DebugApi } from '../src/api.js';
 import type { Pos } from '../src/types.js';
 
-const PORT = Number(process.env.MCDEBUG_PORT) || 25580;
-const HOST = process.env.MCDEBUG_HOST || '127.0.0.1';
+const SOCKET = process.env.MCDEBUG_SOCKET;
 
 /** Test area origin — far from spawn (0,0) to avoid leftover interference. */
 const TEST_ORIGIN: Pos = [100, 64, 100];
 
 /** Create a DebugApi connected to the test server. Caller must call api.close() when done. */
 export function createApi(): DebugApi {
-  return new DebugApi(new RpcClient({ host: HOST, port: PORT, timeoutMs: 5000 }));
+  return new DebugApi(new RpcClient({ socket: SOCKET, timeoutMs: 5000 }));
 }
 
 /** The base position for all test fixtures. */

@@ -9,8 +9,9 @@ entities, and reusable fixtures from an external TS process.
 ```
 ┌─────────────────┐  JSON-RPC 2.0   ┌──────────────────┐
 │  mcdebug (TS)   │  NDJSON over    │  DebugServerMod  │
-│  CLI / runner   │  TCP 0.0.0.0    │  (Kotlin/Fabric) │
-└─────────────────┘  default 25580  └──────────────────┘
+│  CLI / runner   │  unix socket    │  (Kotlin/Fabric) │
+└─────────────────┘  <gameDir>/     └──────────────────┘
+                       mcdebug/socket
 ```
 
 See **CLAUDE.md** for the full contributor guide (architecture, naming, adding
@@ -34,11 +35,13 @@ For setup of the Fabric project itself, see the
 
 ## CLI and pnpm dlx usage
 
-The CLI talks to a running mcdebug Fabric server over TCP JSON-RPC. The server
-listens on all network interfaces by default; restrict published ports with a
-firewall or container port-binding rules when remote access is not required.
-The CLI finds the port from `--port`, `MCDEBUG_PORT`, `mcdebug/port`, then falls
-back to `25580`.
+The CLI talks to a running mcdebug Fabric server over JSON-RPC on a **unix
+domain socket** (`<gameDir>/mcdebug/socket` by default). No TCP ports are
+involved, so multiple dev servers on the same machine never conflict, and the
+socket is unreachable from the network.
+
+The CLI finds the socket path from `--socket`, `MCDEBUG_SOCKET`, the
+`mcdebug/port` discovery file (written by the server), in that order.
 
 ```bash
 # local checkout

@@ -13,8 +13,7 @@ function runRepl(input: string) {
     encoding: 'utf8',
     env: {
       ...process.env,
-      MCDEBUG_PORT: process.env.MCDEBUG_PORT ?? '25580',
-      MCDEBUG_HOST: process.env.MCDEBUG_HOST ?? '127.0.0.1',
+      MCDEBUG_SOCKET: process.env.MCDEBUG_SOCKET ?? '',
     },
   });
 }

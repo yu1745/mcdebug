@@ -893,18 +893,17 @@ const GUIDE_CONNECTION = `
 === Connection ===
 
 The mcdebug server is a Fabric mod running inside Minecraft. The CLI connects over
-TCP/JSON-RPC to the configured host. The server must be running (world loaded) before CLI
-commands work.
+JSON-RPC to the server's unix domain socket. The server must be running (world
+loaded) before CLI commands work.
 
-Default client host: 127.0.0.1. The server listens on 0.0.0.0 by default.`;
+The server listens on <gameDir>/mcdebug/socket by default (unix socket, not TCP).`;
 const GUIDE_PORT_DISCOVERY = `
-=== Port Discovery ===
+=== Socket Discovery ===
 
-The CLI finds the server port in this order:
-  1. --port <N>        CLI flag (highest priority)
-  2. MCDEBUG_PORT      environment variable
-  3. mcdebug/port      file (searched in cwd and parent dirs)
-  4. 25580             default`;
+The CLI finds the server socket in this order:
+  1. --socket <path>   CLI flag (highest priority)
+  2. MCDEBUG_SOCKET    environment variable
+  3. mcdebug/port      discovery file (searched in cwd and parent dirs)`;
 const GUIDE_FILE_SYNTAX = `
 === @file Syntax ===
 

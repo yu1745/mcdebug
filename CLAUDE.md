@@ -5,8 +5,9 @@ Fabric 1.20.1 + Kotlin Mod，提供 JSON-RPC 服务，让 TypeScript CLI 远程�
 ```
 ┌─────────────────┐  JSON-RPC 2.0   ┌──────────────────┐
 │  mcdebug (TS)   │  NDJSON over    │  DebugServerMod  │
-│  CLI / Script   │  TCP 0.0.0.0    │  (Kotlin/Fabric) │
-└─────────────────┘  default 25580  └──────────────────┘
+│  CLI / Script   │  unix socket    │  (Kotlin/Fabric) │
+└─────────────────┘  <gameDir>/     └──────────────────┘
+                       mcdebug/socket
 ```
 
 ## 1. 硬性约束
@@ -61,16 +62,18 @@ mcdebug/
   - `TraceOps` ↔ `trace.*`
   - `ScreenOps` ↔ `screen.*`
 - 错误码：JSON-RPC 标准 `-32700..-32603` + 自定义 `-32001..-32018`（在 `RpcErrors` 中）
-- 端口：默认 `25580`（高位、避开常用服务）
+- 传输：**unix domain socket**（AF_UNIX SOCK_STREAM，默认 `<gameDir>/mcdebug/socket`），支持多客户端并发；无 TCP 端口，多实例互不冲突，网络不可达（无鉴权暴露面）。
 
-## 4. 端口解析顺序（两端统一）
+## 4. Socket 路径解析顺序（两端统一）
 
-1. JVM 系统属性 `-Dmcdebug.port=...` / TS `--port <N>`（最优先）
-2. 环境变量 `MCDEBUG_PORT`
-3. `<gameDir>/config/mcdebug.json` 中 `port` 字段
-4. 默认 `25580`
+1. JVM 系统属性 `-Dmcdebug.socket=<path>` / TS `--socket <path>`（最优先）
+2. 环境变量 `MCDEBUG_SOCKET`
+3. `<gameDir>/config/mcdebug.json` 中 `socket` 字段（相对路径按 gameDir 解析）
+4. 默认 `<gameDir>/mcdebug/socket`
 
-修改端口的推荐方式：往 `run/config/mcdebug.json` 写 `{"port": 25581}`，不需要重启服务配置即可生效。
+服务端把解析出的 socket 路径写入 `<gameDir>/mcdebug/port`（沿用旧文件名，内容从端口号变为 socket 路径），客户端读该文件即可发现。修改 socket 位置的推荐方式：往 `run/config/mcdebug.json` 写 `{"socket": "mcdebug/alt.sock"}`，不需要重启服务配置即可生效。
+
+注意：启动时会删除目标路径的残留 stale socket 文件（防 EADDRINUSE），停止时删除 socket 文件；发现文件 `mcdebug/port` 保留。
 
 ## 5. 常用命令
 
@@ -134,7 +137,7 @@ pnpm dlx 'github:yu1745/mcdebug#path:mcdebug-client' raw storage.list '{"target"
 
 ## 9. 调试技巧
 
-- 看 RPC 端口：`cat run/mcdebug/port` 或 `cat run/config/mcdebug.json`
+- 看 RPC socket：`cat run/mcdebug/port`（内容为 socket 路径）
 - 实时看 server 日志：`run/logs/latest.log`（loom 写文件 + stdout）
 - Loom 缓存了旧 remap jar：清 `run/.fabric/processedMods/`，再 `./gradlew build`
 - TS 端快速调试：`node dist/cli.js raw world.getBlock '{"pos":[0,64,0]}'`

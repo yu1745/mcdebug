@@ -2,29 +2,22 @@
  * Configuration for connecting to a running mcdebug server.
  */
 export interface RpcClientOptions {
-    /** 127.0.0.1 by default. */
-    host?: string;
-    /** Explicit port. Overrides port-file discovery. */
-    port?: number;
-    /** Environment variable holding the port. */
-    portEnv?: string;
-    /** Path to port file written by the mod. */
+    /** Unix domain socket path. Overrides env and discovery-file resolution. */
+    socket?: string;
+    /** Environment variable holding the socket path. */
+    socketEnv?: string;
+    /** Path to the socket-discovery file written by the server (default: mcdebug/port). */
     portFile?: string;
     /** Connection timeout in ms. */
     timeoutMs?: number;
 }
 /**
- * Default port mcdebug server binds to (high, unlikely to conflict with other services).
- * Both client and server hardcode this; either side can be overridden via env/CLI/system property.
+ * Discover the unix socket path the mcdebug server is listening on.
+ * Order: explicit option → MCDEBUG_SOCKET env → discovery file.
  */
-export declare const DEFAULT_PORT = 25580;
+export declare function discoverSocket(opts?: RpcClientOptions): Promise<string>;
 /**
- * Discover the port the mcdebug server is listening on.
- * Order: explicit option → MCDEBUG_PORT env → port file → DEFAULT_PORT.
- */
-export declare function discoverPort(opts?: RpcClientOptions): Promise<number>;
-/**
- * Low-level JSON-RPC 2.0 client over TCP/NDJSON.
+ * Low-level JSON-RPC 2.0 client over unix socket/NDJSON.
  * Auto-connects on first call; supports concurrent requests with an id-correlator.
  */
 export declare class RpcClient {

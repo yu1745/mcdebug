@@ -31,8 +31,9 @@ import java.nio.file.Paths
 /**
  * mcdebug — JSON-RPC debug server for mod development automation.
  *
- * The RPC server binds 0.0.0.0 and writes the bound port to
- * `<run_dir>/mcdebug/port` so the TypeScript CLI can find it.
+ * The RPC server listens on a unix domain socket (default
+ * `<run_dir>/mcdebug/socket`) and writes the socket path to
+ * `<run_dir>/mcdebug/port` so the client can find it.
  */
 object McDebugMod : DedicatedServerModInitializer {
     const val MOD_ID = "mcdebug"
@@ -88,8 +89,8 @@ object McDebugMod : DedicatedServerModInitializer {
         RedstoneOps.install()
         FakePlayerPool.install()
 
-        rpcServer = RpcServer(d, ::portFilePath).also { it.start(server) }
-        LOGGER.info("mcdebug RPC ready on {}:{}", RpcServer.DEFAULT_BIND_ADDRESS, rpcServer?.boundPort)
+        rpcServer = RpcServer(d, ::socketFilePath).also { it.start(server) }
+        LOGGER.info("mcdebug RPC ready on unix socket {}", rpcServer?.socketPath)
     }
 
     private fun onServerStopping(server: MinecraftServer) {
@@ -109,7 +110,8 @@ object McDebugMod : DedicatedServerModInitializer {
         }
     }
 
-    private fun portFilePath(): Path {
+    /** Discovery file written by RpcServer: content is the unix socket path. */
+    private fun socketFilePath(): Path {
         val runDir = FabricLoader.getInstance().gameDir.resolve("mcdebug")
         return Paths.get(runDir.toString(), "port")
     }

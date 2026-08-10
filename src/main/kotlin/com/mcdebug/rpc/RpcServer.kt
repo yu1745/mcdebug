@@ -1,40 +1,67 @@
 package com.mcdebug.rpc
 
-import com.google.gson.Gson
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.mcdebug.McDebugMod
 import com.mcdebug.wait.WaitOps
+import net.fabricmc.loader.api.FabricLoader
 import net.minecraft.server.MinecraftServer
 import org.slf4j.LoggerFactory
 import java.io.BufferedReader
 import java.io.BufferedWriter
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
-import java.net.InetAddress
-import java.net.ServerSocket
-import java.net.Socket
+import java.net.StandardProtocolFamily
+import java.net.UnixDomainSocketAddress
+import java.nio.channels.AsynchronousCloseException
+import java.nio.channels.Channels
+import java.nio.channels.ServerSocketChannel
+import java.nio.channels.SocketChannel
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.Paths
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
 import java.util.concurrent.atomic.AtomicInteger
 
 /**
- * TCP server bound to 0.0.0.0 (all network interfaces).
+ * Unix domain socket server (AF_UNIX, SOCK_STREAM).
  * Wire format: NDJSON — one JSON object per line, '\n' as the delimiter.
  * Maximum frame size: 64 MiB (lines longer than this are rejected as parse errors).
+ *
+ * Socket path resolution order:
+ *   1. JVM system property `-Dmcdebug.socket=<path>`
+ *   2. `MCDEBUG_SOCKET` env var
+ *   3. `<gameDir>/config/mcdebug.json` field "socket" (relative paths resolve against gameDir)
+ *   4. Default `<gameDir>/mcdebug/socket`
+ *
+ * The resolved socket path is written to `<gameDir>/mcdebug/port` (the same
+ * discovery file the old TCP server used) so clients only need to read that
+ * file; the filename stays "port" for compatibility with existing consumers.
+ *
+ * AF_UNIX is multi-client: any number of clients may connect to the listening
+ * socket simultaneously; each accepted connection is an independent stream,
+ * so per-connection state (wait.until cancellation on disconnect, etc.) is
+ * identical to the old TCP behavior. Unlike TCP there is no port namespace to
+ * collide on — every server instance owns its gameDir-local socket path, and
+ * the socket is unreachable from the network (no auth exposure).
+ *
+ * Pitfalls handled here:
+ *   - stale socket files from a crashed server make bind() fail with
+ *     EADDRINUSE, so start() deletes any pre-existing file at the target path
+ *     before binding;
+ *   - stop() removes the socket file so no stale file is left behind.
  */
 class RpcServer(
     private val dispatcher: RpcDispatcher,
-    private val portFilePath: () -> Path?,
+    private val socketFilePath: () -> Path?,
     private val protocolVersion: Int = 1
 ) {
     private val log = LoggerFactory.getLogger("mcdebug-rpc")
-    private var serverSocket: ServerSocket? = null
-    private val clientSockets = ConcurrentHashMap<Int, Socket>()
+    private var serverChannel: ServerSocketChannel? = null
+    private val clientChannels = ConcurrentHashMap<Int, SocketChannel>()
     private val connectionIdGen = AtomicInteger(0)
     private val acceptExecutor = Executors.newSingleThreadExecutor { r ->
         Thread(r, "mcdebug-rpc-accept").apply { isDaemon = true }
@@ -44,90 +71,100 @@ class RpcServer(
     }
 
     @Volatile
-    var boundPort: Int = -1
+    var socketPath: Path? = null
         private set
 
-    fun start(minecraftServer: MinecraftServer): Int {
-        if (serverSocket != null) error("already started")
-        // Port resolution order:
-        //   1. JVM system property `-Dmcdebug.port=...`
-        //   2. `MCDEBUG_PORT` env var
-        //   3. `<gameDir>/config/mcdebug.json` field "port"
-        //   4. Default 25580
-        val requestedPort = resolveRequestedPort()
-        log.info("mcdebug requested port: {} (sysprop={}, env={})", requestedPort,
-            System.getProperty("mcdebug.port"), System.getenv("MCDEBUG_PORT"))
+    fun start(minecraftServer: MinecraftServer): Path {
+        if (serverChannel != null) error("already started")
+        val path = resolveSocketPath()
+
+        // Remove a stale socket file left by a crashed server, otherwise bind()
+        // fails with EADDRINUSE even though nothing is listening.
+        try {
+            Files.deleteIfExists(path)
+        } catch (e: Exception) {
+            log.warn("could not remove stale socket {}: {}", path, e.message)
+        }
+        try {
+            path.parent?.let { Files.createDirectories(it) }
+        } catch (e: Exception) {
+            log.warn("could not create socket directory {}: {}", path.parent, e.message)
+        }
+
         // backlog：测试运行器每个并发用例会建一个独立 RPC 连接（128 并行 + trace
         // 额外请求，瞬时并发远超旧的 50），backlog 太小会导致超出部分的连接被
-        // 内核 RST → 客户端 ECONNREFUSED。提到 1024 给 accept loop 足够缓冲
+        // 内核拒绝。提到 1024 给 accept loop 足够缓冲
         // （实际上限由 OS SOMAXCONN 裁剪，Windows/Linux 现代值都远大于此）。
         val backlog = 1024
-        val ss = try {
-            ServerSocket(requestedPort, backlog, InetAddress.getByName(DEFAULT_BIND_ADDRESS))
-        } catch (e: java.net.BindException) {
-            log.warn("port {} busy, falling back to OS-assigned", requestedPort)
-            ServerSocket(0, backlog, InetAddress.getByName(DEFAULT_BIND_ADDRESS))
-        }
-        serverSocket = ss
-        boundPort = ss.localPort
-        ss.soTimeout = 1000  // allow periodic accept-loop checks for shutdown
-        log.info("mcdebug RPC server listening on {}:{}", DEFAULT_BIND_ADDRESS, boundPort)
-
-        // Write port file (best effort)
+        val ch = ServerSocketChannel.open(StandardProtocolFamily.UNIX)
         try {
-            portFilePath()?.let { p ->
+            ch.bind(UnixDomainSocketAddress.of(path), backlog)
+        } catch (e: Exception) {
+            ch.close()
+            throw e
+        }
+        serverChannel = ch
+        socketPath = path
+        log.info("mcdebug RPC server listening on unix socket {}", path)
+
+        // Write socket discovery file (best effort). Content is the socket path,
+        // not a port number.
+        try {
+            socketFilePath()?.let { p ->
                 p.parent?.let { Files.createDirectories(it) }
-                Files.writeString(p, boundPort.toString())
+                Files.writeString(p, path.toString())
             }
         } catch (e: Exception) {
-            log.warn("could not write port file: {}", e.message)
+            log.warn("could not write socket file: {}", e.message)
         }
 
-        acceptExecutor.submit { acceptLoop(ss, minecraftServer) }
-        return boundPort
+        acceptExecutor.submit { acceptLoop(ch, minecraftServer) }
+        return path
     }
 
     fun stop() {
         try {
-            serverSocket?.close()
+            serverChannel?.close()
         } catch (_: Exception) {}
-        serverSocket = null
-        clientSockets.values.forEach { runCatching { it.close() } }
-        clientSockets.clear()
+        serverChannel = null
+        clientChannels.values.forEach { runCatching { it.close() } }
+        clientChannels.clear()
         acceptExecutor.shutdownNow()
         connectionExecutor.shutdownNow()
-        boundPort = -1
+        socketPath?.let { p -> runCatching { Files.deleteIfExists(p) } }
+        socketPath = null
     }
 
-    private fun acceptLoop(ss: ServerSocket, minecraftServer: MinecraftServer) {
-        while (!ss.isClosed) {
+    private fun acceptLoop(ch: ServerSocketChannel, minecraftServer: MinecraftServer) {
+        while (ch.isOpen) {
             try {
-                val client = ss.accept()
+                val client = ch.accept()
                 val id = connectionIdGen.incrementAndGet()
-                clientSockets[id] = client
+                clientChannels[id] = client
                 connectionExecutor.submit { handleConnection(client, id, minecraftServer) }
+            } catch (e: AsynchronousCloseException) {
+                break  // stop() closed the channel from another thread
             } catch (e: Exception) {
-                if (ss.isClosed) break
-                // swallow timeouts so we can re-check isClosed
+                if (!ch.isOpen) break
+                // transient accept errors: keep serving
+                log.debug("accept error: {}", e.message)
             }
         }
     }
 
-    private fun handleConnection(socket: Socket, connId: Int, minecraftServer: MinecraftServer) {
-        val peer = "${socket.remoteSocketAddress}"
-        log.info("client connected: {}", peer)
+    private fun handleConnection(channel: SocketChannel, connId: Int, minecraftServer: MinecraftServer) {
+        log.info("client connected: #{}", connId)
         RpcContext.currentConnectionId.set(connId)
         try {
-            socket.soTimeout = 0
-            val reader = BufferedReader(InputStreamReader(socket.getInputStream(), StandardCharsets.UTF_8))
-            val writer = BufferedWriter(OutputStreamWriter(socket.getOutputStream(), StandardCharsets.UTF_8))
-            sendNotification(writer, JsonRpc.Notification.SERVER_READY, com.google.gson.JsonObject().apply {
-                addProperty("port", boundPort)
+            val reader = BufferedReader(InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8))
+            val writer = BufferedWriter(OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8))
+            sendNotification(writer, JsonRpc.Notification.SERVER_READY, JsonObject().apply {
+                addProperty("socket", socketPath?.toString() ?: "")
                 addProperty("protocolVersion", protocolVersion)
                 addProperty("modVersion", McDebugMod.MOD_VERSION)
             })
 
-            while (!socket.isClosed) {
+            while (channel.isOpen) {
                 val line = readLineBounded(reader) ?: break
                 if (line.isBlank()) continue
                 val response = processLine(line, minecraftServer)
@@ -136,16 +173,16 @@ class RpcServer(
                 writer.flush()
             }
         } catch (e: Exception) {
-            if (!socket.isClosed) log.debug("connection {} ended: {}", peer, e.message)
+            if (channel.isOpen) log.debug("connection {} ended: {}", connId, e.message)
         } finally {
             // Cancel any long-running jobs (e.g. wait.until) owned by this connection
             // so they don't keep evaluating predicates and holding threads after the
             // client is gone.
             runCatching { WaitOps.cancelConnection(connId) }
             RpcContext.currentConnectionId.remove()
-            clientSockets.remove(connId)
-            runCatching { socket.close() }
-            log.info("client disconnected: {}", peer)
+            clientChannels.remove(connId)
+            runCatching { channel.close() }
+            log.info("client disconnected: #{}", connId)
         }
     }
 
@@ -248,39 +285,41 @@ class RpcServer(
     }
 
     /**
-     * Read `<gameDir>/config/mcdebug.json` if it exists and parse the `port` field.
-     * Returns null if file missing, malformed, or doesn't have a numeric `port` field.
+     * Read `<gameDir>/config/mcdebug.json` if it exists and parse the `socket`
+     * field. Relative paths resolve against gameDir. Returns null if the file
+     * is missing, malformed, or has no valid `socket` field.
      */
-    private fun readConfigPort(): Int? {
+    private fun readConfigSocket(): Path? {
         try {
-            val gameDir = net.fabricmc.loader.api.FabricLoader.getInstance().gameDir
+            val gameDir = FabricLoader.getInstance().gameDir
             val cfg = gameDir.resolve("config").resolve("mcdebug.json")
             if (!Files.exists(cfg)) return null
             val txt = Files.readString(cfg).trim()
             if (txt.isEmpty()) return null
             val json = com.google.gson.JsonParser.parseString(txt).asJsonObject
-            if (json.has("port") && json.get("port").isJsonPrimitive &&
-                json.get("port").asJsonPrimitive.isNumber) {
-                val n = json.get("port").asInt
-                if (n in 1..65535) return n
+            if (json.has("socket") && json.get("socket").isJsonPrimitive &&
+                json.get("socket").asJsonPrimitive.isString) {
+                val s = json.get("socket").asString.trim()
+                if (s.isNotEmpty()) {
+                    val p = Paths.get(s)
+                    return if (p.isAbsolute) p.normalize() else gameDir.resolve(p).normalize()
+                }
             }
-            log.warn("config/mcdebug.json present but no valid 'port' field")
+            log.warn("config/mcdebug.json present but no valid 'socket' field")
         } catch (e: Exception) {
             log.warn("failed to read config/mcdebug.json: {}", e.message)
         }
         return null
     }
 
-    private fun resolveRequestedPort(): Int {
-        System.getProperty("mcdebug.port")?.toIntOrNull()?.let { return it }
-        System.getenv("MCDEBUG_PORT")?.toIntOrNull()?.let { return it }
-        readConfigPort()?.let { return it }
-        return DEFAULT_PORT
+    private fun resolveSocketPath(): Path {
+        System.getProperty("mcdebug.socket")?.let { return Paths.get(it).toAbsolutePath().normalize() }
+        System.getenv("MCDEBUG_SOCKET")?.let { return Paths.get(it).toAbsolutePath().normalize() }
+        readConfigSocket()?.let { return it }
+        return FabricLoader.getInstance().gameDir.resolve("mcdebug").resolve("socket")
     }
 
     companion object {
         const val MAX_FRAME_BYTES = 64 * 1024 * 1024  // 64 MiB
-        const val DEFAULT_BIND_ADDRESS = "0.0.0.0"
-        const val DEFAULT_PORT = 25580
     }
 }

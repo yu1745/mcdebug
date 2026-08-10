@@ -31,16 +31,14 @@ program
     .name('mcdebug')
     .description('TypeScript CLI for the mcdebug Minecraft debug server mod')
     .version(version)
-    .option('--port <n>', 'explicit port (overrides MCDEBUG_PORT and port file)')
-    .option('--port-file <path>', 'explicit port file path')
-    .option('--host <addr>', 'host (default 127.0.0.1)')
+    .option('--socket <path>', 'unix socket path (overrides MCDEBUG_SOCKET and discovery file)')
+    .option('--port-file <path>', 'socket discovery file path')
     .option('--timeout <ms>', 'connection timeout in ms', '5000');
 program.addHelpText('after', GLOBAL_HELP_AFTER);
 function buildClient() {
     const opts = program.opts();
     const clientOpts = {
-        host: opts.host ?? '127.0.0.1',
-        port: opts.port ? Number(opts.port) : undefined,
+        socket: opts.socket,
         portFile: opts.portFile,
         timeoutMs: opts.timeout ? Number(opts.timeout) : undefined,
     };
