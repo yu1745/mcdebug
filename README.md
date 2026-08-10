@@ -1,18 +1,24 @@
 # mcdebug — Minecraft Debug Server Mod
 
 Fabric 1.20.1 + Kotlin mod that exposes a JSON-RPC server, plus a
-TypeScript CLI / test runner, so mod developers can automate tests of their
-machine blocks by reading/writing the world, block entities, inventories,
-resource storages, snapshots, traces, screen handlers, redstone controls,
-entities, and reusable fixtures from an external TS process.
+Kotlin CLI / SDK and a JUnit 5 test runner, so mod developers can automate
+tests of their machine blocks by reading/writing the world, block entities,
+inventories, resource storages, snapshots, traces, screen handlers,
+redstone controls, entities, and reusable fixtures from an external JVM
+process (or from a JUnit test suite).
 
 ```
 ┌─────────────────┐  JSON-RPC 2.0   ┌──────────────────┐
-│  mcdebug (TS)   │  NDJSON over    │  DebugServerMod  │
-│  CLI / runner   │  unix socket    │  (Kotlin/Fabric) │
+│  mcdebug (Kotlin│  NDJSON over    │  DebugServerMod  │
+│  CLI / runner)  │  unix socket    │  (Kotlin/Fabric) │
 └─────────────────┘  <gameDir>/     └──────────────────┘
                        mcdebug/socket
 ```
+
+The CLI is a Kotlin fat jar (`mcdebug-cli.jar`, committed to the repo root).
+The npm package at the repo root is a one-line shell that execs
+`java -jar mcdebug-cli.jar`, so `pnpm dlx @yu1745/mcdebug` keeps working as
+the zero-install entry point for scripts and humans.
 
 See **CLAUDE.md** for the full contributor guide (architecture, naming, adding
 new RPC methods, version bumps). This README covers consumer-facing usage.
@@ -20,14 +26,16 @@ new RPC methods, version bumps). This README covers consumer-facing usage.
 ## Setup
 
 ```bash
-# mod (Kotlin side)
-./gradlew.bat build
+# build everything (mod + contract + CLI fat jar)
+./gradlew build
+./gradlew :cli:copyCliJar   # copies the fat jar to ./mcdebug-cli.jar (repo root)
 
-# client (TS CLI + test runner)
-cd mcdebug-client
-pnpm install
-pnpm build            # tsc → dist/
-node dist/cli.js --help
+# CLI usage (any of these)
+node bin/mcdebug.js --help          # via the npm shell (JAVA_HOME or PATH java)
+java -jar mcdebug-cli.jar --help    # directly
+
+# install/run via pnpm dlx once published (pulls the jar inside the package)
+pnpm dlx @yu1745/mcdebug status
 ```
 
 For setup of the Fabric project itself, see the
@@ -45,17 +53,17 @@ The CLI finds the socket path from `--socket`, `MCDEBUG_SOCKET`, the
 
 ```bash
 # local checkout
-node mcdebug-client/dist/cli.js status
-node mcdebug-client/dist/cli.js raw world.getBlock '{"pos":[0,64,0]}'
+node bin/mcdebug.js status
+node bin/mcdebug.js raw world.getBlock '{"pos":[0,64,0]}'
 
-# pnpm dlx, once the package version is published
+# pnpm dlx, once the package version is published (the jar is inside the package)
 pnpm dlx @yu1745/mcdebug status
 pnpm dlx @yu1745/mcdebug storage list --x 0 --y 64 --z 0
 pnpm dlx @yu1745/mcdebug redstone get-power --x 0 --y 64 --z 0
 
-# pnpm directly from the GitHub package subdirectory, useful before a registry release
-pnpm dlx 'github:yu1745/mcdebug#path:mcdebug-client' status
-pnpm dlx 'github:yu1745/mcdebug#path:mcdebug-client' snapshot capture --from 0,64,0 --to 2,66,2 --include block,inventory
+# pnpm directly from the GitHub repo root, useful before a registry release
+pnpm dlx 'github:yu1745/mcdebug#v0.5.0' status
+pnpm dlx 'github:yu1745/mcdebug#v0.5.0' snapshot capture --from 0,64,0 --to 2,66,2 --include block,inventory
 ```
 
 Most machine testing APIs have dedicated top-level CLI commands. Use `mcdebug
@@ -70,6 +78,7 @@ raw <namespace.method> <json>` for low-level or rarely used RPCs.
 | `redstone.*` | read power, set/pulse vanilla levers, trigger neighbor updates |
 | `entity.*` | spawn, inspect, teleport, remove, and collect item entities |
 | `fixture.*` | capture and load block-region fixtures as JSON |
+| `be.tick` | actively tick a block entity N times (same `BlockEntityTicker` path as natural ticks); turns 15s machine-test waits into milliseconds (neighbor/world ticks are NOT driven — use `wait.until` for natural-tick timing) |
 
 Examples:
 
@@ -146,33 +155,48 @@ Supported RPCs:
 | `world.fillBox/clearBox(...)` | bulk edit loaded test regions with a safety block limit |
 | `fixture.capture/load(...)` | serialize and restore block regions, including BE NBT |
 
-TypeScript usage:
+Kotlin SDK usage (same API shape as the CLI; add `mcdebug-cli` to your
+test classpath from JitPack / mavenLocal):
 
-```ts
-import { DebugApi, RpcClient } from "@yu1745/mcdebug";
-
-const api = new DebugApi(new RpcClient());
-const target = { kind: "block", pos: [0, 64, 0] as const };
-
-const handles = await api.storage.list(target, { side: "north" });
-const before = await api.snapshot.capture({
-  box: { from: [0, 64, 0], to: [0, 64, 0] },
-  include: ["block", "inventory", "energy"],
-});
-await api.redstone.pulse([0, 65, 0], 4);
-const fixture = await api.fixture.capture({ from: [0, 64, 0], to: [2, 66, 2] });
+```kotlin
+val api = DebugApi(RpcClient(RpcClientOptions()))
+val handles = api.storage.list(mapOf("kind" to "block", "pos" to listOf(0, 64, 0)), side = "north")
+val before = api.snapshot.capture(mapOf(
+    "box" to mapOf("from" to listOf(0, 64, 0), "to" to listOf(0, 64, 0)),
+    "include" to listOf("block", "inventory", "energy"),
+))
+api.redstone.pulse(listOf(0, 65, 0), 4)
+val fixture = api.fixture.capture(mapOf("from" to listOf(0, 64, 0), "to" to listOf(2, 66, 2)))
 ```
 
-## Test runner helpers
+## JUnit 5 test runner
 
-The test runner (`mcdebug-client/src/test-runner.ts`) exports helpers that wrap
-the raw `DebugApi` for the common test patterns. Each test gets a `TestContext`
-with an isolated `origin` and cleared area. Import them in your `*.test.ts`:
+The runner package (`com.mcdebug.runner`, inside `mcdebug-cli`) integrates
+mcdebug with JUnit 5: annotate a test class with `@McDebugTest` and inject a
+`TestContext` parameter (grid-allocated `origin`, per-test area cleanup,
+forceload, method-level parallelism enabled by the bundled
+`junit-platform.properties`). Helpers (`place`, `setBlocks`, `waitUntil`,
+`assertBlockId`, predicate builders, `withTrace`, ...) wrap the raw `DebugApi`:
 
-```ts
-import { defineTest, defineTests, place, setBlocks, waitUntil,
-         beFieldGreaterThan, invItemEquals, assertBlockId } from "@yu1745/mcdebug";
+```kotlin
+@McDebugTest
+class MaceratorTest {
+    @Test
+    fun grindsOre(ctx: TestContext) {
+        setupAdjacentBatbox(ctx, "ic2_120:macerator")
+        insertItem(ctx, ctx.origin, "minecraft:iron_ore", 1, 0)
+        ctx.api.be.tick(ctx.origin, 600)   // actively drive the machine — ms-level
+        assertSlotHas(ctx, ctx.origin, 1, "ic2_120:crushed_iron")
+    }
+}
 ```
+
+`be.tick` drives a block entity's ticker N times in one RPC (same
+`BlockEntityTicker` path as natural ticks) — machine tests go from 15s
+`wait.until` waits to milliseconds. Machines with per-tick energy budgets
+(IC2's `TickLimitedSidedEnergyContainer`) need self-precharging:
+`setBeField(ctx, pos, "EnergyStored", <capacity>)` bypasses the world-tick
+input budget. Natural-tick timing tests still use `wait.until`.
 
 ### Generic storage / trace / screen helpers
 

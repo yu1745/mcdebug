@@ -1,6 +1,6 @@
 # mcdebug — Minecraft Debug Server Mod
 
-Fabric 1.20.1 + Kotlin Mod，提供 JSON-RPC 服务，让 TypeScript CLI 远程读写世界/方块实体/物品栏/资源存储/快照/GUI，**用于 Mod 开发者用外部 TS runner 自动化测试自己的机器方块**。
+Fabric 1.20.1 + Kotlin Mod，提供 JSON-RPC 服务，让 Kotlin CLI / JUnit runner 远程读写世界/方块实体/物品栏/资源存储/快照/GUI，**用于 Mod 开发者自动化测试自己的机器方块**（Kotlin JUnit 5，见 ic2-fabric 的 `core/src/mcdebugTest/`）。
 
 ```
 ┌─────────────────┐  JSON-RPC 2.0   ┌──────────────────┐
@@ -27,11 +27,12 @@ mcdebug/
 ├── gradle.properties         # 锁版本（参考 ic2-fabric 工作配置）
 ├── settings.gradle
 ├── CLAUDE.md
-├── mcdebug-client/           # TypeScript CLI + SDK + 测试 runner
-│   ├── package.json
-│   ├── tsconfig.json
-│   └── src/{client,api,commands,test-runner,types,...}.ts
-│       test/*.test.ts        # 消费者侧的 mcdebug 测试用例
+├── contract/                 # 共享契约（方法名清单 + DTO 样板，零依赖）
+├── cli/                       # Kotlin CLI（clikt）+ SDK + JUnit runner
+│   └── src/main/kotlin/com/mcdebug/{cli,runner}/
+├── mcdebug-cli.jar            # CLI fat jar（固定名，进 git，随 tag 分发）
+├── package.json               # npm 壳包：bin/mcdebug.js 一行透传 java -jar
+└── bin/mcdebug.js             # 壳脚本（pnpm dlx 拉包后 jar 在包内）
 └── src/main/
     ├── kotlin/com/mcdebug/
     │   ├── McDebugMod.kt         # @Mod 入口，注册 server lifecycle 钩子
@@ -84,16 +85,14 @@ mcdebug/
 # 启动开发服务器（dev launcher 注入 classpath）
 ./gradlew runServer
 
-# TS 端
-cd mcdebug-client
-pnpm install
-pnpm build                 # tsc 编译到 dist/
-node dist/cli.js --help    # 查看所有 CLI 命令
-node dist/cli.js status    # 调用 server.status RPC
+# CLI 端（Kotlin fat jar）
+./gradlew :cli:copyCliJar     # 产出根目录 mcdebug-cli.jar
+node bin/mcdebug.js --help    # 查看所有 CLI 命令
+node bin/mcdebug.js status    # 调用 server.status RPC
 
-# pnpm dlx（发布包或 GitHub 子目录直装）
+# pnpm dlx（发布包或 GitHub 根目录直装）
 pnpm dlx @yu1745/mcdebug status
-pnpm dlx 'github:yu1745/mcdebug#path:mcdebug-client' raw storage.list '{"target":{"kind":"block","pos":[0,64,0]}}'
+pnpm dlx 'github:yu1745/mcdebug#v0.5.0' raw storage.list '{"target":{"kind":"block","pos":[0,64,0]}}'
 ```
 
 > 反编译 MC / Fabric API 源码（参考用，不参与编译、不进仓库）：`./gradlew genSources`，
@@ -106,9 +105,9 @@ pnpm dlx 'github:yu1745/mcdebug#path:mcdebug-client' raw storage.list '{"target"
 2. 错误抛出 `RpcException(code, message, data?)`（从 `RpcErrors` 选错误码）
 3. 类型在 `RpcHandlerGroup.methods(): Map<String, RpcHandler>` 注册
 4. **同步 `contract/src/main/kotlin/com/mcdebug/contract/Methods.kt`**：在对应组 setOf 中加方法名（`RpcContractTest` 会双向校验，漏加或写错直接构建失败）；有需要时同时补充 DTO 到 `contract/.../<Group>Dtos.kt`（字段名 = JSON 字段名，服务端 Gson 与未来 Kotlin 客户端共用）
-5. 对应在 `mcdebug-client/src/api.ts` 的 `DebugApi` 加方法，参数与返回对齐
-6. CLI 命令在 `mcdebug-client/src/commands/<group>.ts` 注册；没有专用 CLI 子命令时，至少更新 `raw`/REPL help 和 README 的 `pnpm dlx` 示例
-7. 重新 `pnpm build` 和 `./gradlew.bat build` 双端编译
+5. 对应在 `cli/src/main/kotlin/com/mcdebug/cli/DebugApi.kt` 加方法，参数与返回对齐
+6. CLI 命令在 `cli/src/main/kotlin/com/mcdebug/cli/commands/<Group>Commands.kt` 注册；没有专用 CLI 子命令时，至少更新 `raw`/REPL help 和 README 的 `pnpm dlx` 示例
+7. 重新 `./gradlew :cli:copyCliJar`（CLI fat jar）和 `./gradlew build`（契约测试 + 服务端）
 
 ## 7. Tick 设计原则
 
@@ -128,12 +127,11 @@ pnpm dlx 'github:yu1745/mcdebug#path:mcdebug-client' raw storage.list '{"target"
 
 - 改 Kotlin：`./gradlew build` 通过（0 warning, 0 error）
 - 改 Kotlin 逻辑（解析器/NBT/谓词）：`./gradlew test` 通过（JUnit5，`src/test/kotlin/`）。现有测试：`PredicateExprTest`（谓词 DSL 解析+求值，~48 例）、`NbtJsonTest`（`#nbt` 标注+往返，~29 例）
-- 改 TS：`pnpm build` 通过
-- 改 entrypoint/资源：手动 `./gradlew runServer` 启动一次确认 mod 加载 + RPC 端口监听
-- 改了 API/CLI 协议：两端一起改，TS 端的 `DebugApi` 强类型签名是契约
-- 改了用户可见 RPC：更新 `README.md`、`mcdebug-client/src/commands/help-text.ts`，尤其要给 `pnpm dlx ... raw namespace.method` 示例
-- 不要新增 Kotlin test DSL / Gradle plugin / 注解扫描测试入口；测试编排放在消费者项目的 TS dispatcher
-- 测试编排统一放在 TS 端 `mcdebug-client/src/test-runner.ts` + `test/*.test.ts`；mod 端不再做任何 test DSL / 注解扫描
+- 改 CLI/SDK：`./gradlew :cli:copyCliJar` 通过
+- 改 entrypoint/资源：手动 `./gradlew runServer` 启动一次确认 mod 加载 + RPC 监听
+- 改了 API/CLI 协议：两端一起改，Kotlin 端 `DebugApi` 强类型签名是契约（`RpcContractTest` 双向校验方法名）
+- 改了用户可见 RPC：更新 `README.md`，尤其要给 `pnpm dlx ... raw namespace.method` 示例
+- 测试编排统一在消费者项目（Kotlin JUnit，`@McDebugTest` runner）；mod 端不做任何 test DSL / 注解扫描
 - 改 mcdebug 默认端口 / 协议层：先在 plan 文件里讨论再动
 
 ## 9. 调试技巧
@@ -141,8 +139,8 @@ pnpm dlx 'github:yu1745/mcdebug#path:mcdebug-client' raw storage.list '{"target"
 - 看 RPC socket：`cat run/mcdebug/port`（内容为 socket 路径）
 - 实时看 server 日志：`run/logs/latest.log`（loom 写文件 + stdout）
 - Loom 缓存了旧 remap jar：清 `run/.fabric/processedMods/`，再 `./gradlew build`
-- TS 端快速调试：`node dist/cli.js raw world.getBlock '{"pos":[0,64,0]}'`
-- pnpm 快速调试：`pnpm dlx 'github:yu1745/mcdebug#path:mcdebug-client' raw storage.list '{"target":{"kind":"block","pos":[0,64,0]}}'`
+- CLI 快速调试：`node bin/mcdebug.js raw world.getBlock '{"pos":[0,64,0]}'`
+- pnpm 快速调试：`pnpm dlx 'github:yu1745/mcdebug#v0.5.0' raw storage.list '{"target":{"kind":"block","pos":[0,64,0]}}'`
 
 ## 10. 版本更新规则
 
@@ -157,28 +155,25 @@ node scripts/set-version.mjs X.Y.Z
 | # | 文件 | 字段 | 用途 |
 |---|------|------|------|
 | 1 | `gradle.properties` | `mod_version=X.Y.Z` | Fabric mod 版本（Gradle → fabric.mod.json `${version}`） |
-| 2 | `mcdebug-client/src/version.ts` | `export const version = 'X.Y.Z'` | **CLI 唯一真相源** — cli.ts 从这里 import |
-| 3 | `mcdebug-client/package.json` | `"version": "X.Y.Z"` | npm 发布（mcdebug-client 子包） |
-| 4 | `mcdebug-client/src/cli.ts` | `.version(version)` | **必须 import from version.ts，不能硬编码字符串** |
+| 2 | `package.json` | `"version": "X.Y.Z"` | npm 壳包版本（与 tag 一致） |
 
 ### 发版检查清单
 
 ```
 □ node scripts/set-version.mjs X.Y.Z
-□ cli.ts                                  grep -n 'version' 确认是 import 不是硬编码
-□ ./gradlew build -x test
-□ node mcdebug-client/dist/cli.js --version  ← 必须输出 X.Y.Z
+□ ./gradlew :cli:copyCliJar            ← fat jar 重新打包（含 Implementation-Version）
+□ ./gradlew build                      ← 契约测试 + 单测
+□ node bin/mcdebug.js --version        ← 必须输出 X.Y.Z
 □ git add -A && git commit -m "vX.Y.Z: ..."
 □ git tag -a vX.Y.Z -m "..."
 □ git push origin main && git push origin vX.Y.Z
-□ gh run watch（确认 CI 成功）
-□ pnpm dlx 'github:yu1745/mcdebug#path:mcdebug-client' --version ← 确认 X.Y.Z
+□ pnpm dlx 'github:yu1745/mcdebug#vX.Y.Z' --version ← 确认 X.Y.Z（jar 在包内）
 ```
 
 ### 踩过的坑
 
-- **cli.ts 硬编码 version**（v0.3.0、v0.4.0）：cli.ts 的 `.version('0.2.0')` 忘了改成 import，导致 `--version` 和包管理器直装永远显示 0.2.0。**必须从 version.ts import，不允许出现硬编码版本字符串。**
-- **根 package.json 兼容壳**：已移除。Node 包唯一入口是 `mcdebug-client/package.json`；GitHub 直装使用 pnpm 的 `#path:mcdebug-client`，不要在根目录重新创建重复包声明。
+- **artifactId 用了项目名**：`cli` 子项目发布到 mavenLocal 时 artifactId 默认是 `cli`；已显式设为 `mcdebug-cli`。
+- **旧 TS 壳（0.4.x）**：mcdebug-client 子包已退役（0.5.0 起根目录 npm 壳 + Kotlin jar）。不要在根目录之外重新创建 TS 包。
 
 ## 11. 已知小问题
 
@@ -219,7 +214,8 @@ node scripts/set-version.mjs X.Y.Z
 
 下列内容在历史 commit / 旧版 CLAUDE.md 中出现过，但**当前已不在仓库**，不要再加回来：
 
-- **Gradle 插件**（`gradle-plugin/` 子项目，曾含 `McDebugPlugin` / `McDebugExtension` / `McDebugTestTask` / `mcdebugTest` task）——已移除。`settings.gradle` 是单项目，无 `include`。测试编排改由 TS 端 `mcdebug-client/src/test-runner.ts` 承担。
+- **Gradle 插件**（`gradle-plugin/` 子项目，曾含 `McDebugPlugin` / `McDebugExtension` / `McDebugTestTask` / `mcdebugTest` task）——已移除。测试编排改由消费者项目（Kotlin JUnit，`com.mcdebug.runner`）承担。
+- **TS 客户端 / TS 测试 runner**（`mcdebug-client/`）——0.5.0 起退役，由 Kotlin CLI（`cli/`）+ JUnit runner 接替；TS 测试已全部移植为 Kotlin JUnit（见 ic2-fabric）。
 - **Gradle 插件的 JitPack 构件**——已随 `gradle-plugin/` 子项目移除，不要恢复该插件或其坐标。
 - **Server mod jar 的 JitPack 构建仍在使用**。根项目是当前唯一的 Gradle 项目，`jitpack.yml` 通过 `publishToMavenLocal` 发布根项目的 `mavenJava` 构件。不要因为 Gradle 插件已移除而删除此配置。
   - `build.gradle` 里的 `maven { url "https://jitpack.io" }` 用于拉取第三方依赖，与本项目发布配置是两个不同用途。
