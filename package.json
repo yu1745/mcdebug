@@ -1,0 +1,19 @@
+{
+  "name": "@yu1745/mcdebug",
+  "version": "0.5.0",
+  "description": "One-line shell for the mcdebug CLI (Kotlin fat jar): pnpm dlx pulls this package, bin/mcdebug.js transparently execs java -jar mcdebug-cli.jar",
+  "type": "commonjs",
+  "bin": {
+    "mcdebug": "./bin/mcdebug.js"
+  },
+  "files": [
+    "bin/",
+    "mcdebug-cli.jar"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node bin/mcdebug.js --help"
+  }
+}

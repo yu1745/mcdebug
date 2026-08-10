@@ -1,0 +1,53 @@
+plugins {
+	id 'org.jetbrains.kotlin.jvm' version "${kotlin_version}"
+	id 'application'
+	id 'com.gradleup.shadow' version '9.0.0'
+}
+
+version = providers.gradleProperty("version").orNull ?: rootProject.property("mod_version")
+group = providers.gradleProperty("group").orNull ?: rootProject.property("maven_group")
+
+base {
+	archivesName = 'mcdebug-cli'
+}
+
+dependencies {
+	implementation project(':contract')
+	implementation 'com.google.code.gson:gson:2.11.0'
+	implementation 'com.github.ajalt.clikt:clikt:4.4.0'
+}
+
+application {
+	mainClass = 'com.mcdebug.cli.MainKt'
+}
+
+tasks.shadowJar {
+	archiveClassifier = ''
+	archiveFileName = 'mcdebug-cli.jar'
+	mergeServiceFiles()
+	manifest {
+		attributes 'Main-Class': application.mainClass.get()
+	}
+}
+
+// 端到端验证与发布共用的产物任务：产出根目录的 mcdebug-cli.jar（固定名，进 git）。
+// 发布流程：shadowJar → copyCliJar → set-version → commit+tag → push
+// 注意：不能用 Copy task —— Gradle 9 的 input snapshot 会扫描目标目录，
+// 遇到 run/mcdebug/socket（unix socket）非普通文件直接失败；doLast 里拷贝不参与快照。
+tasks.register('copyCliJar') {
+	dependsOn tasks.shadowJar
+	doLast {
+		def src = tasks.shadowJar.archiveFile.get().asFile
+		def dst = rootProject.file('mcdebug-cli.jar')
+		java.nio.file.Files.copy(src.toPath(), dst.toPath(), java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+	}
+}
+
+java {
+	sourceCompatibility = JavaVersion.VERSION_17
+	targetCompatibility = JavaVersion.VERSION_17
+}
+
+kotlin {
+	jvmToolchain(17)
+}

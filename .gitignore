@@ -20,7 +20,8 @@ classes/
 
 .settings/
 .vscode/
-bin/
+bin/*
+!bin/mcdebug.js
 .classpath
 .project
 
