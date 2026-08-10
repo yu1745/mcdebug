@@ -18,6 +18,18 @@ fun main(args: Array<String>) {
                 BeCommands().subcommands(*beSubcommands().toTypedArray()),
                 InvCommands().subcommands(*invSubcommands().toTypedArray()),
                 WaitCommands().subcommands(*waitSubcommands().toTypedArray()),
+                StorageCommands().subcommands(*storageSubcommands().toTypedArray()),
+                FluidCommands().subcommands(*fluidSubcommands().toTypedArray()),
+                CraftCommands().subcommands(*craftSubcommands().toTypedArray()),
+                ScanCommands().subcommands(*scanSubcommands().toTypedArray()),
+                SnapshotCommands().subcommands(*snapshotSubcommands().toTypedArray()),
+                TraceCommands().subcommands(*traceSubcommands().toTypedArray()),
+                EntityCommands().subcommands(*entitySubcommands().toTypedArray()),
+                FixtureCommands().subcommands(*fixtureSubcommands().toTypedArray()),
+                ScreenCommands().subcommands(*screenSubcommands().toTypedArray()),
+                RedstoneCommands().subcommands(*redstoneSubcommands().toTypedArray()),
+                ReflectCommands().subcommands(*reflectSubcommands().toTypedArray()),
+                JarCmd(),
             )
             .main(args)
     } catch (e: RpcException) {
