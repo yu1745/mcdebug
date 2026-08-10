@@ -3,13 +3,10 @@ package com.mcdebug.cli
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
-import java.io.BufferedReader
-import java.io.BufferedWriter
-import java.io.InputStreamReader
-import java.io.OutputStreamWriter
+import java.io.IOException
 import java.net.StandardProtocolFamily
 import java.net.UnixDomainSocketAddress
-import java.nio.channels.Channels
+import java.nio.ByteBuffer
 import java.nio.channels.SocketChannel
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
@@ -30,11 +27,15 @@ class RpcClientOptions(
 /**
  * JSON-RPC 2.0 客户端，unix socket + NDJSON。
  * 连接复用、请求并发（id 关联），与服务器的连接生命周期一一对应。
+ *
+ * 实现注意：直接操作 SocketChannel 的 ByteBuffer 读写，**不要**用
+ * `Channels.newInputStream/newOutputStream` —— JDK 17 的 Channels 对
+ * SocketChannel 的读写都 `synchronized(channel)`：读线程持锁阻塞读时，
+ * 写线程永远拿不到锁（三方死锁：读线程等服务端、写线程等锁、服务端等请求）。
+ * 已在 JUnit 并行测试中实测复现（JDK 21 的 Channels 无此问题，故 CLI 正常）。
  */
 class RpcClient(private val opts: RpcClientOptions) : AutoCloseable {
     private var channel: SocketChannel? = null
-    private var reader: BufferedReader? = null
-    private var writer: BufferedWriter? = null
     private var readThread: Thread? = null
     private var nextId = 0L
     private val pending = ConcurrentHashMap<Any, CompletableFuture<JsonElement>>()
@@ -74,46 +75,62 @@ class RpcClient(private val opts: RpcClientOptions) : AutoCloseable {
             throw IllegalStateException("cannot connect to mcdebug socket $path: ${e.message}", e)
         }
         channel = ch
-        reader = BufferedReader(InputStreamReader(Channels.newInputStream(ch), StandardCharsets.UTF_8))
-        writer = BufferedWriter(OutputStreamWriter(Channels.newOutputStream(ch), StandardCharsets.UTF_8))
         readThread = Thread(::readLoop, "mcdebug-rpc-read").apply {
             isDaemon = true
             start()
         }
     }
 
+    /** 读线程：逐字节组行，按 id 分发响应/通知。 */
     private fun readLoop() {
+        val bb = ByteBuffer.allocate(64 * 1024)
+        val sb = StringBuilder()
         try {
             while (true) {
-                val line = reader!!.readLine() ?: break
-                if (line.isBlank()) continue
-                val msg = JsonParser.parseString(line).asJsonObject
-                if (msg.has("id") && !msg.get("id").isJsonNull) {
-                    val id: Any = msg.get("id").let {
-                        when {
-                            it.isJsonPrimitive && it.asJsonPrimitive.isNumber -> it.asLong
-                            it.isJsonPrimitive && it.asJsonPrimitive.isString -> it.asString
-                            else -> it.toString()
-                        }
-                    }
-                    val f = pending.remove(id) ?: continue
-                    if (msg.has("error")) {
-                        val err = msg.getAsJsonObject("error")
-                        f.completeExceptionally(
-                            RpcException(err.get("code").asInt, err.get("message").asString, err.get("data")),
-                        )
+                bb.clear()
+                val n = channel!!.read(bb)
+                if (n < 0) break
+                bb.flip()
+                while (bb.hasRemaining()) {
+                    val c = bb.get().toInt().toChar()
+                    if (c == '\n') {
+                        if (sb.isNotEmpty() && sb.last() == '\r') sb.deleteCharAt(sb.length - 1)
+                        if (sb.isNotEmpty()) handleLine(sb.toString())
+                        sb.clear()
                     } else {
-                        f.complete(msg.get("result"))
+                        sb.append(c)
                     }
                 }
-                // server notifications（server.ready 等）暂不订阅
             }
-        } catch (_: Exception) {
+        } catch (_: IOException) {
             // connection dropped
+        } catch (_: Exception) {
+            // channel closed
         } finally {
             val err = IllegalStateException("connection closed")
             pending.values.forEach { it.completeExceptionally(err) }
             pending.clear()
+        }
+    }
+
+    private fun handleLine(line: String) {
+        val msg = JsonParser.parseString(line).asJsonObject
+        if (!msg.has("id") || msg.get("id").isJsonNull) return  // server notification
+        val id: Any = msg.get("id").let {
+            when {
+                it.isJsonPrimitive && it.asJsonPrimitive.isNumber -> it.asLong
+                it.isJsonPrimitive && it.asJsonPrimitive.isString -> it.asString
+                else -> it.toString()
+            }
+        }
+        val f = pending.remove(id) ?: return
+        if (msg.has("error")) {
+            val err = msg.getAsJsonObject("error")
+            f.completeExceptionally(
+                RpcException(err.get("code").asInt, err.get("message").asString, err.get("data")),
+            )
+        } else {
+            f.complete(msg.get("result"))
         }
     }
 
@@ -129,14 +146,23 @@ class RpcClient(private val opts: RpcClientOptions) : AutoCloseable {
         }
         val f = CompletableFuture<JsonElement>()
         pending[id] = f
-        writer!!.write(req.toString())
-        writer!!.write("\n")
-        writer!!.flush()
+        writeLine(req.toString())
         // 阻塞等待。wait.until 等长轮询方法会一直挂到条件满足，这里不做超时。
         return try {
             f.get()
         } catch (e: java.util.concurrent.ExecutionException) {
             throw (e.cause ?: e)
+        }
+    }
+
+    /** 整行写入（SocketChannel.write 直写，阻塞直到全部写出）。 */
+    private fun writeLine(s: String) {
+        val bytes = (s + "\n").toByteArray(StandardCharsets.UTF_8)
+        var off = 0
+        while (off < bytes.size) {
+            val n = channel!!.write(ByteBuffer.wrap(bytes, off, bytes.size - off))
+            if (n < 0) throw IllegalStateException("connection closed")
+            off += n
         }
     }
 

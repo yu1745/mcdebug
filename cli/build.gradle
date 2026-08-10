@@ -15,6 +15,18 @@ dependencies {
 	implementation project(':contract')
 	implementation 'com.google.code.gson:gson:2.11.0'
 	implementation 'com.github.ajalt.clikt:clikt:4.4.0'
+	// runner 包（JUnit 集成）编译需要；运行时由消费方（ic2 等）提供 junit-jupiter。
+	compileOnly 'org.junit.jupiter:junit-jupiter-api:5.10.2'
+	testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+test {
+	useJUnitPlatform()
+	testLogging {
+		events "FAILED", "PASSED", "SKIPPED"
+		exceptionFormat "full"
+	}
 }
 
 application {
