@@ -10,6 +10,7 @@ import com.mcdebug.rpc.RpcHandlerGroup
 import com.mcdebug.util.NbtJson
 import com.mcdebug.util.ServerContext
 import net.minecraft.block.entity.BlockEntity
+import net.minecraft.block.entity.BlockEntityTicker
 import net.minecraft.nbt.NbtCompound
 import net.minecraft.server.MinecraftServer
 import net.minecraft.server.world.ServerWorld
@@ -21,7 +22,8 @@ object BlockEntityOps : RpcHandlerGroup {
         "getNbt" to ::getNbt,
         "setNbt" to ::setNbt,
         "getField" to ::getField,
-        "setField" to ::setField
+        "setField" to ::setField,
+        "tick" to ::tick
     )
 
     private fun getNbt(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
@@ -101,3 +103,43 @@ object BlockEntityOps : RpcHandlerGroup {
         world.updateComparators(pos, state.block)
     }
 }
+
+// ---- tick ----
+
+/**
+ * 主动 tick 指定位置的方块实体 N 次（默认 1 次）。
+ *
+ * 用途：机器类测试的加速器——`wait.until` 是干等自然 tick（15s=300t 预算），
+ * 而很多机器逻辑（配方进度、热量、能量消耗）只依赖机器自身 tick 与相邻
+ * 能量接口（`adjacentEnergyTransfer.tick()` 在机器 tick 内部调用），
+ * 可以直接 `be.tick` 驱动 N 次，毫秒级完成原本十几秒的等待。
+ *
+ * 注意：
+ *  - 在 server 线程执行，与自然 tick 语义一致（并发安全）；
+ *  - 只 tick 目标 BE，不 tick 邻居/世界（能量网络等全局逻辑不在其内）；
+ *  - 不适用于依赖自然 tick 跨度的用例（如"机器在 300 自然 tick 内完成"
+ *    的时序验证），这类仍用 `wait.until`；
+ *  - 机器 tick 中可能主动 `markDirty` / 改变世界状态（如离心机加热），
+ *    与真实 tick 行为一致。
+ */
+private fun tick(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
+    RpcContext.onServer(server) {
+        val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
+        val pos = ServerContext.pos(p.getAsJsonArray("pos"))
+        val world = ServerContext.world(server, p.getStringOrNull("dim"))
+        val count = p.getIntOr("ticks", 1).coerceAtLeast(0)
+        val be = ServerContext.blockEntity(world, pos)
+        val state = world.getBlockState(pos)
+        // 走 BlockState.getBlockEntityTicker —— 与自然 tick 完全相同的调用路径（BlockEntityTicker）。
+        @Suppress("UNCHECKED_CAST")
+        val ticker = state.getBlockEntityTicker(world, be.type) as BlockEntityTicker<BlockEntity>? 
+            ?: throw RpcException(RpcErrors.INVALID_PARAMS, "block at $pos has no ticker (not a ticking block entity)")
+        repeat(count) {
+            ticker.tick(world, pos, state, be)
+        }
+        JsonObject().apply {
+            add("pos", ServerContext.posAsJson(pos))
+            addProperty("dim", world.registryKey.value.toString())
+            addProperty("ticked", count)
+        }
+    }

@@ -176,6 +176,8 @@ export class DebugApi {
         setNbt: (p, nbt, dim) => this.rpc.call('be.setNbt', { pos: p, nbt, dim }),
         getField: (p, path, dim) => this.rpc.call('be.getField', { pos: p, path, dim }),
         setField: (p, path, value, dim) => this.rpc.call('be.setField', { pos: p, path, value, dim }),
+        /** Tick the block entity N times (default 1) — same path as natural ticks (BlockEntityTicker). */
+        tick: (p, ticks = 1, dim) => this.rpc.call('be.tick', { pos: p, ticks, dim }),
     };
     inv = {
         getSize: (p, dim) => this.rpc.call('inv.getSize', { pos: p, dim }),

@@ -17,7 +17,7 @@ object Methods {
         "world.unforceloadChunk",
     )
     val be = setOf(
-        "be.getNbt", "be.setNbt", "be.getField", "be.setField",
+        "be.getNbt", "be.setNbt", "be.getField", "be.setField", "be.tick",
     )
     val inv = setOf(
         "inv.getSize", "inv.getSlot", "inv.setSlot", "inv.insert", "inv.extract",

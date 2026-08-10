@@ -1,6 +1,7 @@
 package com.mcdebug.cli
 
 import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.types.int
@@ -57,4 +58,16 @@ class BeSetFieldCmd : CliktCommand(name = "set-field", help = "write one NBT pat
     }
 }
 
-fun beSubcommands() = listOf(BeGetNbtCmd(), BeSetNbtCmd(), BeGetFieldCmd(), BeSetFieldCmd())
+class BeTickCmd : CliktCommand(name = "tick", help = "tick the block entity N times (same path as natural ticks)") {
+    private val x by option("--x").int().required()
+    private val y by option("--y").int().required()
+    private val z by option("--z").int().required()
+    private val ticks by option("--ticks").int().default(1)
+    private val dim by option("--dim")
+
+    override fun run() = withApi { api ->
+        printJson(api.be.tick(listOf(x, y, z), ticks, dim))
+    }
+}
+
+fun beSubcommands() = listOf(BeGetNbtCmd(), BeSetNbtCmd(), BeGetFieldCmd(), BeSetFieldCmd(), BeTickCmd())

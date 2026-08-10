@@ -115,6 +115,10 @@ class BeApi(private val rpc: RpcClient) {
 
     fun setField(pos: Pos, path: String, value: Any, dim: String? = null): JsonElement =
         rpc.call("be.setField", params { p("pos", pos); p("path", path); p("value", value); p("dim", dim) })
+
+    /** 主动 tick 方块实体 N 次（与自然 tick 同一 BlockEntityTicker 路径）。 */
+    fun tick(pos: Pos, ticks: Int = 1, dim: String? = null): JsonElement =
+        rpc.call("be.tick", params { p("pos", pos); p("ticks", ticks); p("dim", dim) })
 }
 
 class InvApi(private val rpc: RpcClient) {

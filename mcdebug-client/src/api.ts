@@ -400,6 +400,9 @@ export class DebugApi {
       this.rpc.call<{ value: JsonNbt }>('be.getField', { pos: p, path, dim }),
     setField: (p: Pos, path: string, value: JsonNbt, dim?: string) =>
       this.rpc.call('be.setField', { pos: p, path, value, dim }),
+    /** Tick the block entity N times (default 1) — same path as natural ticks (BlockEntityTicker). */
+    tick: (p: Pos, ticks = 1, dim?: string) =>
+      this.rpc.call<{ pos: Pos; dim: string; ticked: number }>('be.tick', { pos: p, ticks, dim }),
   };
 
   inv = {

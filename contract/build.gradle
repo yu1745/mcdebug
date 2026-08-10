@@ -28,3 +28,12 @@ java {
 kotlin {
 	jvmToolchain(17)
 }
+
+apply plugin: 'maven-publish'
+
+publishing {
+	publications {
+		create("mavenJava", MavenPublication) { from components.java }
+	}
+	repositories { }
+}

@@ -288,6 +288,12 @@ export declare class DebugApi {
             value: JsonNbt;
         }>;
         setField: (p: Pos, path: string, value: JsonNbt, dim?: string) => Promise<unknown>;
+        /** Tick the block entity N times (default 1) — same path as natural ticks (BlockEntityTicker). */
+        tick: (p: Pos, ticks?: number, dim?: string) => Promise<{
+            pos: Pos;
+            dim: string;
+            ticked: number;
+        }>;
     };
     inv: {
         getSize: (p: Pos, dim?: string) => Promise<{
