@@ -20,13 +20,18 @@ test {
 	}
 }
 
+// 字节码目标 17（root loom 的 MC 1.20.1 要求 ≤17 运行时兼容），
+// 但用 Gradle JVM（21）编译、不锁定 toolchain —— JitPack 只提供 JDK 21，
+// jvmToolchain(17) 会因找不到 17 而构建失败。
 java {
 	sourceCompatibility = JavaVersion.VERSION_17
 	targetCompatibility = JavaVersion.VERSION_17
 }
 
 kotlin {
-	jvmToolchain(17)
+	compilerOptions {
+		jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+	}
 }
 
 apply plugin: 'maven-publish'
