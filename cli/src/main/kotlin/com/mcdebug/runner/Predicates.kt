@@ -48,3 +48,6 @@ fun invCountLessOrEqual(pos: Pos, slot: Int, count: Int): String = "inv[${posOf(
 
 fun tickEquals(tick: Long): String = "tick == $tick"
 fun tickGreaterOrEqual(tick: Long): String = "tick >= $tick"
+
+/** inv[x,y,z].<slot>.item == "<id>" 的别名（与 TS runner 的 invItemEquals 同名）。 */
+fun invItemEquals(pos: Pos, slot: Int, itemId: String): String = invItem(pos, slot, itemId)

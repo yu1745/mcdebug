@@ -64,3 +64,17 @@ java {
 kotlin {
 	jvmToolchain(17)
 }
+
+apply plugin: 'maven-publish'
+
+publishing {
+	publications {
+		// shadowJar 与默认 jar 都是 null classifier，components.java 会冲突；
+		// 显式只发布 shadowJar（fat jar，含 contract/gson/clikt/runner）。
+		create("mavenJava", MavenPublication) {
+			artifactId = 'mcdebug-cli'
+			artifact tasks.shadowJar
+		}
+	}
+	repositories { }
+}
