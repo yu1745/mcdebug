@@ -1,0 +1,30 @@
+plugins {
+	id 'org.jetbrains.kotlin.jvm' version "${kotlin_version}"
+}
+
+version = providers.gradleProperty("version").orNull ?: rootProject.property("mod_version")
+group = providers.gradleProperty("group").orNull ?: rootProject.property("maven_group")
+
+base {
+	archivesName = 'mcdebug-contract'
+}
+
+// 零依赖：DTO 是纯 data class，字段名即 JSON 字段名，
+// 服务端（Gson）与未来 Kotlin 客户端（Gson 或 kotlinx）都能反射使用。
+
+test {
+	useJUnitPlatform()
+	testLogging {
+		events "FAILED", "PASSED", "SKIPPED"
+		exceptionFormat "full"
+	}
+}
+
+java {
+	sourceCompatibility = JavaVersion.VERSION_17
+	targetCompatibility = JavaVersion.VERSION_17
+}
+
+kotlin {
+	jvmToolchain(17)
+}

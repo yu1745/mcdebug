@@ -10,3 +10,4 @@ pluginManagement {
 }
 
 rootProject.name = 'mcdebug'
+include 'contract'
