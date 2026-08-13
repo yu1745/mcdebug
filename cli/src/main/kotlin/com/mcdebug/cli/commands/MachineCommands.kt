@@ -111,12 +111,13 @@ class SnapshotCaptureCmd : CliktCommand(name = "capture", help = "capture a snap
     }
 }
 
-class SnapshotDiffCmd : CliktCommand(name = "diff", help = "structural diff between two snapshots; NOTE: the diff ALWAYS contains /tick and /time metadata changes, so equal:false is reported even when no real block/inventory content changed") {
+class SnapshotDiffCmd : CliktCommand(name = "diff", help = "structural diff between two snapshots; by default /tick and /time ALWAYS change between captures, so equal:false is reported even when no real content changed — pass --ignore-meta to filter those metadata fields out") {
     private val before by option("--before", help = "snapshot JSON or @file").required()
     private val after by option("--after", help = "snapshot JSON or @file").required()
+    private val ignoreMeta by option("--ignore-meta", help = "filter /tick, /time metadata changes from the diff (server >= 0.6.0)").flag()
 
     override fun run() = withApi { api ->
-        printJson(api.snapshot.diff(parseJsonArg(before), parseJsonArg(after)))
+        printJson(api.snapshot.diff(parseJsonArg(before), parseJsonArg(after), ignoreMeta))
     }
 }
 
@@ -126,11 +127,11 @@ class TraceCommands : CliktCommand(name = "trace", help = "capture snapshots on 
     override fun run() = Unit
 }
 
-class TraceStartCmd : CliktCommand(name = "start", help = "start a tick trace on a box") {
+class TraceStartCmd : CliktCommand(name = "start", help = "start a tick trace on a box; --max-ticks auto-stops the trace after N ticks (server >= 0.6.0); without it the trace runs until 'trace stop'") {
     private val from by option("--from").required()
     private val to by option("--to").required()
     private val intervalTicks by option("--interval-ticks").int().default(1)
-    private val maxTicks by option("--max-ticks", help = "NOT IMPLEMENTED server-side (ignored): a trace keeps running forever until you call 'trace stop' manually").int()
+    private val maxTicks by option("--max-ticks", help = "auto-stop after this many ticks; 0 / unset = run until 'trace stop' (no auto-stop)").int()
     private val include by option("--include").default("block")
     private val dim by option("--dim")
 

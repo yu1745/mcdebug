@@ -6,12 +6,16 @@ import com.google.gson.JsonParser
 import java.nio.file.Files
 import java.nio.file.Path
 
-/** 从当前命令链找到根 McDebugCli，用其 client 配置构造 DebugApi。 */
+/** 从当前命令链找到根 McDebugCli，用 withClient 构造 DebugApi（批处理下复用共享连接）。 */
 fun CliktCommand.withApi(block: (DebugApi) -> Unit) {
+    val cli = rootCli()
+    withClient(cli) { c -> block(DebugApi(c)) }
+}
+
+fun CliktCommand.rootCli(): McDebugCli {
     var ctx = currentContext
     while (ctx.parent != null) ctx = ctx.parent!!
-    val cli = requireNotNull(ctx.command as? McDebugCli)
-    RpcClient(cli.clientOptions()).use { c -> block(DebugApi(c)) }
+    return requireNotNull(ctx.command as? McDebugCli)
 }
 
 /** "x,y,z" 三元组 → Pos。 */

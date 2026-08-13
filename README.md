@@ -132,6 +132,40 @@ mcdebug fixture load --fixture @machine-fixture.json --origin 10,64,10
 The server still never exposes `tick.run` or `tick.runUntil`. `trace.*` and
 `wait.until` observe natural Minecraft ticks from the real Fabric server.
 
+## CLI 0.6.0 additions
+
+**Exit codes** (`mcdebug --help` documents them): `0` = success (including
+business-level `ok:false` / `equal:false` results — check the output JSON),
+`1` = CLI usage/parse errors, `2` = server rejection (any JSON-RPC error incl.
+`-320xx`), `3` = method not found (usually: server too old). On connect the CLI
+compares the server `modVersion` with its own version and prints a stderr
+warning when they differ.
+
+```bash
+mcdebug -c "status" -c "raw server.listDimensions"   # batch: one connection,
+# per-command status lines, stops at first failure with its exit code
+
+mcdebug status --health          # TPS/MSPT + per-dim entity/loaded-chunk counts
+                                 # (server.health, requires server >= 0.6.0)
+
+mcdebug trace start --from 0,64,0 --to 0,64,0 --max-ticks 200   # auto-stop
+mcdebug snapshot diff --before @s1.json --after @s2.json --ignore-meta   # drop /tick,/time
+mcdebug wait until --predicate 'tick >= 200'   # default timeout 1200 ticks; 0 = infinite (explicit)
+
+mcdebug watch block 10,64,10 --timeout-ticks 1200   # poll until change, then exit 0
+mcdebug watch field 10,64,10 Energy                 # be get-field polling
+mcdebug watch entity <uuid> Health                  # entity NBT path polling
+
+mcdebug world replace-box --from 0,64,0 --to 10,66,10 --match minecraft:stone --replace minecraft:dirt
+
+mcdebug repl   # history -> ~/.mdb_history; $1 = last result JSON, $? = last exit code;
+               # multi-line: trailing \ or unbalanced JSON brackets continue on next line
+```
+
+Non-ASCII text (中文/emoji/`\u` escapes) written through `be set-nbt` /
+`set-field` round-trips correctly since 0.6.0 (the 0.5.x CLI decoded response
+bytes as chars, garbling all non-ASCII).
+
 ## Transport configuration and discovery
 
 Server side (in `config/mcdebug.json`, or JVM properties / env vars):

@@ -21,7 +21,7 @@ class BeGetNbtCmd : CliktCommand(name = "get-nbt", help = "read block entity NBT
     }
 }
 
-class BeSetNbtCmd : CliktCommand(name = "set-nbt", help = "write block entity NBT; non-ASCII text round-trips GARBLED (charset loss server-side) — use ASCII-only string values") {
+class BeSetNbtCmd : CliktCommand(name = "set-nbt", help = "write block entity NBT; non-ASCII text (中文/emoji/\\u escapes) round-trips correctly since 0.6.0 (UTF-8 fix) — server < 0.6.0 still garbles non-ASCII responses") {
     private val x by option("--x").int().required()
     private val y by option("--y").int().required()
     private val z by option("--z").int().required()

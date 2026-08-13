@@ -215,6 +215,19 @@ node scripts/set-version.mjs X.Y.Z
 
 ## 11b. 已完成变更记录（v2 → 0.5.x）
 
+- **0.6.0 功能批（trace 自动停止 / wait 默认超时 / diff 忽略元数据 / 编码修复 / 批处理 / watch / health / replace-box / repl 增强 / 退出码）**
+  - `trace.start` 新增 `maxTicks`：到期自动停止（抓最后一帧，`autoStopped:true`），移入 finished 表（上限 64）供 `trace.get` 继续读；0/缺省 = 不自动停止。
+  - `wait.until` 默认 `timeoutTicks=1200`（1min @20tps）；0 = 无限（需显式传）。runner 侧总是显式传超时，不受影响。
+  - `snapshot.diff` 新增 `ignoreMeta` 参数：过滤顶层 `/tick`、`/time` 后再 diff（`SnapshotOps.stripMeta`）。
+  - **编码修复**：CLI `RpcClient.readLoop` 原逐字节 cast Char（UTF-8 多字节拆成 mojibake），改为逐字节找行分隔后整行按 UTF-8 解码；`be/entity set-nbt` 非 ASCII（含 \u 转义、emoji）往返正常。单测 `RpcClientUtf8Test`（TCP loopback 端到端）+ `NbtJsonTest` 非 ASCII 用例。
+  - CLI 新命令：`-c/--command` 可重复 + `--batch`（连一次跑多条、逐条打印状态、失败即停并返回对应退出码；每条命令用独立命令树 parse，避免 clikt 选项状态残留；根命令需 `invokeWithoutSubcommand=true`）；`watch block|field|entity`（纯 CLI 轮询，`--interval-ticks` 默认 20、`--timeout-ticks` 默认 1200/0=无限）；`world replace-box`（select-blocks + 一次 setBlocks）；`status --health`（新方法 `server.health`：TPS/MSPT=server.tickTime、各维度 iterateEntities 计数 + loadedChunkCount；旧服务端报「需服务端 ≥0.6.0」退出 3）；`snapshot diff --ignore-meta`；`trace start --max-ticks`。
+  - repl：历史持久化 ~/.mdb_history（200 条）、`$1`（上次结果 JSON 原样）/`$?`（上次退出码）替换、多行输入（行尾 `\` 或 JSON 括号不配平续行）。
+  - 退出码统一：0=成功（含业务性 ok:false）；1=CLI 用法/解析错误；2=服务端拒绝（RPC error 含 -320xx）；3=method not found（-32601）。根 `--help` 有「退出码」一节。
+  - 连接后比较 `server.status.modVersion` 与 CLI 版本，不一致 stderr 打一行警告（`warnVersionMismatch`，不阻塞；status 不可得时静默跳过）。
+  - **注意**：clikt/mordant 会把帮助文本里的 `$...$` 当 markdown 数学解析（两个 `$` 配对即抛异常），所以 repl 相关 help/echo 文案里不得出现 `$` 字面量（README/CLAUDE 等纯 markdown 不受影响）。
+
+- **0.5.2 help 文案修正**（commit 0ed6339）
+
 - **0.5.1 双通道（unix socket + TCP）+ 容错启动**（`rpc/RpcServer.kt` + `McDebugMod.kt` + `cli/RpcClient.kt` + `cli/Main.kt`）
   恢复 TCP 监听与 unix socket 并行服务同一 dispatcher：unix socket 主通道（本机，默认 `<gameDir>/mcdebug/socket`），TCP 辅助通道（跨机，默认 25580 = 0.4.x 旧端口，wildcard 绑定）。配置沿用现有模式：`-Dmcdebug.socket`/`MCDEBUG_SOCKET`/json `socket` 之外新增 `-Dmcdebug.tcpPort`/`-Dmcdebug.tcpEnabled`（env `MCDEBUG_TCP_PORT`/`MCDEBUG_TCP_ENABLED`、json `tcpPort`/`tcpEnabled`）。**容错语义**：两个监听各自独立 try/catch，单边绑定失败（典型：TCP 端口被占）只 WARN、不影响启动；仅两边都失败才 error。发现文件：`mcdebug/port` 继续写 socket 路径；新增 `mcdebug/tcpPort` 写实际端口（仅 TCP 绑定时）。CLI 新增 `--tcp host:port` / `--host`+`--port`（跨机），`--socket` 不变，`--timeout` 现在真正作用于 TCP connect。单元测试 `RpcServerBindTest`（TCP 被占→unix 继续服务 / 双失败→抛错 / 双成功→并行服务+发现文件）覆盖容错逻辑。
 

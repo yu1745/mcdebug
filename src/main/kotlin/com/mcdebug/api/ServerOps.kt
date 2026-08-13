@@ -25,11 +25,39 @@ import java.util.concurrent.CompletableFuture
 object ServerOps : RpcHandlerGroup {
     override fun methods(): Map<String, RpcHandler> = mapOf(
         "status" to ::status,
+        "health" to ::health,
         "listDimensions" to ::listDimensions,
         "runCommand" to ::runCommand,
         "forgeFluidCapability" to ::forgeFluidCapability,
         "mantleInteract" to ::mantleInteract,
     )
+
+    /**
+     * 聚合健康信息（0.6.0+）：TPS/MSPT（MinecraftServer.tickTime 的平均 tick 耗时）、
+     * 各维度实体数与已加载区块数。旧服务端（<0.6.0）无此方法（method not found）。
+     */
+    private fun health(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
+        RpcContext.onServer(server) {
+            val mspt = server.tickTime
+            val tps = if (mspt > 0f) (1000.0 / mspt).coerceAtMost(20.0) else 20.0
+            val dims = JsonArray()
+            server.worlds.forEach { w ->
+                dims.add(JsonObject().apply {
+                    addProperty("dim", w.registryKey.value.toString())
+                    addProperty("entities", w.iterateEntities().count())
+                    addProperty("loadedChunks", w.chunkManager.loadedChunkCount)
+                })
+            }
+            JsonObject().apply {
+                addProperty("tps", round2(tps))
+                addProperty("mspt", round2(mspt.toDouble()))
+                addProperty("tick", server.ticks)
+                addProperty("players", server.currentPlayerCount)
+                add("dims", dims)
+            }
+        }
+
+    private fun round2(v: Double): Double = Math.round(v * 100.0) / 100.0
 
     /**
      * Directly invoke Mantle's FluidTransferHelper.interactWithContainer against a

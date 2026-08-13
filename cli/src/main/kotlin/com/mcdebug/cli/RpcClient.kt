@@ -145,10 +145,13 @@ class RpcClient(private val opts: RpcClientOptions) : AutoCloseable {
         channel = ch
     }
 
-    /** 读线程：逐字节组行，按 id 分发响应/通知。 */
+    /** 读线程：逐字节找行分隔，按 UTF-8 解码整行后分发响应/通知。
+     *
+     * 注意：不能逐字节 cast 成 Char（0.5.x 的做法）——那会把 UTF-8 多字节序列拆成
+     * 单个字节的 mojibake，导致非 ASCII 文本（set-nbt 写中文/emoji 后读回）乱码。 */
     private fun readLoop() {
         val bb = ByteBuffer.allocate(64 * 1024)
-        val sb = StringBuilder()
+        val lineBuf = java.io.ByteArrayOutputStream(64 * 1024)
         try {
             while (true) {
                 bb.clear()
@@ -156,13 +159,15 @@ class RpcClient(private val opts: RpcClientOptions) : AutoCloseable {
                 if (n < 0) break
                 bb.flip()
                 while (bb.hasRemaining()) {
-                    val c = bb.get().toInt().toChar()
-                    if (c == '\n') {
-                        if (sb.isNotEmpty() && sb.last() == '\r') sb.deleteCharAt(sb.length - 1)
-                        if (sb.isNotEmpty()) handleLine(sb.toString())
-                        sb.clear()
+                    val b = bb.get()
+                    if (b == NL_BYTE) {
+                        val bytes = lineBuf.toByteArray()
+                        var len = bytes.size
+                        if (len > 0 && bytes[len - 1] == CR_BYTE) len--
+                        if (len > 0) handleLine(String(bytes, 0, len, StandardCharsets.UTF_8))
+                        lineBuf.reset()
                     } else {
-                        sb.append(c)
+                        lineBuf.write(b.toInt())
                     }
                 }
             }
@@ -237,5 +242,7 @@ class RpcClient(private val opts: RpcClientOptions) : AutoCloseable {
 
     companion object {
         const val DEFAULT_TCP_PORT = 25580
+        private const val NL_BYTE: Byte = '\n'.code.toByte()
+        private const val CR_BYTE: Byte = '\r'.code.toByte()
     }
 }

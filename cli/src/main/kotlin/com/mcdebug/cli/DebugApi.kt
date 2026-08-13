@@ -159,8 +159,8 @@ class SnapshotApi(private val rpc: RpcClient) {
     fun capture(options: Map<String, Any?>): JsonElement =
         rpc.call("snapshot.capture", gson.toJsonTree(options))
 
-    fun diff(before: Any, after: Any): JsonElement =
-        rpc.call("snapshot.diff", params { p("before", before); p("after", after) })
+    fun diff(before: Any, after: Any, ignoreMeta: Boolean? = null): JsonElement =
+        rpc.call("snapshot.diff", params { p("before", before); p("after", after); p("ignoreMeta", ignoreMeta) })
 }
 
 class TraceApi(private val rpc: RpcClient) {
@@ -283,6 +283,10 @@ class ScanApi(private val rpc: RpcClient) {
 
 class ServerApi(private val rpc: RpcClient) {
     fun status(): JsonElement = rpc.call("server.status")
+
+    /** 聚合健康信息（0.6.0+）：TPS/MSPT + 各维度实体数/加载区块数。 */
+    fun health(): JsonElement = rpc.call("server.health")
+
     fun listDimensions(): JsonElement = rpc.call("server.listDimensions")
     fun runCommand(command: String, dim: String? = null): JsonElement =
         rpc.call("server.runCommand", params { p("command", command); p("dim", dim) })

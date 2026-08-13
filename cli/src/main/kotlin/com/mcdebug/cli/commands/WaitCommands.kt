@@ -10,7 +10,7 @@ class WaitUntilCmd : CliktCommand(
     help = "passively wait for a predicate to become true (evaluated on natural server ticks)",
 ) {
     private val predicate by option("--predicate", help = "predicate DSL, e.g. 'inv slot 1 has 2x minecraft:coal'").required()
-    private val timeoutTicks by option("--timeout-ticks", help = "timeout in ticks; 0 (default) = wait FOREVER, never times out").int()
+    private val timeoutTicks by option("--timeout-ticks", help = "timeout in ticks; default 1200 (1 min @20tps); pass 0 explicitly to wait FOREVER").int()
     private val pollIntervalTicks by option("--poll-interval-ticks").int()
 
     override fun run() = withApi { api ->

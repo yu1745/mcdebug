@@ -26,7 +26,7 @@ object Methods {
         "scan.findBlocks", "scan.countByBlock", "scan.findEntities",
     )
     val server = setOf(
-        "server.status", "server.listDimensions", "server.runCommand",
+        "server.status", "server.health", "server.listDimensions", "server.runCommand",
         "server.forgeFluidCapability", "server.mantleInteract",
     )
     val wait = setOf("wait.until")

@@ -125,7 +125,8 @@ object WaitOps : RpcHandlerGroup {
     private fun until(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> {
         val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
         val predicateStr = p.requireString("predicate")
-        val timeoutTicks = p.getIntOr("timeoutTicks", 0)
+        // 默认有限超时 1200 ticks（1 min @20tps）；0 表示无限等待（需显式传）。
+        val timeoutTicks = p.getIntOr("timeoutTicks", 1200).coerceAtLeast(0)
         val pollInterval = p.getIntOr("pollIntervalTicks", 1).coerceAtLeast(1)
         val predicate = PredicateExpr.parse(predicateStr)
         val future = CompletableFuture<JsonElement>()

@@ -39,7 +39,7 @@ class EntityGetNbtCmd : CliktCommand(name = "get-nbt", help = "read entity NBT")
     }
 }
 
-class EntitySetNbtCmd : CliktCommand(name = "set-nbt", help = "write entity NBT; non-ASCII text round-trips GARBLED (charset loss server-side) — use ASCII-only string values") {
+class EntitySetNbtCmd : CliktCommand(name = "set-nbt", help = "write entity NBT; non-ASCII text (中文/emoji/\\u escapes) round-trips correctly since 0.6.0 (UTF-8 fix) — server < 0.6.0 still garbles non-ASCII responses") {
     private val uuid by option("--uuid").required()
     private val nbt by option("--nbt").required()
     private val dim by option("--dim")

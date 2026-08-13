@@ -141,6 +141,36 @@ class SelectBlocksCmd : CliktCommand(name = "select-blocks", help = "find blocks
     }
 }
 
+class ReplaceBoxCmd : CliktCommand(
+    name = "replace-box",
+    help = "find & replace blocks inside a box: all positions matching --match get --replace; " +
+        "implemented CLI-side as select-blocks + ONE setBlocks call, so state properties of the replaced " +
+        "block are NOT preserved (only plain block ids); large boxes are slow — it scans every position",
+) {
+    private val from by option("--from", help = "box corner \"x,y,z\" (comma string)").required()
+    private val to by option("--to", help = "box corner \"x,y,z\" (comma string)").required()
+    private val match by option("--match", help = "block id to look for, e.g. minecraft:stone").required()
+    private val replace by option("--replace", help = "block id to write, e.g. minecraft:air").required()
+    private val state by option("--state", help = "state property k=v for the replacement block, repeatable").multiple()
+    private val dim by option("--dim")
+
+    override fun run() = withApi { api ->
+        val box = parseBox(from, to)
+        val sel = api.world.selectBlocks(box, match, false, dim)
+        val matches = sel.asJsonObject.getAsJsonArray("matches")
+        val props = state.takeIf { it.isNotEmpty() }?.let { parseStateProps(it) }
+        val ops = matches.map { el ->
+            val pos = el.asJsonObject.getAsJsonArray("pos").map { it.asInt }
+            mapOf<String, Any?>("pos" to pos, "block" to replace, "stateProps" to props)
+        }
+        val replaced = if (ops.isEmpty()) 0 else api.world.setBlocks(ops, null, dim).asJsonObject.get("count").asInt
+        com.google.gson.JsonObject().apply {
+            addProperty("matched", matches.size())
+            addProperty("replaced", replaced)
+        }.let { printJson(it) }
+    }
+}
+
 class ForceloadCmd : CliktCommand(name = "forceload", help = "force-load a chunk; takes CHUNK coordinates (--cx = blockX >> 4), NOT block coordinates") {
     private val cx by option("--cx", help = "chunk X (blockX >> 4)").int().required()
     private val cz by option("--cz", help = "chunk Z (blockZ >> 4)").int().required()
@@ -265,6 +295,6 @@ class AttackEntityCmd : CliktCommand(name = "attack-entity", help = "simulate le
 
 fun worldSubcommands() = listOf(
     GetBlockCmd(), SetBlockCmd(), PlaceCmd(), RemoveCmd(), FillBoxCmd(), ClearBoxCmd(),
-    PlaceAsPlayerCmd(), GetRegionCmd(), SelectBlocksCmd(), ForceloadCmd(), UnforceloadCmd(),
+    PlaceAsPlayerCmd(), GetRegionCmd(), SelectBlocksCmd(), ReplaceBoxCmd(), ForceloadCmd(), UnforceloadCmd(),
     UseOnBlockCmd(), UseItemCmd(), UseItemHoldCmd(), AttackBlockCmd(), InteractEntityCmd(), AttackEntityCmd(),
 )

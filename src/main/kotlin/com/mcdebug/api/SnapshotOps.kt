@@ -49,8 +49,25 @@ object SnapshotOps : RpcHandlerGroup {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
             val before = p.get("before") ?: throw RpcException(RpcErrors.INVALID_PARAMS, "before required")
             val after = p.get("after") ?: throw RpcException(RpcErrors.INVALID_PARAMS, "after required")
-            diffJson(before, after)
+            // ignoreMeta=true：过滤顶层 /tick、/time 等元数据字段后再 diff（快照必然随时间变化，
+            // 不忽略的话 equal 永远为 false）。
+            val ignoreMeta = p.getBoolOrFalse("ignoreMeta")
+            diffJson(
+                if (ignoreMeta) stripMeta(before) else before,
+                if (ignoreMeta) stripMeta(after) else after,
+            )
         }
+
+    /** 去掉快照顶层元数据键（tick/time），不改动入参（返回拷贝）。 */
+    internal fun stripMeta(el: JsonElement): JsonElement {
+        if (!el.isJsonObject) return el.deepCopy()
+        val out = JsonObject()
+        el.asJsonObject.entrySet().forEach { (k, v) ->
+            if (k == "tick" || k == "time") return@forEach
+            out.add(k, v)
+        }
+        return out
+    }
 
     internal fun captureSnapshot(
         server: MinecraftServer,

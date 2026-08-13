@@ -35,8 +35,24 @@ data class RunCommandResp(
     val output: String,
 )
 
+/** server.health 响应（0.6.0+）。无参数请求。 */
+data class HealthDimResp(
+    val dim: String,
+    val entities: Int,
+    val loadedChunks: Int,
+)
+
+data class HealthResp(
+    val tps: Double,
+    val mspt: Double,
+    val tick: Long,
+    val players: Int,
+    val dims: List<HealthDimResp>,
+)
+
 object ServerMethods {
     val status = RpcMethod.noReq("server.status", ServerStatusResp::class.java)
+    val health = RpcMethod.noReq("server.health", HealthResp::class.java)
     val listDimensions = RpcMethod.noReq("server.listDimensions", ListDimensionsResp::class.java)
     val runCommand = RpcMethod("server.runCommand", RunCommandReq::class.java, RunCommandResp::class.java)
 }

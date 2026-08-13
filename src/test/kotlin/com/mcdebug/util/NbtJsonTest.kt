@@ -267,4 +267,42 @@ class NbtJsonTest {
         val c = NbtCompound()
         assertThrows(RpcException::class.java) { NbtJson.setByPath(c, "", NbtInt.of(0)) }
     }
+
+    // ---- non-ASCII strings (regression: 0.5.x set-nbt round-trip garbled non-ASCII) ----
+
+    @Test
+    fun `non-ascii string with unicode escapes round-trips losslessly`() {
+        // JSON 源里用 \u 转义（等价于 CLI --nbt '{"name":"\u4e2d\u6587"}' 的写法）。
+        val n = parse("""{"name":"\u4e2d\u6587","msg":"caf\u00e9 \u00fc"}""")
+        val c = assertInstanceOf(NbtCompound::class.java, n)
+        assertEquals("中文", c.getString("name"))
+        assertEquals("café ü", c.getString("msg"))
+        // NBT→JSON 方向不得再引入任何 mojibake。
+        val j = NbtJson.toJson(c)
+        val back = NbtJson.fromJson(j) as NbtCompound
+        assertEquals("中文", back.getString("name"))
+        assertEquals("café ü", back.getString("msg"))
+    }
+
+    @Test
+    fun `supplementary-plane characters survive nbt io round trip`() {
+        // 代理对（emoji）在 NbtIo 的 modified UTF-8（CESU-8）序列化下必须无损往返。
+        val c = NbtCompound()
+        c.putString("emoji", "a\uD83D\uDE00b")
+        val baos = java.io.ByteArrayOutputStream()
+        net.minecraft.nbt.NbtIo.write(c, java.io.DataOutputStream(baos))
+        val back = net.minecraft.nbt.NbtIo.read(
+            java.io.DataInputStream(java.io.ByteArrayInputStream(baos.toByteArray()))
+        )
+        assertEquals("a😀b", (back as NbtCompound).getString("emoji"))
+    }
+
+    @Test
+    fun `toJson fromJson non-ascii round trip matches original java string`() {
+        val c = NbtCompound()
+        c.putString("s", "日本語テキスト ✔")
+        val j = NbtJson.toJson(c)
+        val back = NbtJson.fromJson(j) as NbtCompound
+        assertEquals("日本語テキスト ✔", back.getString("s"))
+    }
 }
