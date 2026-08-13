@@ -49,3 +49,7 @@ fabric-api_source/
 
 node_modules/
 logs/
+
+# 构建产物（不入库）
+dist/
+run/
