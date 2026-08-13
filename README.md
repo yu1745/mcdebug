@@ -331,7 +331,7 @@ JVM 冷启动 ~790ms；GraalVM native-image 单文件产物启动 **~11ms**、�
 
 ```bash
 ./build.sh                                  # 先构建（产出 dist/mcdebug-cli.jar）
-GRAALVM_HOME=/path/to/graalvm ./scripts/build-native.sh   # 产物 dist/mcdebug-native（~42MB）
+GRAALVM_HOME=/path/to/graalvm ./scripts/build-native.sh   # 产物 dist/mdb（~42MB）
 ./dist/mcdebug-native --version             # 11ms
 ./dist/mcdebug-native --socket <sock> status          # 本机 unix socket 通道
 ./dist/mcdebug-native --tcp <host[:port]> status      # 跨机 TCP 通道（默认 25580）

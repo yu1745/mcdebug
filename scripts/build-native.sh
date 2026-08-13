@@ -12,7 +12,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-OUT="${1:-dist/mcdebug-native}"
+OUT="${1:-dist/mdb}"
 # CLI fat jar 是 dist/mcdebug-cli.jar（带 Main-Class manifest）；版本号后缀的 mcdebug-cli-<v>.jar 是无 manifest 的薄 jar
 JAR="dist/mcdebug-cli.jar"
 if [ ! -f "$JAR" ]; then
