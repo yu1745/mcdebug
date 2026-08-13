@@ -324,3 +324,18 @@ The raw predicate grammar (for hand-written predicates) is documented in
 ## License
 
 MIT.
+
+## CLI 分发（native-image，推荐）
+
+JVM 冷启动 ~790ms；GraalVM native-image 单文件产物启动 **~11ms**、零运行时依赖（无需 JDK/node/pnpm），适合在 server 上高频调用。
+
+```bash
+./build.sh                                  # 先构建（产出 dist/mcdebug-cli.jar）
+GRAALVM_HOME=/path/to/graalvm ./scripts/build-native.sh   # 产物 dist/mcdebug-native（~42MB）
+./dist/mcdebug-native --version             # 11ms
+./dist/mcdebug-native --socket <sock> status          # 本机 unix socket 通道
+./dist/mcdebug-native --tcp <host[:port]> status      # 跨机 TCP 通道（默认 25580）
+```
+
+> npm 壳（`bin/mcdebug.js` / pnpm dlx）已弃用：native 产物体积大不适合 npm 分发，且 server 上使用场景不需要 pnpm 一行式。
+> 分发方式见 server 仓库 `registry/scripts.yaml` 的 mcdebug-cli 条目。
