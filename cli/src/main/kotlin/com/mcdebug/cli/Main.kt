@@ -1,6 +1,7 @@
 package com.mcdebug.cli
 
 import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.core.UsageError
 import com.github.ajalt.clikt.core.subcommands
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.arguments.optional
@@ -45,17 +46,30 @@ fun main(args: Array<String>) {
 
 class McDebugCli : CliktCommand(
     name = "mcdebug",
-    help = "CLI for the mcdebug Minecraft debug server mod (JSON-RPC over unix socket)",
+    help = "CLI for the mcdebug Minecraft debug server mod (JSON-RPC over unix socket or TCP)",
 ) {
     init {
         versionOption(McDebugCli::class.java.`package`.implementationVersion ?: "dev")
     }
 
     val socket by option("--socket", help = "unix socket path (overrides MCDEBUG_SOCKET and discovery file)")
+    val tcp by option(
+        "--tcp",
+        metavar = "HOST[:PORT]",
+        help = "connect over TCP to HOST[:PORT] (default port 25580) — cross-machine access",
+    )
+    val host by option("--host", help = "TCP host (must be used together with --port)")
+    val port by option("--port", help = "TCP port (must be used together with --host)").int()
     val portFile by option("--port-file", help = "socket discovery file path")
-    val timeout by option("--timeout", help = "connection timeout in ms").int().default(5000)
+    val timeout by option("--timeout", help = "connection timeout in ms (TCP connect)").int().default(5000)
 
-    fun clientOptions() = RpcClientOptions(socket, portFile, timeout)
+    fun clientOptions(): RpcClientOptions {
+        try {
+            return RpcClientOptions(socket, tcp, host, port, portFile, timeout)
+        } catch (e: IllegalArgumentException) {
+            throw UsageError(e.message ?: "invalid options")
+        }
+    }
 
     override fun run() {
         // 子命令链中父 run 也会被调用；直接调用（无子命令）时打印帮助。

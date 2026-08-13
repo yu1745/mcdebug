@@ -3,7 +3,7 @@
 	"id": "mcdebug",
 	"version": "${version}",
 	"name": "mcdebug",
-	"description": "JSON-RPC debug server for mod development automation. Exposes world/block-entity/inventory inspection and modification over TCP.",
+	"description": "JSON-RPC debug server for mod development automation. Exposes world/block-entity/inventory inspection and modification over a unix socket (local) and TCP (cross-machine).",
 	"authors": [
 		"mcdebug"
 	],

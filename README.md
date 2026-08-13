@@ -11,9 +11,19 @@ process (or from a JUnit test suite).
 ┌─────────────────┐  JSON-RPC 2.0   ┌──────────────────┐
 │  mcdebug (Kotlin│  NDJSON over    │  DebugServerMod  │
 │  CLI / runner)  │  unix socket    │  (Kotlin/Fabric) │
-└─────────────────┘  <gameDir>/     └──────────────────┘
-                       mcdebug/socket
+│                 │  <gameDir>/     │      ▲           │
+│                 │   mcdebug/socket│      │ TCP       │
+│                 ├─────────────── ►│  25580 (cross-  │
+│                 │  NDJSON over    │  machine access)│
+│                 │  TCP host:25580 │                  │
+└─────────────────┘                 └──────────────────┘
 ```
+
+Two transports, one RPC dispatcher (0.5.1+): the **unix socket** is the
+primary channel (local, unreachable from the network) and **TCP** is the
+auxiliary channel for cross-machine access. Either listener may fail to bind
+(e.g. TCP port occupied) and the server still starts on the other one; only
+if both fail does startup error out.
 
 The CLI is a Kotlin fat jar (`mcdebug-cli.jar`, committed to the repo root).
 The npm package at the repo root is a one-line shell that execs
@@ -43,18 +53,23 @@ For setup of the Fabric project itself, see the
 
 ## CLI and pnpm dlx usage
 
-The CLI talks to a running mcdebug Fabric server over JSON-RPC on a **unix
-domain socket** (`<gameDir>/mcdebug/socket` by default). No TCP ports are
-involved, so multiple dev servers on the same machine never conflict, and the
-socket is unreachable from the network.
+The CLI talks to a running mcdebug Fabric server over JSON-RPC. **Local
+access** uses the unix domain socket (`<gameDir>/mcdebug/socket` by default);
+**cross-machine access** uses TCP (`--tcp host:port`, default port 25580).
 
-The CLI finds the socket path from `--socket`, `MCDEBUG_SOCKET`, the
-`mcdebug/port` discovery file (written by the server), in that order.
+Unix socket discovery order: `--socket`, `MCDEBUG_SOCKET`, the `mcdebug/port`
+discovery file (written by the server), in that order. TCP must be requested
+explicitly (`--tcp` or `--host` + `--port`) — the CLI never falls back from one
+transport to the other on its own.
 
 ```bash
-# local checkout
+# local checkout (unix socket)
 node bin/mcdebug.js status
 node bin/mcdebug.js raw world.getBlock '{"pos":[0,64,0]}'
+
+# cross-machine (TCP): server must have its TCP listener bound (default port 25580)
+node bin/mcdebug.js --tcp 192.168.5.102:25582 status
+node bin/mcdebug.js --host 192.168.5.102 --port 25582 raw world.getBlock '{"pos":[0,64,0]}'
 
 # pnpm dlx, once the package version is published (the jar is inside the package)
 pnpm dlx @yu1745/mcdebug status
@@ -116,6 +131,37 @@ mcdebug fixture load --fixture @machine-fixture.json --origin 10,64,10
 
 The server still never exposes `tick.run` or `tick.runUntil`. `trace.*` and
 `wait.until` observe natural Minecraft ticks from the real Fabric server.
+
+## Transport configuration and discovery
+
+Server side (in `config/mcdebug.json`, or JVM properties / env vars):
+
+| channel | config key | JVM property | env var | default |
+|---|---|---|---|---|
+| unix socket path | `"socket"` | `-Dmcdebug.socket=<path>` | `MCDEBUG_SOCKET` | `<gameDir>/mcdebug/socket` |
+| TCP enabled | `"tcpEnabled"` | `-Dmcdebug.tcpEnabled=<bool>` | `MCDEBUG_TCP_ENABLED` | `true` |
+| TCP port | `"tcpPort"` | `-Dmcdebug.tcpPort=<port>` | `MCDEBUG_TCP_PORT` | `25580` (`0` = ephemeral) |
+
+Example: `config/mcdebug.json` `{"socket": "mcdebug/alt.sock", "tcpPort": 25580}`.
+
+Discovery files under `<gameDir>/mcdebug/` (best effort):
+
+- `port` — the resolved **unix socket path** (filename kept from the old TCP
+era for compatibility with existing consumers);
+- `tcpPort` — the actually bound **TCP port number** (only written when the
+TCP listener bound; e.g. the real port when `tcpPort=0`).
+
+Fault tolerance: the two listeners bind independently. A single-side failure
+(typically a TCP port conflict) logs a WARN and the server keeps running on
+the other transport; startup only fails if **both** listeners fail.
+
+### Version differences
+
+| version | transport |
+|---|---|
+| 0.4.15 | pure TCP (container 25580) |
+| 0.5.0 | pure unix socket |
+| 0.5.1 | dual: unix socket (primary) + TCP 25580 (auxiliary) |
 
 ## Universal machine APIs
 

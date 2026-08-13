@@ -4,6 +4,7 @@ import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import java.io.IOException
+import java.net.InetSocketAddress
 import java.net.StandardProtocolFamily
 import java.net.UnixDomainSocketAddress
 import java.nio.ByteBuffer
@@ -20,12 +21,26 @@ class RpcException(val rpcCode: Int, message: String, val data: JsonElement? = n
 
 class RpcClientOptions(
     val socket: String? = null,
+    /** TCP 目标 "host:port"（port 可省略，默认 25580）；指定后优先于 socket。 */
+    val tcp: String? = null,
+    val host: String? = null,
+    val port: Int? = null,
     val portFile: String? = null,
     val timeoutMs: Int = 5000,
-)
+) {
+    init {
+        require(tcp == null || (host == null && port == null)) {
+            "--tcp 与 --host/--port 不能同时使用"
+        }
+        require((host == null) == (port == null)) {
+            "--host 与 --port 必须成对使用"
+        }
+    }
+}
 
 /**
- * JSON-RPC 2.0 客户端，unix socket + NDJSON。
+ * JSON-RPC 2.0 客户端，unix socket / TCP + NDJSON，双传输自动选择：
+ * `tcp`/`host+port` → TCP（跨机）；否则 unix socket（本机）。
  * 连接复用、请求并发（id 关联），与服务器的连接生命周期一一对应。
  *
  * 实现注意：直接操作 SocketChannel 的 ByteBuffer 读写，**不要**用
@@ -64,8 +79,61 @@ class RpcClient(private val opts: RpcClientOptions) : AutoCloseable {
         )
     }
 
+    /** 解析 --tcp 参数：host[:port]，默认端口 25580（支持 [v6] 括号）。 */
+    private fun tcpTarget(): InetSocketAddress? {
+        val raw = opts.tcp ?: return (opts.host ?: return null).let { h ->
+            InetSocketAddress(h, opts.port ?: DEFAULT_TCP_PORT)
+        }
+        val host: String
+        val port: Int
+        if (raw.startsWith("[")) {
+            val close = raw.indexOf(']')
+            require(close > 1) { "invalid --tcp address: $raw" }
+            host = raw.substring(1, close)
+            port = raw.substring(close + 1).removePrefix(":")
+                .takeIf { it.isNotEmpty() }?.toIntOrNull() ?: DEFAULT_TCP_PORT
+        } else {
+            val idx = raw.lastIndexOf(':')
+            if (idx < 0) {
+                host = raw
+                port = DEFAULT_TCP_PORT
+            } else {
+                host = raw.substring(0, idx)
+                port = raw.substring(idx + 1).toIntOrNull()
+                    ?: throw IllegalArgumentException("invalid --tcp port: $raw")
+            }
+        }
+        return InetSocketAddress(host, port)
+    }
+
     private fun ensureConnected() {
         if (channel?.isOpen == true) return
+        val tcp = tcpTarget()
+        if (tcp != null) {
+            connectTcp(tcp)
+        } else {
+            connectUnix()
+        }
+        readThread = Thread(::readLoop, "mcdebug-rpc-read").apply {
+            isDaemon = true
+            start()
+        }
+    }
+
+    /** TCP 连接（跨机访问）；connect 带 timeout（--timeout，默认 5s）。 */
+    private fun connectTcp(addr: InetSocketAddress) {
+        val ch = SocketChannel.open()
+        try {
+            ch.socket().connect(addr, opts.timeoutMs)
+        } catch (e: Exception) {
+            ch.close()
+            throw IllegalStateException("cannot connect to mcdebug TCP $addr: ${e.message}", e)
+        }
+        channel = ch
+    }
+
+    /** unix socket 连接（本机访问，0.5.x 主通道）。 */
+    private fun connectUnix() {
         val path = discoverSocket()
         val ch = SocketChannel.open(StandardProtocolFamily.UNIX)
         try {
@@ -75,10 +143,6 @@ class RpcClient(private val opts: RpcClientOptions) : AutoCloseable {
             throw IllegalStateException("cannot connect to mcdebug socket $path: ${e.message}", e)
         }
         channel = ch
-        readThread = Thread(::readLoop, "mcdebug-rpc-read").apply {
-            isDaemon = true
-            start()
-        }
     }
 
     /** 读线程：逐字节组行，按 id 分发响应/通知。 */
@@ -169,5 +233,9 @@ class RpcClient(private val opts: RpcClientOptions) : AutoCloseable {
     override fun close() {
         runCatching { channel?.close() }
         channel = null
+    }
+
+    companion object {
+        const val DEFAULT_TCP_PORT = 25580
     }
 }

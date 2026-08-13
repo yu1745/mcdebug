@@ -4,10 +4,17 @@ Fabric 1.20.1 + Kotlin Mod，提供 JSON-RPC 服务，让 Kotlin CLI / JUnit run
 
 ```
 ┌─────────────────┐  JSON-RPC 2.0   ┌──────────────────┐
-│  mcdebug (TS)   │  NDJSON over    │  DebugServerMod  │
-│  CLI / Script   │  unix socket    │  (Kotlin/Fabric) │
-└─────────────────┘  <gameDir>/     └──────────────────┘
-                       mcdebug/socket
+│  mcdebug (Kotlin│  NDJSON over    │  DebugServerMod  │
+│  CLI / runner)  │  unix socket    │  (Kotlin/Fabric) │
+│                 │  <gameDir>/     │      ▲           │
+│                 │   mcdebug/socket│      │ TCP       │
+│                 ├─────────────── ►│  25580 (跨机访问)│
+│                 │  NDJSON over    │                  │
+│                 │  TCP host:25580 │                  │
+└─────────────────┘                 └──────────────────┘
+
+双传输、同一 dispatcher（0.5.1+）：unix socket 主通道（本机），TCP 辅助通道（跨机）。
+两边各自独立绑定：单边失败（典型：TCP 端口被占）只 WARN 不影响启动；两边都失败才报错。
 ```
 
 ## 1. 硬性约束
@@ -63,18 +70,34 @@ mcdebug/
   - `TraceOps` ↔ `trace.*`
   - `ScreenOps` ↔ `screen.*`
 - 错误码：JSON-RPC 标准 `-32700..-32603` + 自定义 `-32001..-32018`（在 `RpcErrors` 中）
-- 传输：**unix domain socket**（AF_UNIX SOCK_STREAM，默认 `<gameDir>/mcdebug/socket`），支持多客户端并发；无 TCP 端口，多实例互不冲突，网络不可达（无鉴权暴露面）。
+- 传输：**双通道并行**（0.5.1+）。unix domain socket（AF_UNIX SOCK_STREAM，默认 `<gameDir>/mcdebug/socket`）是主通道，本机访问、多客户端并发、网络不可达；TCP（默认 25580，wildcard `0.0.0.0`）是辅助通道，用于跨机访问，同样多客户端并发。无鉴权，TCP 侧靠端口发布规则/防火墙限制。**容错语义**：两个监听各自独立 try/catch，单边绑定失败只记 WARN、不影响启动；仅当两边都失败才报错。
 
-## 4. Socket 路径解析顺序（两端统一）
+## 4. 传输配置解析顺序（两端统一）
 
-1. JVM 系统属性 `-Dmcdebug.socket=<path>` / TS `--socket <path>`（最优先）
+### 4a. unix socket 路径
+
+1. JVM 系统属性 `-Dmcdebug.socket=<path>` / CLI `--socket <path>`（最优先）
 2. 环境变量 `MCDEBUG_SOCKET`
 3. `<gameDir>/config/mcdebug.json` 中 `socket` 字段（相对路径按 gameDir 解析）
 4. 默认 `<gameDir>/mcdebug/socket`
 
-服务端把解析出的 socket 路径写入 `<gameDir>/mcdebug/port`（沿用旧文件名，内容从端口号变为 socket 路径），客户端读该文件即可发现。修改 socket 位置的推荐方式：往 `run/config/mcdebug.json` 写 `{"socket": "mcdebug/alt.sock"}`，不需要重启服务配置即可生效。
+### 4b. TCP（跨机辅助通道，端口与 enabled 标志独立解析）
 
-注意：启动时会删除目标路径的残留 stale socket 文件（防 EADDRINUSE），停止时删除 socket 文件；发现文件 `mcdebug/port` 保留。
+1. JVM 系统属性 `-Dmcdebug.tcpPort=<port>` / `-Dmcdebug.tcpEnabled=<bool>`
+2. 环境变量 `MCDEBUG_TCP_PORT` / `MCDEBUG_TCP_ENABLED`
+3. `<gameDir>/config/mcdebug.json` 中 `tcpPort`（数字）/ `tcpEnabled`（布尔）字段
+4. 默认：enabled，端口 25580（与 0.4.x 旧版一致，生产 compose 映射无需改动）；`tcpPort=0` 表示临时端口（OS 分配，实际端口写进发现文件与日志）
+
+### 4c. 发现文件（best effort）
+
+- `<gameDir>/mcdebug/port`：内容为 **unix socket 路径**（沿用旧文件名，0.4.x 时期内容是端口号，0.5.0 起变为 socket 路径）
+- `<gameDir>/mcdebug/tcpPort`：内容为 **实际绑定的 TCP 端口号**（新文件，0.5.1+；仅 TCP 成功绑定时才写）
+
+客户端（CLI）默认走 socket 发现（`--socket` / `MCDEBUG_SOCKET` / `mcdebug/port` 文件）；跨机访问必须显式 `--tcp host:port`（或 `--host` + `--port`），CLI 不会在两种传输间自动回退。
+
+修改 socket 位置的推荐方式：往 `run/config/mcdebug.json` 写 `{"socket": "mcdebug/alt.sock"}`，不需要重启服务配置即可生效。
+
+注意：启动时会删除目标路径的残留 stale socket 文件（防 EADDRINUSE），停止时删除 socket 文件；发现文件 `mcdebug/port`、`mcdebug/tcpPort` 保留。
 
 ## 5. 常用命令
 
@@ -88,7 +111,8 @@ mcdebug/
 # CLI 端（Kotlin fat jar）
 ./gradlew :cli:copyCliJar     # 产出根目录 mcdebug-cli.jar
 node bin/mcdebug.js --help    # 查看所有 CLI 命令
-node bin/mcdebug.js status    # 调用 server.status RPC
+node bin/mcdebug.js status    # 调用 server.status RPC（unix socket，本机）
+node bin/mcdebug.js --tcp 192.168.5.102:25582 status   # 跨机访问（TCP）
 
 # pnpm dlx（发布包或 GitHub 根目录直装）
 pnpm dlx @yu1745/mcdebug status
@@ -136,10 +160,10 @@ pnpm dlx 'github:yu1745/mcdebug#v0.5.0' raw storage.list '{"target":{"kind":"blo
 
 ## 9. 调试技巧
 
-- 看 RPC socket：`cat run/mcdebug/port`（内容为 socket 路径）
+- 看 RPC socket：`cat run/mcdebug/port`（内容为 socket 路径）；TCP 端口：`cat run/mcdebug/tcpPort`
 - 实时看 server 日志：`run/logs/latest.log`（loom 写文件 + stdout）
 - Loom 缓存了旧 remap jar：清 `run/.fabric/processedMods/`，再 `./gradlew build`
-- CLI 快速调试：`node bin/mcdebug.js raw world.getBlock '{"pos":[0,64,0]}'`
+- CLI 快速调试：`node bin/mcdebug.js raw world.getBlock '{"pos":[0,64,0]}'`（本机 socket）；跨机：`node bin/mcdebug.js --tcp host:port ...`
 - pnpm 快速调试：`pnpm dlx 'github:yu1745/mcdebug#v0.5.0' raw storage.list '{"target":{"kind":"block","pos":[0,64,0]}}'`
 
 ## 10. 版本更新规则
@@ -189,7 +213,10 @@ node scripts/set-version.mjs X.Y.Z
 - `modid.mixins.json` 是 Fabric 模板遗留，且 mod 当前未写任何 mixin 代码，发版前可清理
 - `inv.insert` / `inv.extract` 对目标方块已消失（如过压爆炸成 air）时报 `-32004 no block entity`，错误不够友好；改进：目标无 BE 时返回 `INVALID_TARGET`/`STORAGE_NOT_FOUND` 类错误并带 `reason`（ic2-fabric 过压测试曾踩中：机器放下即炸后 insertItem 必然撞上）
 
-## 11b. v2 已完成（变更记录）
+## 11b. 已完成变更记录（v2 → 0.5.x）
+
+- **0.5.1 双通道（unix socket + TCP）+ 容错启动**（`rpc/RpcServer.kt` + `McDebugMod.kt` + `cli/RpcClient.kt` + `cli/Main.kt`）
+  恢复 TCP 监听与 unix socket 并行服务同一 dispatcher：unix socket 主通道（本机，默认 `<gameDir>/mcdebug/socket`），TCP 辅助通道（跨机，默认 25580 = 0.4.x 旧端口，wildcard 绑定）。配置沿用现有模式：`-Dmcdebug.socket`/`MCDEBUG_SOCKET`/json `socket` 之外新增 `-Dmcdebug.tcpPort`/`-Dmcdebug.tcpEnabled`（env `MCDEBUG_TCP_PORT`/`MCDEBUG_TCP_ENABLED`、json `tcpPort`/`tcpEnabled`）。**容错语义**：两个监听各自独立 try/catch，单边绑定失败（典型：TCP 端口被占）只 WARN、不影响启动；仅两边都失败才 error。发现文件：`mcdebug/port` 继续写 socket 路径；新增 `mcdebug/tcpPort` 写实际端口（仅 TCP 绑定时）。CLI 新增 `--tcp host:port` / `--host`+`--port`（跨机），`--socket` 不变，`--timeout` 现在真正作用于 TCP connect。单元测试 `RpcServerBindTest`（TCP 被占→unix 继续服务 / 双失败→抛错 / 双成功→并行服务+发现文件）覆盖容错逻辑。
 
 下列原 v2 待办已实现。保留描述以便回溯"为什么这么设计"。
 

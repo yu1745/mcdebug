@@ -31,9 +31,12 @@ import java.nio.file.Paths
 /**
  * mcdebug — JSON-RPC debug server for mod development automation.
  *
- * The RPC server listens on a unix domain socket (default
- * `<run_dir>/mcdebug/socket`) and writes the socket path to
- * `<run_dir>/mcdebug/port` so the client can find it.
+ * The RPC server listens on two transports in parallel: a unix domain socket
+ * (primary, local, default `<run_dir>/mcdebug/socket`) and TCP (auxiliary,
+ * cross-machine, default port 25580). Either listener may fail to bind
+ * without blocking startup; only if both fail does the server error out.
+ * Discovery files: `<run_dir>/mcdebug/port` (socket path) and
+ * `<run_dir>/mcdebug/tcpPort` (TCP port).
  */
 object McDebugMod : DedicatedServerModInitializer {
     const val MOD_ID = "mcdebug"
@@ -89,8 +92,12 @@ object McDebugMod : DedicatedServerModInitializer {
         RedstoneOps.install()
         FakePlayerPool.install()
 
-        rpcServer = RpcServer(d, ::socketFilePath).also { it.start(server) }
-        LOGGER.info("mcdebug RPC ready on unix socket {}", rpcServer?.socketPath)
+        rpcServer = RpcServer(d, ::socketFilePath, ::tcpPortFilePath).also { it.start(server) }
+        LOGGER.info(
+            "mcdebug RPC ready: unix socket={}, tcpPort={}",
+            rpcServer?.socketPath,
+            rpcServer?.tcpPort,
+        )
     }
 
     private fun onServerStopping(server: MinecraftServer) {
@@ -114,5 +121,11 @@ object McDebugMod : DedicatedServerModInitializer {
     private fun socketFilePath(): Path {
         val runDir = FabricLoader.getInstance().gameDir.resolve("mcdebug")
         return Paths.get(runDir.toString(), "port")
+    }
+
+    /** Discovery file written by RpcServer: content is the TCP port (only if TCP bound). */
+    private fun tcpPortFilePath(): Path {
+        val runDir = FabricLoader.getInstance().gameDir.resolve("mcdebug")
+        return Paths.get(runDir.toString(), "tcpPort")
     }
 }
