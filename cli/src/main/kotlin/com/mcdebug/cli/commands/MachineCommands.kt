@@ -30,7 +30,7 @@ private fun parseGridSpec(specs: List<String>): List<Any?> = specs.map { s ->
     }
 }
 
-class CraftDoCmd : CliktCommand(name = "do", help = "craft a 3x3 grid (up to 9 args); spec: item@count, slot=item@count, or null") {
+class CraftDoCmd : CliktCommand(name = "do", help = "craft a 3x3 grid (up to 9 args); each arg = item@count or null, parsed BY POSITION (left-to-right, top-to-bottom) — a 'slot=' prefix is stripped and IGNORED, not interpreted as a slot; --recipe-id bypasses grid matching and forces a specific recipe") {
     private val grid by argument("grid", help = "grid slots left-to-right, top-to-bottom; use 'null' for empty").multiple()
     private val recipeId by option("--recipe-id")
     private val dim by option("--dim")
@@ -51,15 +51,15 @@ class CraftFindCmd : CliktCommand(name = "find", help = "list recipes matching a
 
 // ---- scan group ----
 
-class ScanCommands : CliktCommand(name = "scan", help = "box scanning: blocks / block counts / entities") {
+class ScanCommands : CliktCommand(name = "scan", help = "box scanning; return shapes differ: find-blocks = flat array of [x,y,z]; count-by-block = {\"id\":count} map; find-entities = array of entity objects (searched box expanded by +1 margin on each side)") {
     override fun run() = Unit
 }
 
-class ScanFindBlocksCmd : CliktCommand(name = "find-blocks", help = "find all positions of a block id in a box") {
+class ScanFindBlocksCmd : CliktCommand(name = "find-blocks", help = "find all positions of a block id in a box; returns a FLAT array of [x,y,z] positions (no per-block objects)") {
     private val from by option("--from").required()
     private val to by option("--to").required()
     private val block by option("--block").required()
-    private val count by option("--count").flag()
+    private val count by option("--count", help = "return the total count instead of the position list").flag()
     private val dim by option("--dim")
 
     override fun run() = withApi { api ->
@@ -67,7 +67,7 @@ class ScanFindBlocksCmd : CliktCommand(name = "find-blocks", help = "find all po
     }
 }
 
-class ScanCountByBlockCmd : CliktCommand(name = "count-by-block", help = "count blocks by id in a box") {
+class ScanCountByBlockCmd : CliktCommand(name = "count-by-block", help = "count blocks by id in a box; returns a {\"blockId\": count} map (not a list)") {
     private val from by option("--from").required()
     private val to by option("--to").required()
     private val dim by option("--dim")
@@ -77,7 +77,7 @@ class ScanCountByBlockCmd : CliktCommand(name = "count-by-block", help = "count 
     }
 }
 
-class ScanFindEntitiesCmd : CliktCommand(name = "find-entities", help = "find entities in a box") {
+class ScanFindEntitiesCmd : CliktCommand(name = "find-entities", help = "find entities in a box; the searched box is the given box EXPANDED by 1 block on each side; returns an array of entity objects") {
     private val from by option("--from").required()
     private val to by option("--to").required()
     private val type by option("--type")
@@ -111,7 +111,7 @@ class SnapshotCaptureCmd : CliktCommand(name = "capture", help = "capture a snap
     }
 }
 
-class SnapshotDiffCmd : CliktCommand(name = "diff", help = "structural diff between two snapshots") {
+class SnapshotDiffCmd : CliktCommand(name = "diff", help = "structural diff between two snapshots; NOTE: the diff ALWAYS contains /tick and /time metadata changes, so equal:false is reported even when no real block/inventory content changed") {
     private val before by option("--before", help = "snapshot JSON or @file").required()
     private val after by option("--after", help = "snapshot JSON or @file").required()
 
@@ -130,7 +130,7 @@ class TraceStartCmd : CliktCommand(name = "start", help = "start a tick trace on
     private val from by option("--from").required()
     private val to by option("--to").required()
     private val intervalTicks by option("--interval-ticks").int().default(1)
-    private val maxTicks by option("--max-ticks").int()
+    private val maxTicks by option("--max-ticks", help = "NOT IMPLEMENTED server-side (ignored): a trace keeps running forever until you call 'trace stop' manually").int()
     private val include by option("--include").default("block")
     private val dim by option("--dim")
 

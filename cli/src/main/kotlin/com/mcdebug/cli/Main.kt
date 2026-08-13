@@ -88,7 +88,7 @@ class StatusCmd : CliktCommand(name = "status", help = "show server status") {
     }
 }
 
-class RawCmd : CliktCommand(name = "raw", help = "call an arbitrary JSON-RPC method; jsonParams is JSON or @file") {
+class RawCmd : CliktCommand(name = "raw", help = "call an arbitrary JSON-RPC method; jsonParams is JSON or @file; params follow the SERVER schema, e.g. {\"pos\":[x,y,z]} (pos is an array, there is no --x/--y/--z here) — check the equivalent subcommand's --help for the schema") {
     val method by argument("method", help = "method name, e.g. world.getBlock")
     val jsonParams by argument("jsonParams", help = "JSON params object, or @file to read from file").optional()
 

@@ -228,7 +228,7 @@ object FluidOps : RpcHandlerGroup {
             when {
                 parts.isEmpty() -> throw RpcException(
                     RpcErrors.FLUID_INDEX_OUT_OF_RANGE,
-                    "storage has no enumerable tanks; pass --index only if you know the target"
+                    "storage is empty: no enumerable fluid parts to operate on"
                 )
                 parts.size == 1 -> 0
                 else -> throw RpcException(

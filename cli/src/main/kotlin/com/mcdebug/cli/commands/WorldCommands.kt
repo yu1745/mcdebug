@@ -9,7 +9,10 @@ import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.types.int
 
-class WorldCommands : CliktCommand(name = "world", help = "world block / region / player-simulation operations") {
+class WorldCommands : CliktCommand(
+    name = "world",
+    help = "world block / region / player-simulation operations; coordinate styles: single point = --x/--y/--z, box = --from/--to \"x,y,z\" (comma string), chunk = --cx/--cz (chunk coordinates = blockX >> 4, NOT block coordinates)",
+) {
     override fun run() = Unit
 }
 
@@ -25,7 +28,7 @@ class GetBlockCmd : CliktCommand(name = "get-block", help = "read a block state 
     }
 }
 
-class SetBlockCmd : CliktCommand(name = "set-block", help = "set a block state (raw setBlockState, no BlockItem pipeline)") {
+class SetBlockCmd : CliktCommand(name = "set-block", help = "set a block state (raw setBlockState, no BlockItem pipeline); ok:false (out-of-bounds / same block already set) is a NORMAL response, not an error: exit code stays 0, check the ok field") {
     private val x by option("--x").int().required()
     private val y by option("--y").int().required()
     private val z by option("--z").int().required()
@@ -40,7 +43,7 @@ class SetBlockCmd : CliktCommand(name = "set-block", help = "set a block state (
     }
 }
 
-class PlaceCmd : CliktCommand(name = "place", help = "alias of set-block (raw setBlockState)") {
+class PlaceCmd : CliktCommand(name = "place", help = "alias of set-block: raw setBlockState, NOT the player placement pipeline (see place-as-player); ok:false is a normal response, not an error") {
     private val x by option("--x").int().required()
     private val y by option("--y").int().required()
     private val z by option("--z").int().required()
@@ -55,7 +58,7 @@ class PlaceCmd : CliktCommand(name = "place", help = "alias of set-block (raw se
     }
 }
 
-class RemoveCmd : CliktCommand(name = "remove", help = "remove a block (sets it to minecraft:air)") {
+class RemoveCmd : CliktCommand(name = "remove", help = "remove a block (sets it to minecraft:air); ok:false (out-of-bounds / already air) is a NORMAL response, not an error: exit code 0") {
     private val x by option("--x").int().required()
     private val y by option("--y").int().required()
     private val z by option("--z").int().required()
@@ -66,13 +69,13 @@ class RemoveCmd : CliktCommand(name = "remove", help = "remove a block (sets it 
     }
 }
 
-class FillBoxCmd : CliktCommand(name = "fill-box", help = "fill a loaded box with one block state") {
-    private val from by option("--from").required()
-    private val to by option("--to").required()
+class FillBoxCmd : CliktCommand(name = "fill-box", help = "fill a box with one block state; chunks must ALREADY be loaded (unloaded chunk -> -32008), unlike get-region which auto-loads") {
+    private val from by option("--from", help = "box corner \"x,y,z\" (comma string)").required()
+    private val to by option("--to", help = "box corner \"x,y,z\" (comma string)").required()
     private val block by option("--block").required()
     private val state by option("--state", help = "state property k=v, repeatable").multiple()
     private val flags by option("--flags").int()
-    private val maxBlocks by option("--max-blocks").int()
+    private val maxBlocks by option("--max-blocks", help = "confirmation THRESHOLD, not a cap: if the box exceeds it, the call fails with -32602 and writes NOTHING (default 32768)").int()
     private val dim by option("--dim")
 
     override fun run() = withApi { api ->
@@ -81,11 +84,11 @@ class FillBoxCmd : CliktCommand(name = "fill-box", help = "fill a loaded box wit
     }
 }
 
-class ClearBoxCmd : CliktCommand(name = "clear-box", help = "fill a box with air") {
-    private val from by option("--from").required()
-    private val to by option("--to").required()
+class ClearBoxCmd : CliktCommand(name = "clear-box", help = "fill a box with air; chunks must ALREADY be loaded (unloaded chunk -> -32008), unlike get-region which auto-loads") {
+    private val from by option("--from", help = "box corner \"x,y,z\" (comma string)").required()
+    private val to by option("--to", help = "box corner \"x,y,z\" (comma string)").required()
     private val flags by option("--flags").int()
-    private val maxBlocks by option("--max-blocks").int()
+    private val maxBlocks by option("--max-blocks", help = "confirmation THRESHOLD, not a cap: if the box exceeds it, the call fails with -32602 and writes NOTHING (default 32768)").int()
     private val dim by option("--dim")
 
     override fun run() = withApi { api ->
@@ -93,15 +96,15 @@ class ClearBoxCmd : CliktCommand(name = "clear-box", help = "fill a box with air
     }
 }
 
-class PlaceAsPlayerCmd : CliktCommand(name = "place-as-player", help = "place a block through the full BlockItem pipeline with a fake player") {
+class PlaceAsPlayerCmd : CliktCommand(name = "place-as-player", help = "place a block through the full BlockItem placement pipeline with a fake player (fake player defaults: gamemode=survival, player-facing = looking at the clicked face)") {
     private val x by option("--x").int().required()
     private val y by option("--y").int().required()
     private val z by option("--z").int().required()
     private val block by option("--block").required()
     private val face by option("--face", help = "up|down|north|south|east|west").required()
     private val neighbor by option("--neighbor", help = "x,y,z of the block the face belongs to")
-    private val playerFacing by option("--player-facing", help = "up|down|north|south|east|west")
-    private val nbt by option("--nbt", help = "block entity NBT JSON or @file")
+    private val playerFacing by option("--player-facing", help = "up|down|north|south|east|west (default: looking at the clicked face)")
+    private val nbt by option("--nbt", help = "block entity NBT JSON or @file — NOT IMPLEMENTED YET: currently ignored by the server (no error, no effect)")
     private val dim by option("--dim")
 
     override fun run() = withApi { api ->
@@ -115,7 +118,7 @@ class PlaceAsPlayerCmd : CliktCommand(name = "place-as-player", help = "place a 
     }
 }
 
-class GetRegionCmd : CliktCommand(name = "get-region", help = "read all blocks in a box") {
+class GetRegionCmd : CliktCommand(name = "get-region", help = "read all blocks in a box; AUTO-LOADS unloaded chunks (opposite of fill-box/clear-box, which fail with -32008 on unloaded chunks)") {
     private val from by option("--from").required()
     private val to by option("--to").required()
     private val includeNbt by option("--include-nbt").flag()
@@ -138,9 +141,9 @@ class SelectBlocksCmd : CliktCommand(name = "select-blocks", help = "find blocks
     }
 }
 
-class ForceloadCmd : CliktCommand(name = "forceload", help = "force-load a chunk") {
-    private val cx by option("--cx").int().required()
-    private val cz by option("--cz").int().required()
+class ForceloadCmd : CliktCommand(name = "forceload", help = "force-load a chunk; takes CHUNK coordinates (--cx = blockX >> 4), NOT block coordinates") {
+    private val cx by option("--cx", help = "chunk X (blockX >> 4)").int().required()
+    private val cz by option("--cz", help = "chunk Z (blockZ >> 4)").int().required()
     private val dim by option("--dim")
 
     override fun run() = withApi { api ->
@@ -148,9 +151,9 @@ class ForceloadCmd : CliktCommand(name = "forceload", help = "force-load a chunk
     }
 }
 
-class UnforceloadCmd : CliktCommand(name = "unforceload", help = "unforce-load a chunk") {
-    private val cx by option("--cx").int().required()
-    private val cz by option("--cz").int().required()
+class UnforceloadCmd : CliktCommand(name = "unforceload", help = "unforce-load a chunk; takes CHUNK coordinates (--cx = blockX >> 4); after a REAL unload, writes into that chunk fail with -32008 (reads auto-load it again, writes do not)") {
+    private val cx by option("--cx", help = "chunk X (blockX >> 4)").int().required()
+    private val cz by option("--cz", help = "chunk Z (blockZ >> 4)").int().required()
     private val dim by option("--dim")
 
     override fun run() = withApi { api ->
@@ -158,17 +161,17 @@ class UnforceloadCmd : CliktCommand(name = "unforceload", help = "unforce-load a
     }
 }
 
-class UseOnBlockCmd : CliktCommand(name = "use-on-block", help = "simulate right-clicking a block with an item (full interactBlock pipeline)") {
+class UseOnBlockCmd : CliktCommand(name = "use-on-block", help = "simulate right-clicking a block with an item (full interactBlock pipeline); fake player stands just outside the clicked face, gamemode defaults to survival") {
     private val x by option("--x").int().required()
     private val y by option("--y").int().required()
     private val z by option("--z").int().required()
-    private val face by option("--face").required()
+    private val face by option("--face", help = "REQUIRED: up|down|north|south|east|west (which face was clicked)").required()
     private val item by option("--item")
     private val count by option("--count").int()
     private val nbt by option("--nbt", help = "item NBT JSON or @file")
     private val sneaking by option("--sneaking").flag()
-    private val playerFacing by option("--player-facing")
-    private val gamemode by option("--gamemode", help = "survival|creative")
+    private val playerFacing by option("--player-facing", help = "up|down|north|south|east|west (default: looking at the clicked face)")
+    private val gamemode by option("--gamemode", help = "survival|creative (default: survival)")
     private val dim by option("--dim")
 
     override fun run() = withApi { api ->
@@ -176,7 +179,7 @@ class UseOnBlockCmd : CliktCommand(name = "use-on-block", help = "simulate right
     }
 }
 
-class UseItemCmd : CliktCommand(name = "use-item", help = "simulate right-clicking with an item in air (Item.use)") {
+class UseItemCmd : CliktCommand(name = "use-item", help = "simulate right-clicking with an item in air (Item.use); fake player defaults: gamemode=survival, position=world spawn (there is no position option)") {
     private val item by option("--item").required()
     private val count by option("--count").int()
     private val nbt by option("--nbt")
@@ -188,28 +191,34 @@ class UseItemCmd : CliktCommand(name = "use-item", help = "simulate right-clicki
     }
 }
 
-class UseItemHoldCmd : CliktCommand(name = "use-item-hold", help = "right-click a ranged weapon and hold it for holdTicks (bows, crossbows, modded weapons)") {
+class UseItemHoldCmd : CliktCommand(name = "use-item-hold", help = "right-click a ranged weapon and hold it for holdTicks (bows, crossbows, modded weapons); gamemode defaults to survival") {
     private val item by option("--item").required()
     private val count by option("--count").int()
     private val nbt by option("--nbt")
     private val ammo by option("--ammo")
     private val ammoCount by option("--ammo-count").int()
-    private val targetUuid by option("--target-uuid")
-    private val direction by option("--direction", help = "north|south|east|west|up|down")
+    private val targetUuid by option("--target-uuid", help = "aim at this entity (then --player-pos is optional: the fake player stands 5 blocks in front of it)")
+    private val direction by option("--direction", help = "north|south|east|west|up|down (fixed facing when no target)")
     private val holdTicks by option("--hold-ticks").int()
     private val repeat by option("--repeat").int()
-    private val playerPos by option("--player-pos", help = "x,y,z")
+    private val playerPos by option("--player-pos", help = "x,y,z of the fake player — REQUIRED when using --direction: without it the fake player would spawn at world spawn, usually far from the origin, and shots land far away")
     private val dim by option("--dim")
 
     override fun run() = withApi { api ->
+        val pos = playerPos?.let { parseTriplet(it, "player-pos") }
+        if (targetUuid == null && pos == null) {
+            throw IllegalArgumentException(
+                "--player-pos is required when aiming with --direction: without --target-uuid the fake player would spawn at world spawn, far from the origin, and shots would land far away"
+            )
+        }
         printJson(api.world.useItemHold(
             item, count, nbt?.let { parseJsonArg(it) }, ammo, ammoCount, targetUuid,
-            direction, holdTicks, repeat, playerPos?.let { parseTriplet(it, "player-pos") }, dim,
+            direction, holdTicks, repeat, pos, dim,
         ))
     }
 }
 
-class AttackBlockCmd : CliktCommand(name = "attack-block", help = "simulate left-clicking a block (processBlockBreakingAction pipeline)") {
+class AttackBlockCmd : CliktCommand(name = "attack-block", help = "simulate left-clicking a block (processBlockBreakingAction pipeline); ONE call performs the whole break (start->hold->stop): the block is fully broken in a single invocation; gamemode defaults to survival") {
     private val x by option("--x").int().required()
     private val y by option("--y").int().required()
     private val z by option("--z").int().required()
@@ -226,13 +235,13 @@ class AttackBlockCmd : CliktCommand(name = "attack-block", help = "simulate left
     }
 }
 
-class InteractEntityCmd : CliktCommand(name = "interact-entity", help = "simulate right-clicking an entity with an item") {
+class InteractEntityCmd : CliktCommand(name = "interact-entity", help = "simulate right-clicking an entity with an item; fake player defaults: gamemode=survival, player-facing=south, standing next to the entity") {
     private val uuid by option("--uuid").required()
     private val item by option("--item")
     private val count by option("--count").int()
     private val nbt by option("--nbt")
     private val sneaking by option("--sneaking").flag()
-    private val playerFacing by option("--player-facing")
+    private val playerFacing by option("--player-facing", help = "up|down|north|south|east|west (default: south)")
     private val dim by option("--dim")
 
     override fun run() = withApi { api ->
@@ -240,13 +249,13 @@ class InteractEntityCmd : CliktCommand(name = "interact-entity", help = "simulat
     }
 }
 
-class AttackEntityCmd : CliktCommand(name = "attack-entity", help = "simulate left-clicking (attacking) an entity") {
+class AttackEntityCmd : CliktCommand(name = "attack-entity", help = "simulate left-clicking (attacking) an entity; fake player defaults: gamemode=survival, player-facing=south, standing 1.5 blocks behind the entity") {
     private val uuid by option("--uuid").required()
     private val item by option("--item")
     private val count by option("--count").int()
     private val nbt by option("--nbt")
     private val armor by option("--armor", help = "armor JSON or @file")
-    private val playerFacing by option("--player-facing")
+    private val playerFacing by option("--player-facing", help = "up|down|north|south|east|west (default: south)")
     private val dim by option("--dim")
 
     override fun run() = withApi { api ->

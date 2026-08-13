@@ -39,7 +39,7 @@ class EntityGetNbtCmd : CliktCommand(name = "get-nbt", help = "read entity NBT")
     }
 }
 
-class EntitySetNbtCmd : CliktCommand(name = "set-nbt", help = "write entity NBT") {
+class EntitySetNbtCmd : CliktCommand(name = "set-nbt", help = "write entity NBT; non-ASCII text round-trips GARBLED (charset loss server-side) — use ASCII-only string values") {
     private val uuid by option("--uuid").required()
     private val nbt by option("--nbt").required()
     private val dim by option("--dim")
@@ -88,7 +88,7 @@ class EntityListItemsCmd : CliktCommand(name = "list-items", help = "list droppe
     }
 }
 
-class EntityCollectItemsCmd : CliktCommand(name = "collect-items", help = "collect dropped item entities in a box") {
+class EntityCollectItemsCmd : CliktCommand(name = "collect-items", help = "collect dropped item entities in a box; without --remove it only LISTS (same as list-items); with --remove each item entry echoes removed:false (the pre-removal snapshot) while the top-level removed:true records the removal") {
     private val from by option("--from").required()
     private val to by option("--to").required()
     private val dim by option("--dim")

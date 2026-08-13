@@ -7,7 +7,7 @@ import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.types.int
 
-class InvCommands : CliktCommand(name = "inv", help = "vanilla inventory operations on a block entity") {
+class InvCommands : CliktCommand(name = "inv", help = "vanilla inventory operations on a block entity; slot indices are 0-BASED (first slot = 0)") {
     override fun run() = Unit
 }
 
@@ -22,7 +22,7 @@ class InvGetSizeCmd : CliktCommand(name = "get-size", help = "inventory slot cou
     }
 }
 
-class InvGetSlotCmd : CliktCommand(name = "get-slot", help = "read one slot") {
+class InvGetSlotCmd : CliktCommand(name = "get-slot", help = "read one slot (0-based)") {
     private val x by option("--x").int().required()
     private val y by option("--y").int().required()
     private val z by option("--z").int().required()
@@ -34,7 +34,7 @@ class InvGetSlotCmd : CliktCommand(name = "get-slot", help = "read one slot") {
     }
 }
 
-class InvSetSlotCmd : CliktCommand(name = "set-slot", help = "write one slot (item=null to clear)") {
+class InvSetSlotCmd : CliktCommand(name = "set-slot", help = "write one slot, 0-based (item=null to clear)") {
     private val x by option("--x").int().required()
     private val y by option("--y").int().required()
     private val z by option("--z").int().required()
@@ -49,7 +49,7 @@ class InvSetSlotCmd : CliktCommand(name = "set-slot", help = "write one slot (it
     }
 }
 
-class InvInsertCmd : CliktCommand(name = "insert", help = "insert items into a machine inventory") {
+class InvInsertCmd : CliktCommand(name = "insert", help = "insert items into a machine inventory (slot is 0-based)") {
     private val x by option("--x").int().required()
     private val y by option("--y").int().required()
     private val z by option("--z").int().required()
@@ -65,7 +65,7 @@ class InvInsertCmd : CliktCommand(name = "insert", help = "insert items into a m
     }
 }
 
-class InvExtractCmd : CliktCommand(name = "extract", help = "extract items from a machine inventory") {
+class InvExtractCmd : CliktCommand(name = "extract", help = "extract items from a machine inventory (slot is 0-based)") {
     private val x by option("--x").int().required()
     private val y by option("--y").int().required()
     private val z by option("--z").int().required()

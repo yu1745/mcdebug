@@ -33,9 +33,9 @@ class ScreenSnapshotCmd : CliktCommand(name = "snapshot", help = "read a screen 
     }
 }
 
-class ScreenSetPlayerSlotCmd : CliktCommand(name = "set-player-slot", help = "set the fake player's cursor stack") {
+class ScreenSetPlayerSlotCmd : CliktCommand(name = "set-player-slot", help = "write a PLAYER INVENTORY slot of the fake player (--slot 0-35), NOT the cursor stack (the cursor is a separate screen field)") {
     private val screenId by option("--screen-id").required()
-    private val slot by option("--slot").int().required()
+    private val slot by option("--slot", help = "player inventory slot 0-35 (not the cursor stack)").int().required()
     private val stack by option("--stack", help = "ItemStack JSON: {\"item\":\"...\",\"count\":N}").required()
 
     override fun run() = withApi { api ->
@@ -89,7 +89,7 @@ class RedstoneGetPowerCmd : CliktCommand(name = "get-power", help = "read redsto
     }
 }
 
-class RedstoneIsPoweredCmd : CliktCommand(name = "is-powered", help = "is the block powered?") {
+class RedstoneIsPoweredCmd : CliktCommand(name = "is-powered", help = "is the block powered BY NEIGHBORS? (true when an adjacent block/redstone powers it; the block's own powered state — e.g. a switched-on lever itself — does NOT report true)") {
     private val x by option("--x").int().required()
     private val y by option("--y").int().required()
     private val z by option("--z").int().required()

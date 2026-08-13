@@ -21,7 +21,7 @@ class BeGetNbtCmd : CliktCommand(name = "get-nbt", help = "read block entity NBT
     }
 }
 
-class BeSetNbtCmd : CliktCommand(name = "set-nbt", help = "write block entity NBT") {
+class BeSetNbtCmd : CliktCommand(name = "set-nbt", help = "write block entity NBT; non-ASCII text round-trips GARBLED (charset loss server-side) — use ASCII-only string values") {
     private val x by option("--x").int().required()
     private val y by option("--y").int().required()
     private val z by option("--z").int().required()
@@ -45,7 +45,7 @@ class BeGetFieldCmd : CliktCommand(name = "get-field", help = "read one NBT path
     }
 }
 
-class BeSetFieldCmd : CliktCommand(name = "set-field", help = "write one NBT path inside a block entity") {
+class BeSetFieldCmd : CliktCommand(name = "set-field", help = "write one NBT path inside a block entity; WARNING: if the JSON value type does not match the field's NBT type, the response is still ok:true but the field is silently NOT written") {
     private val x by option("--x").int().required()
     private val y by option("--y").int().required()
     private val z by option("--z").int().required()
@@ -58,7 +58,7 @@ class BeSetFieldCmd : CliktCommand(name = "set-field", help = "write one NBT pat
     }
 }
 
-class BeTickCmd : CliktCommand(name = "tick", help = "tick the block entity N times (same path as natural ticks)") {
+class BeTickCmd : CliktCommand(name = "tick", help = "tick the block entity N times (same path as natural ticks); requires server-side support: added in mcdebug mod >= 0.5.0 (0.4.x servers return method not found)") {
     private val x by option("--x").int().required()
     private val y by option("--y").int().required()
     private val z by option("--z").int().required()

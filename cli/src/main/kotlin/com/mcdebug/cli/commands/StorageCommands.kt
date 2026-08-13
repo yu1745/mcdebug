@@ -169,7 +169,7 @@ class FluidGetCmd : CliktCommand(name = "get", help = "read one tank part") {
     private val y by option("--y").int().required()
     private val z by option("--z").int().required()
     private val side by option("--side")
-    private val index by option("--index").int()
+    private val index by option("--index", help = "tank part index").int()
     private val dim by option("--dim")
 
     override fun run() = withApi { api ->
@@ -177,14 +177,14 @@ class FluidGetCmd : CliktCommand(name = "get", help = "read one tank part") {
     }
 }
 
-class FluidInsertCmd : CliktCommand(name = "insert", help = "insert fluid into a tank") {
+class FluidInsertCmd : CliktCommand(name = "insert", help = "insert fluid into a tank; amount unit is DROPLETS (81000 = 1 bucket = 3 bottles)") {
     private val x by option("--x").int().required()
     private val y by option("--y").int().required()
     private val z by option("--z").int().required()
     private val fluid by option("--fluid").required()
     private val amount by option("--amount").int().required()
     private val side by option("--side")
-    private val index by option("--index").int()
+    private val index by option("--index", help = "tank part index (required when the storage has multiple tanks)").int()
     private val dim by option("--dim")
 
     override fun run() = withApi { api ->
@@ -192,13 +192,13 @@ class FluidInsertCmd : CliktCommand(name = "insert", help = "insert fluid into a
     }
 }
 
-class FluidExtractCmd : CliktCommand(name = "extract", help = "extract fluid from a tank") {
+class FluidExtractCmd : CliktCommand(name = "extract", help = "extract fluid from a tank; amount unit is DROPLETS (81000 = 1 bucket = 3 bottles); extraction works in WHOLE-BOTTLE units (27000) — finer amounts are not extracted") {
     private val x by option("--x").int().required()
     private val y by option("--y").int().required()
     private val z by option("--z").int().required()
     private val amount by option("--amount").int().required()
     private val side by option("--side")
-    private val index by option("--index").int()
+    private val index by option("--index", help = "tank part index (required when the storage has multiple tanks)").int()
     private val dim by option("--dim")
 
     override fun run() = withApi { api ->
