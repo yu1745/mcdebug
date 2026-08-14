@@ -21,7 +21,7 @@ CLEAN=0
 while [ $# -gt 0 ]; do
   case "$1" in
     --clean) CLEAN=1 ;;
-    --out) shift; OUT="$2" ;;
+    --out) shift; OUT="$1" ;;
     *) echo "usage: $0 [--clean] [--out <dir>]" >&2; exit 2 ;;
   esac
   shift
