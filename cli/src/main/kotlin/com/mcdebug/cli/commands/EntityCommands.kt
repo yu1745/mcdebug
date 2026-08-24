@@ -22,7 +22,7 @@ class EntitySpawnCmd : CliktCommand(name = "spawn", help = "spawn an entity at a
     private val yaw by option("--yaw").float()
     private val pitch by option("--pitch").float()
     private val nbt by option("--nbt", help = "entity NBT JSON or @file")
-    private val stack by option("--stack", help = "item stack JSON (for ItemEntity)")
+    private val stack by option("--stack", help = "item stack JSON (for ItemEntity): {\"item\":\"modid:item_id\",\"count\":N,\"nbt\":{...}} — the item field is named `item`, NOT `id`; nbt uses typed sentinels {\"#nbt\":\"byte|short|int|long|float|double|string|...\",\"value\":...} to preserve exact NBT types")
     private val includeNbt by option("--include-nbt").flag()
 
     override fun run() = withApi { api ->
