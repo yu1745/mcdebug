@@ -26,7 +26,7 @@ Fabric 1.20.1 + Kotlin Mod，提供 JSON-RPC 服务，让 Kotlin CLI / JUnit run
 
 ## 2. 目录结构
 
-单 Gradle 项目（`settings.gradle` 只有 `rootProject`，无 `include`）。Gradle 插件、Kotlin test DSL、反编译源码参考均已不在仓库中（见 §12）。
+Gradle 根项目 + `contract`/`cli` 子项目 + `forge`（委托项目，见 §13）。Gradle 插件、Kotlin test DSL、反编译源码参考均已不在仓库中（见 §12）。
 
 ```
 mcdebug/
@@ -35,6 +35,7 @@ mcdebug/
 ├── settings.gradle
 ├── CLAUDE.md
 ├── contract/                 # 共享契约（方法名清单 + DTO 样板，零依赖）
+├── forge/                     # Forge 1.20.1 原生移植（独立 Gradle 8.1.1 + ForgeGradle 6 构建，见 §13）
 ├── cli/                       # Kotlin CLI（clikt）+ SDK + JUnit runner
 │   └── src/main/kotlin/com/mcdebug/{cli,runner}/
 ├── mcdebug-cli.jar            # CLI fat jar（固定名，进 git，随 tag 分发）
@@ -264,3 +265,17 @@ node scripts/set-version.mjs X.Y.Z
 - **`mc_source/` / `fabric-api_source/`**（反编译源码参考）——`.gitignore` 明确排除，永远不进仓库；需要时本地 `./gradlew genSources` 解压查看。
 
 CLAUDE.md 维护规则：改了仓库结构（新增/移除子系统、改发布通道、改默认端口/协议）必须同步本文件，避免下次又被旧描述带偏。
+
+## 13. Forge 1.20.1 原生移植（`forge/`，0.6.1 起）
+
+- **构建隔离**：ForgeGradle 6 跑不了根构建的 Gradle 9，所以 `forge/` 是**独立构建**（自带 wrapper = Gradle 8.1.1、`gradle.properties` 钉 JDK17、官方映射、KotlinForForge 4.11、Kotlin 2.3 编译器 + `apiVersion=1.9`，因为运行时 KFF 只带 1.9 标准库）。根 `settings.gradle` 把它作为委托项目 `:forge` 引入（`forge/delegate.gradle` 只是 Exec `forge/gradlew <task>`），所以 `./gradlew :forge:build` 和根 `./gradlew build` 都会构建它；产物 `forge/build/libs/mcdebug-forge-<mod_version>.jar`（版本取自根 `gradle.properties`，不单独 bump）。`./build.sh` 显式再跑一次 `:forge:build`，dist/ 里多一个 `mcdebug-forge-*.jar`。
+- **共享源码（不复制）**：`forge/build.gradle` 的 `syncShared` 把根 `src/main/kotlin/com/mcdebug/` 下与加载器无关的 `rpc/{JsonRpc,RpcErrors,RpcHandler,RpcServer,RpcEnv}.kt`、`wait/PredicateExpr.kt` 同步到 `forge/build/generated/` 编译。`RpcServer` 取游戏目录走 `RpcEnv.gameDir`（Fabric 在 `onInitializeServer` 里设 FabricLoader 的值，Forge 设 `FMLPaths.GAMEDIR`）。**改这几个文件时两端都要编译通过**；它们引用 `McDebugMod.LOGGER` / `MOD_VERSION` 与 `WaitOps.cancelConnection`，Forge 侧同名提供。
+- **移植的部分**（`forge/src/main/kotlin/com/mcdebug/`，Mojang 官方命名）：`McDebugMod`（`@Mod` + `ServerStartedEvent`/`ServerStoppingEvent`，只在服务端启动 RPC）、`api/*Ops`（16 组、80 个方法全部注册，`scripts/forge-smoke.sh` 会对照 `contract/Methods.kt` 逐个验证）、`util/{NbtJson,ServerContext,Mappings}`、`wait/WaitOps`。新增/改 RPC 方法时 Fabric 与 Forge 两端都要实现，并更新 `contract/Methods.kt`。
+- **与 Fabric 版的语义差异**（需在 README/排障时知道）：
+  - 存储走 Forge Capability：`vanilla:inventory`=`Container`，`fabric:item`=`ITEM_HANDLER`，`fabric:fluid`=`FLUID_HANDLER`(/`FLUID_HANDLER_ITEM`)，`teamreborn:energy`=`ENERGY`(FE)。句柄 id 沿用 Fabric 名（CLI 写死了它们），另接受 `forge:item|fluid|energy` 别名。
+  - **流体单位是 mB（1000/桶）**，Fabric 是 droplet（81000/桶）；流体结果带 `"unit":"mB"`。`fluid.insert --index` 无法指定罐（`IFluidHandler.fill` 不分罐），结果多一个 `changedTank`。
+  - 假玩家用 Forge `FakePlayer`（不进 `world.players`、不 tick），不是 Fabric 版手工 spawn 的 ServerPlayer；`UseEntityCallback` 等价物是手动调 `ForgeHooks.onInteractEntityAt`。
+  - `reflect.*`：只认 Mojang 官方类名；成员名在 dev 是官方名、生产是 SRG（`m_123_`），不带映射表（Fabric 版带 yarn/intermediary 表）。`reflect.mappings` 恒返回 available。
+  - `server.mantleInteract` 去掉了 Kilt 桥接的多步诊断 trace，只保留直接调用 Mantle `FluidTransferHelper.interactWithContainer` 的结果。
+- **运行/验证**：不要为 dedicated `runServer` 自行同意 EULA。用 `scripts/forge-smoke.sh`（起 `runGameTestServer`：开发用 GameTest 服务器不检查 EULA，`forge/src/devtest` 的 `RpcHold` 测试让它保持存活直到 flag 文件出现，该测试集只在 dev 运行时 classpath，不进 jar），或手动：`cd forge && ./gradlew runGameTestServer -PdevFlag=/tmp/x.done`，socket 在 `forge/run-gametest/mcdebug/socket`，结束时 `touch /tmp/x.done`。GameTest 服务器不限速 tick（1 秒可达数百上千 tick），`wait.until` 的 tick 数与实时时间无关。
+- 已知未验证：生产 Forge 服（SRG 运行时 + Connector 环境）下的行为；真正的 dedicated `runServer`/生产 `forge/` jar 放进 mods 的加载（只在 dev 的 userdev 环境验证了 mod 加载与全部 RPC）。

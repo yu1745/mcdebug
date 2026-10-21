@@ -311,7 +311,7 @@ object WorldOps : RpcHandlerGroup {
      *      held tick (crossbow loading, bow draw) — driven here by reflecting
      *      LivingEntity.tickActiveItemStack, the exact same method the server
      *      calls from LivingEntity.tick() every tick.
-     *   3. Player.stopUsingItem() — the "release". This calls
+     *   3. Player.releaseUsingItem() — the "release". This calls
      *      Item.onStoppedUsing (bow fires, crossbow finishes loading).
      *
      * Projectiles are real entities spawned into the world; they fly on normal
@@ -479,7 +479,7 @@ object WorldOps : RpcHandlerGroup {
                                 invokeTickActiveItemStack(fakePlayer)
                             }
                             // 3. Release: onStoppedUsing (bow fires, crossbow loads).
-                            fakePlayer.stopUsingItem()
+                            fakePlayer.releaseUsingItem()
                             cycleJson.addProperty("stopped", true)
                         } else {
                             cycleJson.addProperty("stopped", false)
@@ -515,7 +515,7 @@ object WorldOps : RpcHandlerGroup {
 
                     // Cleanup: restore hand stacks and using state.
                     if (fakePlayer.isUsingItem()) {
-                        fakePlayer.stopUsingItem()
+                        fakePlayer.releaseUsingItem()
                     }
                     fakePlayer.setItemInHand(InteractionHand.MAIN_HAND, oldMainHand)
                     fakePlayer.setItemInHand(InteractionHand.OFF_HAND, oldOffHand)
@@ -532,7 +532,7 @@ object WorldOps : RpcHandlerGroup {
                 } catch (e: Throwable) {
                     // Best-effort cleanup so the pooled fake player stays sane.
                     runCatching {
-                        if (fakePlayer.isUsingItem()) fakePlayer.stopUsingItem()
+                        if (fakePlayer.isUsingItem()) fakePlayer.releaseUsingItem()
                         fakePlayer.setItemInHand(InteractionHand.MAIN_HAND, oldMainHand)
                         fakePlayer.setItemInHand(InteractionHand.OFF_HAND, oldOffHand)
                         fakePlayer.inventory.setItem(8, ItemStack.EMPTY)

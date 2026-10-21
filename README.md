@@ -51,6 +51,25 @@ pnpm dlx @yu1745/mcdebug status
 For setup of the Fabric project itself, see the
 [Fabric Documentation](https://docs.fabricmc.net/develop/getting-started/creating-a-project#setting-up).
 
+## Forge 1.20.1 port
+
+`forge/` is a native Forge port of the same server (same RPC methods, parameters,
+result shapes and error codes; `mcdebug-cli.jar` / `mdb` work unchanged against it).
+It is an independent Gradle 8.1.1 + ForgeGradle 6 build (official mappings,
+KotlinForForge 4.x) wired into the root build as `:forge`:
+
+```bash
+./gradlew :forge:build        # -> forge/build/libs/mcdebug-forge-<version>.jar (drop into the server's mods/)
+./build.sh                    # dist/ gets the Fabric jars AND mcdebug-forge-*.jar
+scripts/forge-smoke.sh        # dev GameTest server + CLI assertions + contract parity (no EULA needed)
+```
+
+Same transports and discovery files (`<gameDir>/mcdebug/socket`, TCP 25580). Differences:
+storage handles resolve to Forge capabilities (`fabric:item`=`ITEM_HANDLER`, `fabric:fluid`=`FLUID_HANDLER`,
+`teamreborn:energy`=`ENERGY`/FE, ids kept for CLI compatibility), **fluid amounts are mB (1000 per bucket)**
+instead of Fabric droplets, the fake player is Forge's `FakePlayer`, and `reflect.*` uses Mojang class
+names with dev-official / production-SRG member names. See CLAUDE.md section 13.
+
 ## CLI and pnpm dlx usage
 
 The CLI talks to a running mcdebug Fabric server over JSON-RPC. **Local

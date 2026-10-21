@@ -14,6 +14,11 @@ base { archivesName = 'mcdebug-forge' }
 
 java.toolchain.languageVersion = JavaLanguageVersion.of(17)
 
+// dev-only GameTest harness: compiled and put on the run classpath, never shipped in the jar
+sourceSets { devtest { compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+	runtimeClasspath += sourceSets.main.output } }
+configurations { devtestImplementation.extendsFrom implementation }
+
 minecraft {
 	mappings channel: 'official', version: "${minecraft_version}"
 
@@ -29,7 +34,10 @@ minecraft {
 			property 'forge.logging.markers', 'REGISTRIES'
 			property 'forge.logging.console.level', 'info'
 			property 'forge.enabledGameTestNamespaces', 'mcdebug'
-			mods { mcdebug { source sourceSets.main } }
+			if (project.hasProperty('devFlag')) property 'mcdebug.devtest.flag', project.property('devFlag')
+			arg '--world'
+			arg 'gametestworld'
+			mods { mcdebug { source sourceSets.main; source sourceSets.devtest } }
 		}
 	}
 }
