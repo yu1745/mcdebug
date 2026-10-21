@@ -1,0 +1,13 @@
+// Root-build view of the Forge port (Gradle 9 root; ForgeGradle 6 needs the nested Gradle 8.1.1 build).
+// Each task below just runs the same-named task of the nested build in this directory.
+// The real build script is forge/build.gradle (used by `cd forge && ./gradlew ...`).
+['build', 'assemble', 'clean', 'compileKotlin', 'runServer', 'runGameTestServer'].each { taskName ->
+	tasks.register(taskName, Exec) {
+		group = 'forge'
+		description = "Runs './gradlew ${taskName}' in forge/ (nested Gradle 8.1.1 + ForgeGradle 6 build)"
+		workingDir = projectDir
+		commandLine './gradlew', taskName, '--console=plain'
+		// Dev server run tasks never return on their own; keep stdin attached off.
+		standardInput = System.in
+	}
+}

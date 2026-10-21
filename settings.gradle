@@ -12,3 +12,9 @@ pluginManagement {
 rootProject.name = 'mcdebug'
 include 'contract'
 include 'cli'
+
+// Forge 1.20.1 port. ForgeGradle 6 cannot run on this build's Gradle 9, so forge/ is an
+// independent build (own wrapper, Gradle 8.1.1). This project only delegates to it:
+// `./gradlew :forge:build` runs `forge/gradlew build`. See forge/delegate.gradle.
+include 'forge'
+project(':forge').buildFileName = 'delegate.gradle'
