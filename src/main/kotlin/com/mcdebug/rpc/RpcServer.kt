@@ -5,7 +5,6 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonParser
 import com.mcdebug.McDebugMod
 import com.mcdebug.wait.WaitOps
-import net.fabricmc.loader.api.FabricLoader
 import net.minecraft.server.MinecraftServer
 import org.slf4j.LoggerFactory
 import java.io.BufferedReader
@@ -388,7 +387,7 @@ class RpcServer(
      */
     private fun readConfigJson(): JsonObject? {
         try {
-            val gameDir = FabricLoader.getInstance().gameDir
+            val gameDir = RpcEnv.gameDir()
             val cfg = gameDir.resolve("config").resolve("mcdebug.json")
             if (!Files.exists(cfg)) return null
             val txt = Files.readString(cfg).trim()
@@ -413,14 +412,14 @@ class RpcServer(
             if (el != null && el.isJsonPrimitive && el.asJsonPrimitive.isString) {
                 val s = el.asString.trim()
                 if (s.isNotEmpty()) {
-                    val gameDir = FabricLoader.getInstance().gameDir
+                    val gameDir = RpcEnv.gameDir()
                     val p = Paths.get(s)
                     return if (p.isAbsolute) p.normalize() else gameDir.resolve(p).normalize()
                 }
             }
             log.warn("config/mcdebug.json present but no valid 'socket' field")
         }
-        return FabricLoader.getInstance().gameDir.resolve("mcdebug").resolve("socket")
+        return RpcEnv.gameDir().resolve("mcdebug").resolve("socket")
     }
 
     private data class TcpConfig(val enabled: Boolean, val port: Int)
@@ -431,8 +430,8 @@ class RpcServer(
         val propPort = System.getProperty("mcdebug.tcpPort")
         val envPort = System.getenv("MCDEBUG_TCP_PORT")
 
-        // Only touch FabricLoader (config file) when no property/env override is
-        // present — keeps this code path unit-testable without a Fabric env.
+        // Only touch the game dir (config file) when no property/env override is
+        // present — keeps this code path unit-testable without a loader env.
         val json = if (propEnabled == null && envEnabled == null && propPort == null && envPort == null) {
             readConfigJson()
         } else {

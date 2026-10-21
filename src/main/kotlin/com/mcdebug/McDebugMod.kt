@@ -21,6 +21,7 @@ import com.mcdebug.rpc.RpcServer
 import com.mcdebug.wait.WaitOps
 import net.fabricmc.api.DedicatedServerModInitializer
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents
+import com.mcdebug.rpc.RpcEnv
 import net.fabricmc.loader.api.FabricLoader
 import net.minecraft.server.MinecraftServer
 import org.slf4j.Logger
@@ -58,6 +59,7 @@ object McDebugMod : DedicatedServerModInitializer {
         private set
 
     override fun onInitializeServer() {
+        RpcEnv.gameDir = { FabricLoader.getInstance().gameDir }
         LOGGER.info("mcdebug {} initializing", MOD_VERSION)
 
         ServerLifecycleEvents.SERVER_STARTED.register(::onServerStarted)
