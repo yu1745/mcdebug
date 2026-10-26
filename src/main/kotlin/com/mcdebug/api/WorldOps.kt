@@ -16,7 +16,11 @@ import net.minecraft.block.BlockState
 import net.minecraft.entity.Entity
 import net.minecraft.entity.EquipmentSlot
 import net.minecraft.entity.LivingEntity
+import com.google.common.collect.LinkedHashMultimap
+import net.minecraft.entity.attribute.EntityAttribute
+import net.minecraft.entity.attribute.EntityAttributeModifier
 import net.minecraft.entity.attribute.EntityAttributes
+import net.minecraft.registry.entry.RegistryEntry
 import net.minecraft.entity.player.PlayerEntity
 import net.minecraft.item.BlockItem
 import net.minecraft.item.ItemStack
@@ -78,7 +82,7 @@ object WorldOps : RpcHandlerGroup {
                 add("state", ServerContext.blockStateToJson(state))
                 addProperty("hasBlockEntity", hasBe)
                 if (includeNbt && hasBe) {
-                    val nbt = world.getBlockEntity(pos)!!.createNbt()
+                    val nbt = world.getBlockEntity(pos)!!.createNbt(world.registryManager)
                     add("nbt", NbtJson.toJson(nbt))
                 }
             }
@@ -194,7 +198,7 @@ object WorldOps : RpcHandlerGroup {
             val stack = ItemStack(blockItem, 1)
             val nbtEl = p.get("nbt")
             if (nbtEl != null && !nbtEl.isJsonNull) {
-                stack.nbt = NbtJson.fromJson(nbtEl) as? NbtCompound
+                ServerContext.stackSetNbt(stack, NbtJson.fromJson(nbtEl) as? NbtCompound)
             }
 
             val gamemode = FakePlayerPool.gameModeFrom(p)
@@ -1237,15 +1241,24 @@ object WorldOps : RpcHandlerGroup {
         old.forEach { (slot, stack) -> player.equipStack(slot, stack) }
     }
 
+    //1.21: ItemStack#getAttributeModifiers(EquipmentSlot) is gone; the attribute component lives on the item
+    private fun mainHandModifierMultimap(stack: ItemStack): com.google.common.collect.Multimap<RegistryEntry<EntityAttribute>, EntityAttributeModifier> {
+        val multimap = LinkedHashMultimap.create<RegistryEntry<EntityAttribute>, EntityAttributeModifier>()
+        stack.item.getAttributeModifiers().applyModifiers(EquipmentSlot.MAINHAND) { attribute, modifier ->
+            multimap.put(attribute, modifier)
+        }
+        return multimap
+    }
+
     private fun addMainHandModifiers(player: ServerPlayerEntity, stack: ItemStack) {
         if (!stack.isEmpty) {
-            player.getAttributes().addTemporaryModifiers(stack.getAttributeModifiers(EquipmentSlot.MAINHAND))
+            player.getAttributes().addTemporaryModifiers(mainHandModifierMultimap(stack))
         }
     }
 
     private fun removeMainHandModifiers(player: ServerPlayerEntity, stack: ItemStack) {
         if (!stack.isEmpty) {
-            player.getAttributes().removeModifiers(stack.getAttributeModifiers(EquipmentSlot.MAINHAND))
+            player.getAttributes().removeModifiers(mainHandModifierMultimap(stack))
         }
     }
 
@@ -1395,7 +1408,7 @@ object WorldOps : RpcHandlerGroup {
                     addProperty("dim", world.registryKey.value.toString())
                     add("state", ServerContext.blockStateToJson(state))
                     addProperty("hasBlockEntity", be != null)
-                    if (includeNbt && be != null) add("nbt", NbtJson.toJson(be.createNbt()))
+                    if (includeNbt && be != null) add("nbt", NbtJson.toJson(be.createNbt(world.registryManager)))
                 }
                 results.add(entry)
             }
@@ -1420,7 +1433,7 @@ object WorldOps : RpcHandlerGroup {
                 val entry = JsonObject().apply { add("pos", ServerContext.posAsJson(pos)) }
                 if (includeNbt) {
                     val be = world.getBlockEntity(pos)
-                    if (be != null) entry.add("nbt", NbtJson.toJson(be.createNbt()))
+                    if (be != null) entry.add("nbt", NbtJson.toJson(be.createNbt(world.registryManager)))
                 }
                 matches.add(entry)
             }

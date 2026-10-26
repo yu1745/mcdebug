@@ -19,6 +19,8 @@ import org.slf4j.LoggerFactory
 import java.util.UUID
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
+import net.minecraft.network.packet.c2s.common.SyncedClientOptions
+import net.minecraft.server.network.ConnectedClientData
 
 /**
  * Fake ServerPlayerEntity used by the interaction RPCs (world.placeAsPlayer,
@@ -92,7 +94,7 @@ internal object FakePlayerPool {
     }
 
     fun create(server: MinecraftServer, world: ServerWorld, profile: GameProfile): ServerPlayerEntity {
-        val p = ServerPlayerEntity(server, world, profile)
+        val p = ServerPlayerEntity(server, world, profile, SyncedClientOptions.createDefault())
         // Resting state: survival + protected (a spawned player must never die or drift).
         p.abilities.creativeMode = false
         p.abilities.allowModifyWorld = true
@@ -105,7 +107,7 @@ internal object FakePlayerPool {
         // Criteria.trigger() / etc. doesn't NPE on null networkHandler.
         // Packets are silently dropped — no real client receives them.
         val connection = ClientConnection(NetworkSide.CLIENTBOUND)
-        val handler = object : ServerPlayNetworkHandler(server, connection, p) {
+        val handler = object : ServerPlayNetworkHandler(server, connection, p, ConnectedClientData.createDefault(profile, false)) {
             override fun sendPacket(packet: Packet<*>) {
                 // no-op: silently drop all outbound packets
             }

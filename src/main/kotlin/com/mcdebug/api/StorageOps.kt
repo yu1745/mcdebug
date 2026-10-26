@@ -40,6 +40,9 @@ import net.minecraft.world.World
 import java.lang.reflect.Method
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
+import net.minecraft.component.ComponentChanges
+import net.minecraft.inventory.SimpleInventory
+import net.minecraft.nbt.NbtOps
 
 object StorageOps : RpcHandlerGroup {
     internal const val HANDLE_VANILLA_INVENTORY = "vanilla:inventory"
@@ -335,7 +338,7 @@ object StorageOps : RpcHandlerGroup {
         for (slot in slots) {
             if (remaining <= 0) break
             val current = inv.getStack(slot)
-            if (current.isEmpty || !ItemStack.canCombine(current, stack)) continue
+            if (current.isEmpty || !ItemStack.areItemsAndComponentsEqual(current, stack)) continue
             if (!canInsert(inv, slot, stack, side)) continue
             val space = minOf(current.maxCount, inv.maxCountPerStack) - current.count
             if (space <= 0) continue
@@ -371,7 +374,7 @@ object StorageOps : RpcHandlerGroup {
         for (slot in slotsFor(inv, side)) {
             if (remaining <= 0) break
             val current = inv.getStack(slot)
-            if (current.isEmpty || !ItemStack.canCombine(current, exemplar)) continue
+            if (current.isEmpty || !ItemStack.areItemsAndComponentsEqual(current, exemplar)) continue
             if (!canExtract(inv, slot, current, side)) continue
             val moved = minOf(current.count, remaining)
             if (!simulate) {
@@ -553,7 +556,7 @@ object StorageOps : RpcHandlerGroup {
             addProperty("index", index)
             val variant = view.resource
             if (variant.isBlank) add("fluid", JsonNull.INSTANCE) else addProperty("fluid", Registries.FLUID.getId(variant.fluid).toString())
-            if (!variant.isBlank && variant.nbt != null) add("nbt", NbtJson.toJson(variant.nbt!!))
+            if (!variant.isBlank && variant.hasComponents()) add("nbt", fluidComponentsToJson(variant.components))
             addProperty("amount", view.amount)
             addProperty("capacity", view.capacity)
         }
@@ -610,9 +613,29 @@ object StorageOps : RpcHandlerGroup {
     private fun sideForInventory(target: TargetRef, side: Direction?): Direction? =
         if (target is TargetRef.Block) side else null
 
-    @Suppress("DEPRECATION")
     private fun itemContext(stack: ItemStack, mutable: Boolean): ContainerItemContext =
-        if (mutable) ContainerItemContext.withInitial(stack.copy()) else ContainerItemContext.withConstant(stack.copy())
+        if (mutable) {
+            //withInitial was removed in fabric-transfer 1.21; a one-slot InventoryStorage reproduces its
+            //mutable-copy container-item semantics
+            val inv = SimpleInventory(1)
+            inv.setStack(0, stack.copy())
+            ContainerItemContext.ofSingleSlot(InventoryStorage.of(inv, null).getSlot(0))
+        } else ContainerItemContext.withConstant(stack.copy())
+
+    /** 1.21: fluid variants carry component changes instead of NBT; encode them losslessly for the DTO. */
+    private fun fluidComponentsToJson(changes: net.minecraft.component.ComponentChanges): com.google.gson.JsonElement =
+        try {
+            NbtJson.toJson(
+                net.minecraft.component.ComponentChanges.CODEC
+                    .encodeStart(net.minecraft.nbt.NbtOps.INSTANCE, changes)
+                    .result()
+                    .orElseThrow { RpcException(RpcErrors.INTERNAL_ERROR, "failed to encode fluid components") }
+            )
+        } catch (e: RpcException) {
+            throw e
+        } catch (e: Exception) {
+            throw RpcException(RpcErrors.INTERNAL_ERROR, "failed to encode fluid components: ${e.message}")
+        }
 
     private fun itemTargetAfter(context: ContainerItemContext): JsonObject {
         val variant = context.itemVariant

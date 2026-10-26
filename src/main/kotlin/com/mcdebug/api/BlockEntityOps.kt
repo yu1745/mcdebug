@@ -32,7 +32,7 @@ object BlockEntityOps : RpcHandlerGroup {
             val pos = ServerContext.pos(p.getAsJsonArray("pos"))
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val be = ServerContext.blockEntity(world, pos)
-            val nbt = be.createNbt()
+            val nbt = be.createNbt(world.registryManager)
             JsonObject().apply { add("nbt", NbtJson.toJson(nbt)) }
         }
 
@@ -56,7 +56,7 @@ object BlockEntityOps : RpcHandlerGroup {
             val path = p.requireString("path")
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val be = ServerContext.blockEntity(world, pos)
-            val nbt = be.createNbt()
+            val nbt = be.createNbt(world.registryManager)
             val value = NbtJson.getByPathAsJson(nbt, path)
             JsonObject().apply { add("value", value) }
         }
@@ -69,7 +69,7 @@ object BlockEntityOps : RpcHandlerGroup {
             val valueJson = p.get("value") ?: throw RpcException(RpcErrors.INVALID_PARAMS, "value required")
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val be = ServerContext.blockEntity(world, pos)
-            val nbt = be.createNbt()
+            val nbt = be.createNbt(world.registryManager)
             val newValue = NbtJson.fromJson(valueJson)
             NbtJson.setByPath(nbt, path, newValue)
             applyBeNbt(world, pos, be, nbt)
@@ -96,7 +96,7 @@ object BlockEntityOps : RpcHandlerGroup {
      * limitation; this helper covers the common inventory/comparator case.
      */
     private fun applyBeNbt(world: ServerWorld, pos: BlockPos, be: BlockEntity, nbt: NbtCompound) {
-        be.readNbt(nbt)
+        be.read(nbt, world.registryManager)
         be.markDirty()
         val state = world.getBlockState(pos)
         world.updateListeners(pos, state, state, 3)

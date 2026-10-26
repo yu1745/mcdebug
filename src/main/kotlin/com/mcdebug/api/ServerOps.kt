@@ -38,7 +38,7 @@ object ServerOps : RpcHandlerGroup {
      */
     private fun health(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
         RpcContext.onServer(server) {
-            val mspt = server.tickTime
+            val mspt = server.averageTickTime
             val tps = if (mspt > 0f) (1000.0 / mspt).coerceAtMost(20.0) else 20.0
             val dims = JsonArray()
             server.worlds.forEach { w ->
@@ -359,8 +359,10 @@ object ServerOps : RpcHandlerGroup {
             }
             val sourceWithCapture = source.withOutput(capturing)
 
+            //executeWithPrefix returns void in 1.21; parse+execute on the dispatcher keeps the int result
             val result: Int = try {
-                server.commandManager.executeWithPrefix(sourceWithCapture, command)
+                val commandManager = server.commandManager
+                commandManager.dispatcher.execute(commandManager.dispatcher.parse(command.removePrefix("/"), sourceWithCapture))
             } catch (e: Exception) {
                 throw RpcException(
                     RpcErrors.INTERNAL_ERROR,

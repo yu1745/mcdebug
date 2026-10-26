@@ -179,7 +179,7 @@ object WaitOps : RpcHandlerGroup {
                 val w = ServerContext.world(srv, null)
                 val be: BlockEntity? = w.getBlockEntity(pos!!)
                 if (be == null) JsonNull.INSTANCE
-                else NbtJson.getByPathAsJson(be.createNbt(), ref.path)
+                else NbtJson.getByPathAsJson(be.createNbt(w.registryManager), ref.path)
             }
             "inv" -> {
                 val w = ServerContext.world(srv, null)
@@ -217,8 +217,9 @@ object WaitOps : RpcHandlerGroup {
                 agg.field == "count" -> sum += stack.count.toDouble()
                 agg.field == "item" -> if (!stack.isEmpty) count++
                 agg.field.startsWith("nbt.") -> {
-                    if (!stack.isEmpty && stack.nbt != null) {
-                        val v = NbtJson.getByPathAsJson(stack.nbt!!, agg.field.removePrefix("nbt."))
+                    val nbt = if (!stack.isEmpty) ServerContext.stackNbt(stack) else null
+                    if (nbt != null) {
+                        val v = NbtJson.getByPathAsJson(nbt, agg.field.removePrefix("nbt."))
                         if (v.isJsonPrimitive && v.asJsonPrimitive.isNumber) sum += v.asDouble
                     }
                 }
@@ -251,8 +252,9 @@ object WaitOps : RpcHandlerGroup {
             field == "count" -> com.google.gson.JsonPrimitive(stack.count)
             field == "maxCount" -> com.google.gson.JsonPrimitive(stack.maxCount)
             field.startsWith("nbt.") -> {
-                if (stack.isEmpty || stack.nbt == null) com.google.gson.JsonNull.INSTANCE
-                else NbtJson.getByPathAsJson(stack.nbt!!, field.removePrefix("nbt."))
+                val nbt = if (!stack.isEmpty) ServerContext.stackNbt(stack) else null
+                if (nbt == null) com.google.gson.JsonNull.INSTANCE
+                else NbtJson.getByPathAsJson(nbt, field.removePrefix("nbt."))
             }
             else -> throw RpcException(RpcErrors.INVALID_PREDICATE, "unknown inv field: $field")
         }

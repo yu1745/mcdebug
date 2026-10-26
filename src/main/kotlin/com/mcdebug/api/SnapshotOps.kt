@@ -114,7 +114,7 @@ object SnapshotOps : RpcHandlerGroup {
                         add("state", ServerContext.blockStateToJson(state))
                     }
                     if (SnapshotKind.BLOCK_ENTITY_NBT in include && be != null) {
-                        add("blockEntityNbt", NbtJson.toJson(be.createNbt()))
+                        add("blockEntityNbt", NbtJson.toJson(be.createNbt(world.registryManager)))
                     }
                     if ((SnapshotKind.INVENTORY in include || SnapshotKind.FLUID in include || SnapshotKind.ENERGY in include) && be != null) {
                         val resources = StorageOps.blockResourcesToJson(world, pos)

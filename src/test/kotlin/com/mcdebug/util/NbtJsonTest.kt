@@ -290,8 +290,8 @@ class NbtJsonTest {
         val c = NbtCompound()
         c.putString("emoji", "a\uD83D\uDE00b")
         val baos = java.io.ByteArrayOutputStream()
-        net.minecraft.nbt.NbtIo.write(c, java.io.DataOutputStream(baos))
-        val back = net.minecraft.nbt.NbtIo.read(
+        net.minecraft.nbt.NbtIo.writeCompound(c, java.io.DataOutputStream(baos))
+        val back = net.minecraft.nbt.NbtIo.readCompound(
             java.io.DataInputStream(java.io.ByteArrayInputStream(baos.toByteArray()))
         )
         assertEquals("a😀b", (back as NbtCompound).getString("emoji"))

@@ -5,6 +5,8 @@ import com.mcdebug.rpc.RpcException
 import net.minecraft.block.Block
 import net.minecraft.block.BlockState
 import net.minecraft.block.entity.BlockEntity
+import net.minecraft.component.DataComponentTypes
+import net.minecraft.component.type.NbtComponent
 import net.minecraft.inventory.Inventory
 import net.minecraft.item.ItemStack
 import net.minecraft.nbt.NbtCompound
@@ -137,6 +139,19 @@ object ServerContext {
     private fun propertyValueName(prop: Property<*>, value: Comparable<*>): String =
         (prop as Property<Comparable<Any>>).name(value as Comparable<Any>)
 
+    /**
+     * 1.21: ItemStack no longer carries a raw NBT tag; arbitrary per-stack NBT lives in the
+     * `minecraft:custom_data` component. These helpers keep the RPC contract's "nbt" field
+     * meaning the same thing across versions.
+     */
+    fun stackNbt(stack: ItemStack): NbtCompound? =
+        (stack.get(DataComponentTypes.CUSTOM_DATA) as? NbtComponent)?.copyNbt()
+
+    fun stackSetNbt(stack: ItemStack, nbt: NbtCompound?) {
+        //set(type, null) removes the component
+        stack.set(DataComponentTypes.CUSTOM_DATA, nbt?.let(NbtComponent::of))
+    }
+
     fun itemStackToJson(stack: ItemStack): com.google.gson.JsonObject {
         val obj = com.google.gson.JsonObject()
         if (stack.isEmpty) {
@@ -146,7 +161,7 @@ object ServerContext {
         }
         obj.addProperty("item", Registries.ITEM.getId(stack.item).toString())
         obj.addProperty("count", stack.count)
-        val nbt = stack.nbt
+        val nbt = stackNbt(stack)
         if (nbt != null) obj.add("nbt", NbtJson.toJson(nbt))
         return obj
     }
@@ -156,7 +171,7 @@ object ServerContext {
         val it = itemById(server, item)
         val stack = ItemStack(it, count)
         if (nbtJson != null && !nbtJson.isJsonNull) {
-            stack.nbt = NbtJson.fromJson(nbtJson) as? NbtCompound
+            stackSetNbt(stack, NbtJson.fromJson(nbtJson) as? NbtCompound)
         }
         return stack
     }

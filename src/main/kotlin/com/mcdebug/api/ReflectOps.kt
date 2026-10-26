@@ -17,6 +17,7 @@ import java.lang.reflect.Method
 import java.lang.reflect.Modifier
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.atomic.AtomicLong
+import com.mcdebug.util.ServerContext
 
 /**
  * Arbitrary runtime reflection over the live server, for deep debugging of mod
@@ -418,7 +419,7 @@ object ReflectOps : RpcHandlerGroup {
                     addProperty("\$ref", id)
                     addProperty("item", v.item.toString())
                     addProperty("count", v.count)
-                    if (v.nbt != null) add("nbt", NbtJson.toJson(v.nbt as net.minecraft.nbt.NbtElement))
+                    ServerContext.stackNbt(v)?.let { add("nbt", NbtJson.toJson(it)) }
                 }
             }
             PRIMITIVE_WRAPPER_TYPES.contains(v.javaClass) -> JsonPrimitive(v.toString())

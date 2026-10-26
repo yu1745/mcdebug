@@ -9,12 +9,11 @@ import com.mcdebug.rpc.RpcException
 import com.mcdebug.rpc.RpcHandler
 import com.mcdebug.rpc.RpcHandlerGroup
 import com.mcdebug.util.ServerContext
-import net.minecraft.inventory.RecipeInputInventory
 import net.minecraft.item.ItemStack
 import net.minecraft.recipe.CraftingRecipe
 import net.minecraft.recipe.Recipe
-import net.minecraft.recipe.RecipeMatcher
-import net.minecraft.registry.DynamicRegistryManager
+import net.minecraft.recipe.RecipeEntry
+import net.minecraft.recipe.input.CraftingRecipeInput
 import net.minecraft.server.MinecraftServer
 import net.minecraft.util.Identifier
 import net.minecraft.util.collection.DefaultedList
@@ -87,30 +86,31 @@ object CraftingOps : RpcHandlerGroup {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
             val stacks = parseGridWith(server, p)
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
-            val inv = GridInput(stacks)
+            //create() trims to the occupied bounding box and ignores empty cells, exactly like a real 3x3 grid
+            val input = CraftingRecipeInput.create(3, 3, stacks)
 
-            val recipe: Recipe<RecipeInputInventory>? = pickRecipe(server, p, inv, world)
-            if (recipe == null) {
+            val entry: RecipeEntry<Recipe<CraftingRecipeInput>>? = pickRecipe(server, p, input, world)
+            if (entry == null) {
                 return@onServer JsonObject().apply {
                     addProperty("matched", false)
                     add("candidates", JsonArray().apply { /* intentionally empty */ })
                 }
             }
+            val recipe = entry.value
 
-            val registryManager: DynamicRegistryManager = world.registryManager
-            val resultStack: ItemStack = recipe.craft(inv, registryManager)
+            val resultStack: ItemStack = recipe.craft(input, world.registryManager)
             val remainder: DefaultedList<ItemStack> = try {
-                recipe.getRemainder(inv)
+                recipe.getRemainder(input)
             } catch (e: Exception) {
                 // Some non-vanilla recipes throw on getRemainder; fall back to "leave slots as-is".
                 val fb = DefaultedList.ofSize(9, ItemStack.EMPTY)
-                for (i in 0 until 9) fb[i] = inv.getStack(i).copy()
+                for (i in 0 until 9) fb[i] = input.getStackInSlot(i).copy()
                 fb
             }
 
             JsonObject().apply {
                 addProperty("matched", true)
-                addProperty("recipeId", recipe.id.toString())
+                addProperty("recipeId", entry.id.toString())
                 addProperty("recipeType", RegistriesIdLookup.typeIdOf(recipe))
                 add("result", ServerContext.itemStackToJson(resultStack))
                 add("remainder", remainderListToJson(remainder))
@@ -130,21 +130,22 @@ object CraftingOps : RpcHandlerGroup {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
             val stacks = parseGridWith(server, p)
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
-            val inv = GridInput(stacks)
+            val input = CraftingRecipeInput.create(3, 3, stacks)
 
             val matches = JsonArray()
-            for (recipe in server.recipeManager.values()) {
+            for (entry in server.recipeManager.values()) {
+                val recipe = entry.value
                 if (recipe !is CraftingRecipe) continue
                 if (recipe.isIgnoredInRecipeBook() || recipe.isEmpty) continue
                 if (!recipe.fits(3, 3)) continue
                 val matched = try {
-                    recipe.matches(inv, world)
+                    recipe.matches(input, world)
                 } catch (e: Exception) { false }
                 if (matched) {
                     matches.add(JsonObject().apply {
-                        addProperty("recipeId", recipe.id.toString())
+                        addProperty("recipeId", entry.id.toString())
                         addProperty("recipeType", RegistriesIdLookup.typeIdOf(recipe))
-                        addProperty("output", describeItem(recipe.getOutput(world.registryManager)))
+                        addProperty("output", describeItem(recipe.getResult(world.registryManager)))
                     })
                 }
             }
@@ -156,32 +157,34 @@ object CraftingOps : RpcHandlerGroup {
     private fun pickRecipe(
         server: MinecraftServer,
         p: JsonObject,
-        inv: GridInput,
+        input: CraftingRecipeInput,
         world: World,
-    ): Recipe<RecipeInputInventory>? {
+    ): RecipeEntry<Recipe<CraftingRecipeInput>>? {
         val explicit = p.getStringOrNull("recipeId")
         if (explicit != null) {
             val id = Identifier.tryParse(explicit)
                 ?: throw RpcException(RpcErrors.INVALID_PARAMS, "invalid recipeId: $explicit")
-            val r = server.recipeManager.get(id).orElse(null)
+            val found = server.recipeManager.get(id).orElse(null)
                 ?: throw RpcException(RpcErrors.INVALID_PARAMS, "no recipe with id: $explicit")
             @Suppress("UNCHECKED_CAST")
-            return r as? Recipe<RecipeInputInventory>
+            val r = found.value as? Recipe<CraftingRecipeInput>
                 ?: throw RpcException(
                     RpcErrors.INVALID_PARAMS,
-                    "recipe $explicit is not a RecipeInputInventory recipe (type=${RegistriesIdLookup.typeIdOf(r)})"
+                    "recipe $explicit is not a crafting-grid recipe (type=${RegistriesIdLookup.typeIdOf(found.value)})"
                 )
+            return RecipeEntry(found.id, r)
         }
-        for (recipe in server.recipeManager.values()) {
+        for (entry in server.recipeManager.values()) {
+            val recipe = entry.value
             if (recipe !is CraftingRecipe) continue
             if (recipe.isIgnoredInRecipeBook() || recipe.isEmpty) continue
             if (!recipe.fits(3, 3)) continue
             val matched = try {
-                recipe.matches(inv, world)
+                recipe.matches(input, world)
             } catch (e: Exception) { false }
             if (matched) {
                 @Suppress("UNCHECKED_CAST")
-                return recipe as Recipe<RecipeInputInventory>
+                return entry as RecipeEntry<Recipe<CraftingRecipeInput>>
             }
         }
         return null
@@ -218,38 +221,6 @@ object CraftingOps : RpcHandlerGroup {
 }
 
 // ---- private helpers (file-scope, not exposed in help) ----
-
-/**
- * Minimal 3x3 RecipeInputInventory backed by a 9-element DefaultedList. Implements
- * only what CraftingRecipe.matches / .craft / .getRemainder actually use.
- * `getInputStacks` returns stacks in row-major order (slot 0 = top-left).
- */
-private class GridInput(private val stacks: DefaultedList<ItemStack>) : RecipeInputInventory {
-    override fun size(): Int = stacks.size
-    override fun isEmpty(): Boolean = stacks.all { it.isEmpty }
-    override fun getStack(slot: Int): ItemStack = stacks[slot]
-    override fun removeStack(slot: Int): ItemStack {
-        val s = stacks[slot]
-        stacks[slot] = ItemStack.EMPTY
-        return s
-    }
-    override fun removeStack(slot: Int, count: Int): ItemStack {
-        val s = stacks[slot]
-        val taken = s.split(count)
-        stacks[slot] = s
-        return taken
-    }
-    override fun setStack(slot: Int, stack: ItemStack) { stacks[slot] = stack }
-    override fun markDirty() {}
-    override fun canPlayerUse(player: net.minecraft.entity.player.PlayerEntity): Boolean = true
-    override fun clear() { for (i in 0 until stacks.size) stacks[i] = ItemStack.EMPTY }
-    override fun getHeight(): Int = 3
-    override fun getWidth(): Int = 3
-    override fun getInputStacks(): List<ItemStack> = stacks.filter { !it.isEmpty }
-    override fun provideRecipeInputs(matcher: RecipeMatcher) {
-        for (s in stacks) if (!s.isEmpty) matcher.addInput(s)
-    }
-}
 
 private object RegistriesIdLookup {
     fun typeIdOf(r: Recipe<*>): String {

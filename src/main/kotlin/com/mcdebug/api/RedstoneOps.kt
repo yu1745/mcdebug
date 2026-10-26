@@ -126,7 +126,11 @@ object RedstoneOps : RpcHandlerGroup {
         val lever = state.block as? LeverBlock
             ?: throw RpcException(RpcErrors.INVALID_PARAMS, "block at $pos is not a vanilla lever")
         val before = state.get(LeverBlock.POWERED)
-        val afterState = if (before != powered) lever.togglePower(state, world, pos) else state
+        //1.21: togglePower returns void and mutates the world; read the resulting state back
+        val afterState = if (before != powered) {
+            lever.togglePower(state, world, pos, null)
+            world.getBlockState(pos)
+        } else state
         if (before == powered) world.updateNeighborsAlways(pos, afterState.block)
         return JsonObject().apply {
             add("pos", ServerContext.posAsJson(pos))
