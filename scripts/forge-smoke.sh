@@ -4,43 +4,45 @@
 # 然后释放（touch flag）让服务器正常停机。
 #   用法: scripts/forge-smoke.sh            （需要 mcdebug-cli.jar；无需 root、无需网络之外的资源）
 #   日志: forge/run-gametest/smoke.log
+#
+# 契约一致性只看 **服务端平面**（`Methods.SERVER_METHODS`）：`gui.*` 由客户端 entrypoint
+# 注册，Forge 服务端（乃至 Fabric 专用服务端）上本来就不存在，报 -32601 是正确行为。
 set -euo pipefail
 cd "$(dirname "$0")/.."
 CLI_JAR="${CLI_JAR:-mcdebug-cli.jar}"
 SOCK="$PWD/forge/run-gametest/mcdebug/socket"
 LOG="$PWD/forge/run-gametest/smoke.log"
+METHODS_KT="contract/src/main/kotlin/com/mcdebug/contract/Methods.kt"
 FLAG="$(mktemp -u /tmp/mcdebug-forge-smoke.XXXXXX)"
 mkdir -p forge/run-gametest
 rm -f "$SOCK"
 rm -rf forge/run-gametest/gametestworld   # 开发用一次性世界，保证断言可重复
 
+# 服务端平面契约校验 + 平面隔离：与 fabric-smoke.sh 共用 scripts/contract-parity.py，
+# 避免两个冒烟脚本各自解析 Methods.kt 而漂移（历史教训：fabric 侧漏掉"排除 gui.*"与
+# "按 id 匹配响应"，报出假的 inv.extract 缺失）。
+contract_parity() {
+  python3 scripts/contract-parity.py "$SOCK" "$METHODS_KT"
+}
+
+
 (cd forge && ./gradlew runGameTestServer -PdevFlag="$FLAG" --console=plain >"$LOG" 2>&1) &
 SERVER_PID=$!
-cleanup() { # 契约一致性：contract/Methods.kt 里每个方法名在 Forge 服务端都必须已注册（不能是 -32601 method not found）
-if python3 - "$SOCK" contract/src/main/kotlin/com/mcdebug/contract/Methods.kt <<'PYEOF'
-import json, re, socket, sys
-sock_path, methods_kt = sys.argv[1:3]
-names = sorted(set(re.findall(r'"([a-z]+\.[A-Za-z]+)"', open(methods_kt).read())))
-s = socket.socket(socket.AF_UNIX); s.connect(sock_path); f = s.makefile("rwb")
-missing = []
-for i, m in enumerate(names):
-    f.write((json.dumps({"jsonrpc": "2.0", "id": i, "method": m, "params": {}}) + "\n").encode()); f.flush()
-    r = json.loads(f.readline())
-    if r.get("error", {}).get("code") == -32601: missing.append(m)
-print(f"contract parity: {len(names) - len(missing)}/{len(names)} methods registered" + (f", MISSING {missing}" if missing else ""))
-sys.exit(1 if missing else 0)
-PYEOF
-then :; else fail=1; fi
 
-touch "$FLAG"; wait "$SERVER_PID" 2>/dev/null || true; rm -f "$FLAG"; }
+fail=0
+cleanup() {
+  if ! contract_parity; then fail=1; fi
+  touch "$FLAG"; wait "$SERVER_PID" 2>/dev/null || true; rm -f "$FLAG"
+}
 trap cleanup EXIT
 
-for _ in $(seq 1 150); do
+# 轮询等 RPC ready（有界：最多 180s，服务器进程提前退出立即失败，避免模式写错时无限等）
+for _ in $(seq 1 90); do
   grep -q "mcdebug RPC ready" "$LOG" 2>/dev/null && break
   kill -0 "$SERVER_PID" 2>/dev/null || { echo "server exited early, see $LOG" >&2; exit 1; }
   sleep 2
 done
-grep -q "mcdebug RPC ready" "$LOG" || { echo "RPC not ready after 300s, see $LOG" >&2; exit 1; }
+grep -q "mcdebug RPC ready" "$LOG" || { echo "RPC not ready after 180s, see $LOG" >&2; exit 1; }
 
 fail=0
 cli() { java -jar "$CLI_JAR" --socket "$SOCK" "$@" 2>&1 | grep -v '^warning: server'; }
@@ -61,21 +63,8 @@ check "wait.until"                  '"matched":true'                 raw wait.un
 check "bow release spawns arrow"    'minecraft:arrow'                raw world.useItemHold '{"item":"minecraft:bow","ammo":"minecraft:arrow","direction":"north","holdTicks":20,"playerPos":[2,220,10]}'
 check "runCommand"                  '"success":true'                 raw server.runCommand '{"command":"/time set day"}'
 
-# 契约一致性：contract/Methods.kt 里每个方法名在 Forge 服务端都必须已注册（不能是 -32601 method not found）
-if python3 - "$SOCK" contract/src/main/kotlin/com/mcdebug/contract/Methods.kt <<'PYEOF'
-import json, re, socket, sys
-sock_path, methods_kt = sys.argv[1:3]
-names = sorted(set(re.findall(r'"([a-z]+\.[A-Za-z]+)"', open(methods_kt).read())))
-s = socket.socket(socket.AF_UNIX); s.connect(sock_path); f = s.makefile("rwb")
-missing = []
-for i, m in enumerate(names):
-    f.write((json.dumps({"jsonrpc": "2.0", "id": i, "method": m, "params": {}}) + "\n").encode()); f.flush()
-    r = json.loads(f.readline())
-    if r.get("error", {}).get("code") == -32601: missing.append(m)
-print(f"contract parity: {len(names) - len(missing)}/{len(names)} methods registered" + (f", MISSING {missing}" if missing else ""))
-sys.exit(1 if missing else 0)
-PYEOF
-then :; else fail=1; fi
+# 服务端平面契约校验（同上；cleanup 里还会再跑一次用于真实失败状态）
+if contract_parity; then :; else fail=1; fi
 
 touch "$FLAG"; wait "$SERVER_PID" || true; trap - EXIT; rm -f "$FLAG"
 [ "$fail" = 0 ] && echo "forge smoke: ALL OK" || { echo "forge smoke: FAILED"; exit 1; }

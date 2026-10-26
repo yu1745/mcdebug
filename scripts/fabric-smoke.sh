@@ -95,21 +95,9 @@ check "place lever"                '"ok":true'                          raw worl
 check "redstone setLever"          '"powered":true'                     raw redstone.setLever '{"pos":[4,200,0],"powered":true}'
 check "runCommand"                 '"success":true'                     raw server.runCommand '{"command":"/time set day"}'
 
-# 契约一致性：Methods.kt 的每个方法都必须已注册（不能是 -32601 method not found）
-if python3 - "$SOCK" contract/src/main/kotlin/com/mcdebug/contract/Methods.kt <<'PYEOF'
-import json, re, socket, sys
-sock_path, methods_kt = sys.argv[1:3]
-names = sorted(set(re.findall(r'"([a-z]+\.[A-Za-z]+)"', open(methods_kt).read())))
-s = socket.socket(socket.AF_UNIX); s.connect(sock_path); f = s.makefile("rwb")
-missing = []
-for i, m in enumerate(names):
-    f.write((json.dumps({"jsonrpc": "2.0", "id": i, "method": m, "params": {}}) + "\n").encode()); f.flush()
-    r = json.loads(f.readline())
-    if r.get("error", {}).get("code") == -32601: missing.append(m)
-print(f"contract parity: {len(names) - len(missing)}/{len(names)} methods registered" + (f", MISSING {missing}" if missing else ""))
-sys.exit(1 if missing else 0)
-PYEOF
-then :; else fail=1; fi
+# 契约一致性 + 平面隔离：见 scripts/contract-parity.py（按 id 匹配响应，排除客户端平面 gui.*）
+python3 scripts/contract-parity.py "$SOCK" contract/src/main/kotlin/com/mcdebug/contract/Methods.kt \
+  || { echo "fabric smoke: FAILED (contract parity)" >&2; exit 1; }
 
 kill_server
 [ "$fail" = 0 ] && echo "fabric smoke: ALL OK" || { echo "fabric smoke: FAILED"; exit 1; }

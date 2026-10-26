@@ -74,11 +74,23 @@ import java.util.concurrent.atomic.AtomicInteger
  *   - stop() removes the socket file so no stale file is left behind.
  */
 class RpcServer(
-    private val dispatcher: RpcDispatcher,
+    private val host: RpcMethodHost,
     private val socketFilePath: () -> Path?,
     private val tcpPortFilePath: () -> Path?,
-    private val protocolVersion: Int = 1
+    private val protocolVersion: Int = 1,
+    private val transport: TransportConfig = TransportConfig.SERVER,
 ) {
+    /**
+     * Backward-compatible constructor for the server plane: dispatches into [dispatcher]
+     * with whatever `MinecraftServer` is passed to [start].
+     */
+    constructor(
+        dispatcher: RpcDispatcher,
+        socketFilePath: () -> Path?,
+        tcpPortFilePath: () -> Path?,
+        protocolVersion: Int = 1,
+    ) : this(ServerMethodHost(dispatcher), socketFilePath, tcpPortFilePath, protocolVersion)
+
     private val log = LoggerFactory.getLogger("mcdebug-rpc")
     private var unixChannel: ServerSocketChannel? = null
     private var tcpChannel: ServerSocketChannel? = null
@@ -108,13 +120,14 @@ class RpcServer(
      * Bind both listeners independently and start their accept loops.
      * Throws IllegalStateException only if BOTH listeners fail to bind.
      *
-     * @param minecraftServer the running server, used to dispatch requests;
+     * @param minecraftServer the running server, handed to [RpcMethodHost.attach];
      *                        may be null in transport-level tests (no requests
      *                        can be served then).
      * @return the bound unix socket path, or null if the unix listener failed.
      */
     fun start(minecraftServer: MinecraftServer?): Path? {
         if (unixChannel != null || tcpChannel != null) error("already started")
+        host.attach(minecraftServer)
 
         var unixOk = false
         var tcpOk = false
@@ -187,8 +200,8 @@ class RpcServer(
             error("mcdebug RPC could not start: both unix socket and TCP listeners failed to bind")
         }
 
-        unixChannel?.let { ch -> unixAcceptExecutor.submit { acceptLoop(ch, "unix", minecraftServer) } }
-        tcpChannel?.let { ch -> tcpAcceptExecutor.submit { acceptLoop(ch, "tcp", minecraftServer) } }
+        unixChannel?.let { ch -> unixAcceptExecutor.submit { acceptLoop(ch, "unix") } }
+        tcpChannel?.let { ch -> tcpAcceptExecutor.submit { acceptLoop(ch, "tcp") } }
         return socketPath
     }
 
@@ -211,13 +224,13 @@ class RpcServer(
         tcpPort = null
     }
 
-    private fun acceptLoop(ch: ServerSocketChannel, via: String, minecraftServer: MinecraftServer?) {
+    private fun acceptLoop(ch: ServerSocketChannel, via: String) {
         while (ch.isOpen) {
             try {
                 val client = ch.accept()
                 val id = connectionIdGen.incrementAndGet()
                 clientChannels[id] = client
-                connectionExecutor.submit { handleConnection(client, id, via, minecraftServer) }
+                connectionExecutor.submit { handleConnection(client, id, via) }
             } catch (e: AsynchronousCloseException) {
                 break  // stop() closed the channel from another thread
             } catch (e: Exception) {
@@ -232,14 +245,14 @@ class RpcServer(
         channel: SocketChannel,
         connId: Int,
         via: String,
-        minecraftServer: MinecraftServer?,
     ) {
-        log.info("client connected: #{} ({})", connId, via)
+        log.info("client connected: #{} ({}, {} plane)", connId, via, transport.plane)
         RpcContext.currentConnectionId.set(connId)
         try {
             val reader = BufferedReader(InputStreamReader(Channels.newInputStream(channel), StandardCharsets.UTF_8))
             val writer = BufferedWriter(OutputStreamWriter(Channels.newOutputStream(channel), StandardCharsets.UTF_8))
             sendNotification(writer, JsonRpc.Notification.SERVER_READY, JsonObject().apply {
+                addProperty("plane", transport.plane)
                 addProperty("socket", socketPath?.toString() ?: "")
                 addProperty("tcpPort", tcpPort)
                 addProperty("protocolVersion", protocolVersion)
@@ -249,7 +262,7 @@ class RpcServer(
             while (channel.isOpen) {
                 val line = readLineBounded(reader) ?: break
                 if (line.isBlank()) continue
-                val response = processLine(line, minecraftServer)
+                val response = processLine(line)
                 writer.write(response.toString())
                 writer.write("\n")
                 writer.flush()
@@ -264,11 +277,11 @@ class RpcServer(
             RpcContext.currentConnectionId.remove()
             clientChannels.remove(connId)
             runCatching { channel.close() }
-            log.info("client disconnected: #{} ({})", connId, via)
+            log.info("client disconnected: #{} ({}, {} plane)", connId, via, transport.plane)
         }
     }
 
-    private fun processLine(line: String, minecraftServer: MinecraftServer?): JsonElement {
+    private fun processLine(line: String): JsonElement {
         val rawObj: JsonObject = try {
             JsonParser.parseString(line).asJsonObject
         } catch (e: Exception) {
@@ -291,11 +304,8 @@ class RpcServer(
             return errorResponse(request.id, e)
         }
 
-        val server = minecraftServer
-            ?: return errorResponse(request.id, RpcException(RpcErrors.INTERNAL_ERROR, "server not initialized"))
-
         return try {
-            val future = dispatcher.dispatch(request.method, params, server)
+            val future = host.dispatch(request.method, params)
             val result = future.get()  // block this connection thread until handler completes
             successResponse(request.id, result)
         } catch (e: java.util.concurrent.ExecutionException) {
@@ -405,10 +415,10 @@ class RpcServer(
     }
 
     private fun resolveSocketPath(): Path {
-        System.getProperty("mcdebug.socket")?.let { return Paths.get(it).toAbsolutePath().normalize() }
-        System.getenv("MCDEBUG_SOCKET")?.let { return Paths.get(it).toAbsolutePath().normalize() }
+        System.getProperty(transport.socketProperty)?.let { return Paths.get(it).toAbsolutePath().normalize() }
+        System.getenv(transport.socketEnv)?.let { return Paths.get(it).toAbsolutePath().normalize() }
         readConfigJson()?.let { json ->
-            val el = json.get("socket")
+            val el = json.get(transport.socketJsonKey)
             if (el != null && el.isJsonPrimitive && el.asJsonPrimitive.isString) {
                 val s = el.asString.trim()
                 if (s.isNotEmpty()) {
@@ -417,18 +427,18 @@ class RpcServer(
                     return if (p.isAbsolute) p.normalize() else gameDir.resolve(p).normalize()
                 }
             }
-            log.warn("config/mcdebug.json present but no valid 'socket' field")
+            log.warn("config/mcdebug.json present but no valid '{}' field", transport.socketJsonKey)
         }
-        return RpcEnv.gameDir().resolve("mcdebug").resolve("socket")
+        return RpcEnv.gameDir().resolve("mcdebug").resolve(transport.defaultSocketFileName)
     }
 
     private data class TcpConfig(val enabled: Boolean, val port: Int)
 
     private fun resolveTcpConfig(): TcpConfig {
-        val propEnabled = System.getProperty("mcdebug.tcpEnabled")
-        val envEnabled = System.getenv("MCDEBUG_TCP_ENABLED")
-        val propPort = System.getProperty("mcdebug.tcpPort")
-        val envPort = System.getenv("MCDEBUG_TCP_PORT")
+        val propEnabled = System.getProperty(transport.tcpEnabledProperty)
+        val envEnabled = System.getenv(transport.tcpEnabledEnv)
+        val propPort = System.getProperty(transport.tcpPortProperty)
+        val envPort = System.getenv(transport.tcpPortEnv)
 
         // Only touch the game dir (config file) when no property/env override is
         // present — keeps this code path unit-testable without a loader env.
@@ -438,17 +448,17 @@ class RpcServer(
             null
         }
 
-        val enabled = propEnabled?.let { parseBool(it, "-Dmcdebug.tcpEnabled") }
-            ?: envEnabled?.let { parseBool(it, "MCDEBUG_TCP_ENABLED") }
-            ?: json?.get("tcpEnabled")?.takeIf { it.isJsonPrimitive }?.asJsonPrimitive
+        val enabled = propEnabled?.let { parseBool(it, "-D${transport.tcpEnabledProperty}") }
+            ?: envEnabled?.let { parseBool(it, transport.tcpEnabledEnv) }
+            ?: json?.get(transport.tcpEnabledJsonKey)?.takeIf { it.isJsonPrimitive }?.asJsonPrimitive
                 ?.takeIf { it.isBoolean }?.asBoolean
-            ?: true
+            ?: transport.defaultTcpEnabled
 
-        val port = propPort?.let { parsePort(it, "-Dmcdebug.tcpPort") }
-            ?: envPort?.let { parsePort(it, "MCDEBUG_TCP_PORT") }
-            ?: json?.get("tcpPort")?.takeIf { it.isJsonPrimitive }?.asJsonPrimitive
+        val port = propPort?.let { parsePort(it, "-D${transport.tcpPortProperty}") }
+            ?: envPort?.let { parsePort(it, transport.tcpPortEnv) }
+            ?: json?.get(transport.tcpPortJsonKey)?.takeIf { it.isJsonPrimitive }?.asJsonPrimitive
                 ?.takeIf { it.isNumber }?.asInt?.takeIf { it in 0..65535 }
-            ?: DEFAULT_TCP_PORT
+            ?: transport.defaultTcpPort
 
         return TcpConfig(enabled, port)
     }
@@ -464,17 +474,88 @@ class RpcServer(
 
     private fun parsePort(raw: String, source: String): Int = raw.trim().toIntOrNull()?.let { p ->
         if (p in 0..65535) p else {
-            log.warn("invalid port {} in {}; using default {}", raw, source, DEFAULT_TCP_PORT)
-            DEFAULT_TCP_PORT
+            log.warn("invalid port {} in {}; using default {}", raw, source, transport.defaultTcpPort)
+            transport.defaultTcpPort
         }
     } ?: run {
-        log.warn("invalid port '{}' in {}; using default {}", raw, source, DEFAULT_TCP_PORT)
-        DEFAULT_TCP_PORT
+        log.warn("invalid port '{}' in {}; using default {}", raw, source, transport.defaultTcpPort)
+        transport.defaultTcpPort
     }
 
     companion object {
         const val MAX_FRAME_BYTES = 64 * 1024 * 1024  // 64 MiB
         const val DEFAULT_TCP_PORT = 25580
         private const val BACKLOG = 1024
+    }
+}
+
+/**
+ * Transport-level configuration keys and defaults for one **plane**.
+ *
+ * The server plane and the client plane (`gui.*`) can coexist in a single process
+ * (single-player = integrated server + client), so every key and default must be
+ * distinct — otherwise the second plane would delete and rebind the first plane's
+ * socket file.
+ *
+ * | | server plane | client plane |
+ * |---|---|---|
+ * | socket system property | `-Dmcdebug.socket` | `-Dmcdebug.clientSocket` |
+ * | socket env | `MCDEBUG_SOCKET` | `MCDEBUG_CLIENT_SOCKET` |
+ * | json field | `socket` | `clientSocket` |
+ * | default socket file | `<gameDir>/mcdebug/socket` | `<gameDir>/mcdebug/clientSocket` |
+ * | TCP port property/env/json | `mcdebug.tcpPort` / `MCDEBUG_TCP_PORT` / `tcpPort` | `mcdebug.clientTcpPort` / `MCDEBUG_CLIENT_TCP_PORT` / `clientTcpPort` |
+ * | TCP default | enabled, 25580 | **disabled**, 25581 |
+ *
+ * The client TCP listener is off by default on purpose: a real player's client must
+ * not expose an unauthenticated RPC port on the network.
+ */
+class TransportConfig(
+    /** "server" or "client" — reported in the `server.ready` notification and logs. */
+    val plane: String,
+    val socketProperty: String,
+    val socketEnv: String,
+    val socketJsonKey: String,
+    val tcpPortProperty: String,
+    val tcpPortEnv: String,
+    val tcpPortJsonKey: String,
+    val tcpEnabledProperty: String,
+    val tcpEnabledEnv: String,
+    val tcpEnabledJsonKey: String,
+    val defaultSocketFileName: String,
+    val defaultTcpPort: Int,
+    val defaultTcpEnabled: Boolean,
+) {
+    companion object {
+        val SERVER = TransportConfig(
+            plane = "server",
+            socketProperty = "mcdebug.socket",
+            socketEnv = "MCDEBUG_SOCKET",
+            socketJsonKey = "socket",
+            tcpPortProperty = "mcdebug.tcpPort",
+            tcpPortEnv = "MCDEBUG_TCP_PORT",
+            tcpPortJsonKey = "tcpPort",
+            tcpEnabledProperty = "mcdebug.tcpEnabled",
+            tcpEnabledEnv = "MCDEBUG_TCP_ENABLED",
+            tcpEnabledJsonKey = "tcpEnabled",
+            defaultSocketFileName = "socket",
+            defaultTcpPort = 25580,
+            defaultTcpEnabled = true,
+        )
+
+        val CLIENT = TransportConfig(
+            plane = "client",
+            socketProperty = "mcdebug.clientSocket",
+            socketEnv = "MCDEBUG_CLIENT_SOCKET",
+            socketJsonKey = "clientSocket",
+            tcpPortProperty = "mcdebug.clientTcpPort",
+            tcpPortEnv = "MCDEBUG_CLIENT_TCP_PORT",
+            tcpPortJsonKey = "clientTcpPort",
+            tcpEnabledProperty = "mcdebug.clientTcpEnabled",
+            tcpEnabledEnv = "MCDEBUG_CLIENT_TCP_ENABLED",
+            tcpEnabledJsonKey = "clientTcpEnabled",
+            defaultSocketFileName = "clientSocket",
+            defaultTcpPort = 25581,
+            defaultTcpEnabled = false,
+        )
     }
 }

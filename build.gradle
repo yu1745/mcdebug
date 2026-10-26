@@ -29,18 +29,33 @@ base {
 	archivesName = project.archives_base_name
 }
 
+sourceSets {
+	main {
+		// `contract` is a separate, zero-dependency artifact (published for CLI / JUnit
+		// runner consumers), but the mod jar must be **self-contained**: a release jar is
+		// dropped into `mods/` on its own, so a plain `implementation project(':contract')`
+		// would leave `com.mcdebug.contract.Methods` missing at runtime and break the
+		// client entrypoint with NoClassDefFoundError. Compiling the same sources into the
+		// mod keeps one source of truth and zero runtime dependencies.
+		kotlin.srcDir rootProject.file('contract/src/main/kotlin')
+	}
+}
+
 loom {
 	splitEnvironmentSourceSets()
 
 	mods {
 		"mcdebug" {
 			sourceSet sourceSets.main
+			// The client source set (src/client/{kotlin,java,resources}) holds the
+			// client-plane RPC agent (`gui.*`): real rendering + real Screen events.
+			// Both source sets are packaged into the same jar.
+			sourceSet sourceSets.client
 		}
 	}
 }
 
 dependencies {
-	implementation project(':contract')
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
 	mappings loom.officialMojangMappings()
 	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
@@ -92,6 +107,39 @@ jar {
 	inputs.property "projectName", projectName
 	from("LICENSE") { rename { "${it}_$projectName" } }
 }
+
+// The release jar is deployed on its own into `<gameDir>/mods` (server or client), so it
+// must carry everything the two entrypoints touch. A missing class only shows up as a
+// `NoClassDefFoundError` in a foreign environment — deps present in the dev classpath hide
+// it (`contract` classes are the classic case). Fail the build instead.
+tasks.register('verifyJarSelfContained') {
+	description = 'Fail if the release jar misses classes/resources the entrypoints need at runtime'
+	group = 'verification'
+	def jarTask = tasks.named('remapJar')
+	dependsOn jarTask
+	doLast {
+		def jarFile = jarTask.get().archiveFile.get().asFile
+		def required = [
+			'com/mcdebug/McDebugMod.class',                        // server entrypoint
+			'com/mcdebug/client/McDebugClientMod.class',           // client entrypoint
+			'com/mcdebug/client/GuiOps.class',                     // gui.* handlers
+			'com/mcdebug/client/Capture.class',
+			'com/mcdebug/client/mixin/AbstractContainerScreenAccessor.class',
+			'com/mcdebug/contract/Methods.class',                  // contract used by the client self-check
+			'mcdebug.mixins.json',
+			'mcdebug.client.mixins.json',
+			'fabric.mod.json',
+		]
+		def entries = new java.util.zip.ZipFile(jarFile).withCloseable { zip -> zip.entries().collect { it.name } as Set }
+		def missing = required.findAll { !entries.contains(it) }
+		if (missing) {
+			throw new GradleException("${jarFile.name} is not self-contained, missing: ${missing}")
+		}
+		logger.lifecycle("verifyJarSelfContained: ${required.size()} required entries present in ${jarFile.name}")
+	}
+}
+
+tasks.named('check') { dependsOn 'verifyJarSelfContained' }
 
 publishing {
 	publications {

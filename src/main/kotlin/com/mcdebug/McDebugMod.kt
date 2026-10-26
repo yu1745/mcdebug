@@ -1,43 +1,31 @@
 package com.mcdebug
 
-import com.mcdebug.api.BlockEntityOps
-import com.mcdebug.api.CraftingOps
-import com.mcdebug.api.EntityOps
-import com.mcdebug.api.FakePlayerPool
-import com.mcdebug.api.FixtureOps
-import com.mcdebug.api.FluidOps
-import com.mcdebug.api.InventoryOps
-import com.mcdebug.api.RedstoneOps
-import com.mcdebug.api.ReflectOps
-import com.mcdebug.api.ScreenOps
-import com.mcdebug.api.ScanOps
-import com.mcdebug.api.ServerOps
-import com.mcdebug.api.SnapshotOps
-import com.mcdebug.api.StorageOps
-import com.mcdebug.api.TraceOps
-import com.mcdebug.api.WorldOps
 import com.mcdebug.rpc.RpcDispatcher
-import com.mcdebug.rpc.RpcServer
-import com.mcdebug.wait.WaitOps
-import net.fabricmc.api.DedicatedServerModInitializer
-import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents
 import com.mcdebug.rpc.RpcEnv
+import net.fabricmc.api.DedicatedServerModInitializer
 import net.fabricmc.loader.api.FabricLoader
 import net.minecraft.server.MinecraftServer
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
-import java.nio.file.Path
-import java.nio.file.Paths
 
 /**
- * mcdebug — JSON-RPC debug server for mod development automation.
+ * mcdebug — JSON-RPC debug agent for mod development automation.
  *
- * The RPC server listens on two transports in parallel: a unix domain socket
- * (primary, local, default `<run_dir>/mcdebug/socket`) and TCP (auxiliary,
- * cross-machine, default port 25580). Either listener may fail to bind
- * without blocking startup; only if both fail does the server error out.
- * Discovery files: `<run_dir>/mcdebug/port` (socket path) and
- * `<run_dir>/mcdebug/tcpPort` (TCP port).
+ * One jar, two planes:
+ *  - **server plane** ([ServerPlane]): `world.*` / `be.*` / `inv.*` / `wait.*` … over a
+ *    unix domain socket (primary, local, default `<gameDir>/mcdebug/socket`) and TCP
+ *    (auxiliary, cross-machine, default port 25580). Either listener may fail to bind
+ *    without blocking startup; only if both fail does the plane error out.
+ *    Discovery files: `<gameDir>/mcdebug/port` (socket path) and
+ *    `<gameDir>/mcdebug/tcpPort` (TCP port).
+ *  - **client plane** (`mcdebug.client.McDebugClientMod`, `gui.*`): real rendering and
+ *    real Screen event dispatch — screenshots with pixel coordinates, clicks, block
+ *    interaction. Registered by the Fabric `client` entrypoint.
+ *
+ * This entrypoint is the `DedicatedServerModInitializer`, so it does **not** fire on a
+ * client. A single-player client gets the server plane from the client entrypoint
+ * instead ([ServerPlane.installLifecycleHooks] hooks the integrated server), which
+ * yields both planes in one process.
  */
 object McDebugMod : DedicatedServerModInitializer {
     const val MOD_ID = "mcdebug"
@@ -46,88 +34,15 @@ object McDebugMod : DedicatedServerModInitializer {
         .map { it.metadata.version.friendlyString }
         .orElse("0.0.0")
 
-    private var rpcServer: RpcServer? = null
+    /** Live JSON-RPC dispatcher of the server plane (null when not running). */
+    val dispatcher: RpcDispatcher? get() = ServerPlane.dispatcher
 
-    /** Live JSON-RPC dispatcher for the running MC server. */
-    @Volatile
-    var dispatcher: RpcDispatcher? = null
-        private set
-
-    /** The MinecraftServer instance backing the current RPC session. */
-    @Volatile
-    var currentServer: MinecraftServer? = null
-        private set
+    /** The MinecraftServer instance backing the current server-plane session. */
+    val currentServer: MinecraftServer? get() = ServerPlane.currentServer
 
     override fun onInitializeServer() {
         RpcEnv.gameDir = { FabricLoader.getInstance().gameDir }
-        LOGGER.info("mcdebug {} initializing", MOD_VERSION)
-
-        ServerLifecycleEvents.SERVER_STARTED.register(::onServerStarted)
-        ServerLifecycleEvents.SERVER_STOPPING.register(::onServerStopping)
-    }
-
-    private fun onServerStarted(server: MinecraftServer) {
-        val d = RpcDispatcher().apply {
-            registerGroup("world", WorldOps)
-            registerGroup("be", BlockEntityOps)
-            registerGroup("inv", InventoryOps)
-            registerGroup("scan", ScanOps)
-            registerGroup("server", ServerOps)
-            registerGroup("wait", WaitOps)
-            registerGroup("fluid", FluidOps)
-            registerGroup("craft", CraftingOps)
-            registerGroup("storage", StorageOps)
-            registerGroup("snapshot", SnapshotOps)
-            registerGroup("trace", TraceOps)
-            registerGroup("screen", ScreenOps)
-            registerGroup("redstone", RedstoneOps)
-            registerGroup("entity", EntityOps)
-            registerGroup("fixture", FixtureOps)
-            registerGroup("reflect", ReflectOps)
-        }
-        dispatcher = d
-        currentServer = server
-
-        // Install the tick listener for wait.until. This is passive — it only observes server tick events.
-        WaitOps.install()
-        TraceOps.install()
-        RedstoneOps.install()
-        FakePlayerPool.install()
-
-        rpcServer = RpcServer(d, ::socketFilePath, ::tcpPortFilePath).also { it.start(server) }
-        LOGGER.info(
-            "mcdebug RPC ready: unix socket={}, tcpPort={}",
-            rpcServer?.socketPath,
-            rpcServer?.tcpPort,
-        )
-    }
-
-    private fun onServerStopping(server: MinecraftServer) {
-        try {
-            WaitOps.uninstall()
-            TraceOps.uninstall()
-            RedstoneOps.uninstall()
-            ScreenOps.clear()
-            FakePlayerPool.shutdown()
-            rpcServer?.stop()
-        } catch (e: Exception) {
-            LOGGER.warn("error stopping mcdebug", e)
-        } finally {
-            rpcServer = null
-            dispatcher = null
-            currentServer = null
-        }
-    }
-
-    /** Discovery file written by RpcServer: content is the unix socket path. */
-    private fun socketFilePath(): Path {
-        val runDir = FabricLoader.getInstance().gameDir.resolve("mcdebug")
-        return Paths.get(runDir.toString(), "port")
-    }
-
-    /** Discovery file written by RpcServer: content is the TCP port (only if TCP bound). */
-    private fun tcpPortFilePath(): Path {
-        val runDir = FabricLoader.getInstance().gameDir.resolve("mcdebug")
-        return Paths.get(runDir.toString(), "tcpPort")
+        LOGGER.info("mcdebug {} initializing (dedicated server)", MOD_VERSION)
+        ServerPlane.installLifecycleHooks()
     }
 }

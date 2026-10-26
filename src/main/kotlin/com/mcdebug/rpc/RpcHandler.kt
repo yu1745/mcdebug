@@ -44,6 +44,52 @@ interface RpcHandlerGroup {
     fun methods(): Map<String, RpcHandler>
 }
 
+/**
+ * The environment a [RpcServer] serves requests from. Transport code (accept loops,
+ * framing, JSON-RPC envelope) is identical for every plane; only "which registry do
+ * I dispatch into, and what is the main thread I schedule work on" differs:
+ *
+ *  - [ServerMethodHost] — the server plane (`world.*`, `be.*`, `screen.*` …). Registered
+ *    by the `server` entrypoint; main thread = MinecraftServer thread.
+ *  - client plane (`gui.*`) — see `com.mcdebug.client.ClientMethodHost` in the client
+ *    source set; main thread = the client/render thread.
+ *
+ * Keeping this seam in the shared, loader-neutral `rpc/` package is what lets the exact
+ * same transport serve both planes (and lets a single process — single-player! — run
+ * both at once, each on its own socket).
+ */
+interface RpcMethodHost {
+    /**
+     * Called by [RpcServer.start] with the object requests should be dispatched against
+     * (the `MinecraftServer` on the server plane). Hosts that own their target already
+     * (e.g. the client, which has a process-wide singleton) may ignore it.
+     */
+    fun attach(server: MinecraftServer?) {}
+
+    /**
+     * Dispatch one request. Implementations throw [RpcException] when the host is not
+     * ready (e.g. server not initialized yet) — the transport turns that into a
+     * JSON-RPC error response.
+     */
+    fun dispatch(method: String, params: JsonObject?): CompletableFuture<JsonElement>
+}
+
+/** Server-plane [RpcMethodHost]: dispatches into a [RpcDispatcher] with the attached server. */
+class ServerMethodHost(private val dispatcher: RpcDispatcher) : RpcMethodHost {
+    @Volatile
+    private var server: MinecraftServer? = null
+
+    override fun attach(server: MinecraftServer?) {
+        this.server = server
+    }
+
+    override fun dispatch(method: String, params: JsonObject?): CompletableFuture<JsonElement> {
+        val s = server
+            ?: throw RpcException(RpcErrors.INTERNAL_ERROR, "server not initialized")
+        return dispatcher.dispatch(method, params, s)
+    }
+}
+
 object RpcContext {
     val GSON: Gson = GsonBuilder().disableHtmlEscaping().serializeNulls().create()
 

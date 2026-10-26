@@ -64,8 +64,10 @@ class RpcContractTest {
     }
 
     @Test
-    fun everyDeclaredMethodIsRegisteredOnServer() {
-        val extra = Methods.ALL - registered
+    fun everyDeclaredServerMethodIsRegisteredOnServer() {
+        // Methods.ALL 里还有客户端面的 gui.*（由 client entrypoint 注册，dev 单测里不存在），
+        // 所以这里只能比对 SERVER_METHODS。
+        val extra = Methods.SERVER_METHODS - registered
         assertTrue(
             extra.isEmpty(),
             "contract/Methods.kt 已声明但服务端未注册: ${extra.sorted()}\n" +
@@ -74,9 +76,41 @@ class RpcContractTest {
     }
 
     @Test
+    fun clientMethodsAreDisjointFromServerMethods() {
+        val overlap = Methods.SERVER_METHODS intersect Methods.CLIENT_METHODS
+        assertTrue(
+            overlap.isEmpty(),
+            "同一个方法名不能同时属于两个 plane: ${overlap.sorted()}",
+        )
+        assertEquals(
+            Methods.SERVER_METHODS + Methods.CLIENT_METHODS,
+            Methods.ALL,
+            "Methods.ALL 必须恰好等于两个 plane 的并集",
+        )
+    }
+
+    @Test
+    fun clientMethodsAllBelongToClientPlane() {
+        Methods.CLIENT_METHODS.forEach { name ->
+            assertEquals("client", Methods.planeOf(name), "planeOf($name) 应为 client")
+        }
+        Methods.SERVER_METHODS.forEach { name ->
+            assertEquals("server", Methods.planeOf(name), "planeOf($name) 应为 server")
+        }
+        assertEquals(null, Methods.planeOf("no.suchMethod"))
+        // gui.* 是客户端面，服务端 dispatcher 不应注册任何 gui.*
+        assertTrue(
+            registered.none { it.startsWith("gui.") },
+            "gui.* 只能由客户端 entrypoint 注册，服务端注册表里出现了: " +
+                registered.filter { it.startsWith("gui.") },
+        )
+    }
+
+    @Test
     fun methodNamesMatchJsonRpcConvention() {
         // 方法名必须是非空、无空白、点分命名（JSON-RPC 对大小写无要求）。
-        registered.forEach { name ->
+        // 两个 plane 一起校验。
+        Methods.ALL.forEach { name ->
             assertTrue(
                 name.matches(Regex("[^\\s]+\\.\\S+")),
                 "方法名不符合约定（点分、无空白）: $name",

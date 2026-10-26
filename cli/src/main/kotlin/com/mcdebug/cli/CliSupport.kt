@@ -11,6 +11,12 @@ import com.google.gson.JsonElement
 /** 批处理模式下的共享连接（-c 多命令连一次跑多条）；非批处理为 null。 */
 var batchClient: RpcClient? = null
 
+/** 批处理模式下的共享**客户端平面**连接（`gui.*`）；与 server 连接各自独立。 */
+var batchClientPlane: RpcClient? = null
+
+/** 是否正在跑 `--batch`（-c 多命令）：决定连接是复用还是用完即关。 */
+var batchActive: Boolean = false
+
 /** CLI 版本（fat jar manifest Implementation-Version；dev 运行时为 "dev"）。 */
 fun cliVersion(): String =
     McDebugCli::class.java.`package`?.implementationVersion?.takeIf { it.isNotBlank() } ?: "dev"
@@ -22,9 +28,12 @@ fun cliVersion(): String =
  * 新连接建立后比较服务端 modVersion 与 CLI 版本，不一致时 stderr 打一行警告（不阻塞执行）。
  */
 fun withClient(cli: McDebugCli, block: (RpcClient) -> Unit) {
-    val batch = batchClient
-    if (batch != null) {
-        block(batch)
+    if (batchActive) {
+        val c = batchClient ?: RpcClient(cli.clientOptions()).also {
+            batchClient = it
+            warnVersionMismatch(it)
+        }
+        block(c)
         return
     }
     RpcClient(cli.clientOptions()).use { c ->
@@ -33,20 +42,54 @@ fun withClient(cli: McDebugCli, block: (RpcClient) -> Unit) {
     }
 }
 
-/** 连接后（status 可得时）比较 modVersion 与 CLI 版本，不一致打 stderr 警告。 */
-fun warnVersionMismatch(client: RpcClient) {
+/**
+ * 客户端平面（`gui.*`）连接。默认走客户端发现文件 `mcdebug/clientPort`，可用
+ * `--client-socket` / `--client-tcp` 覆盖；批处理下同样复用一条连接。
+ *
+ * 与 [withClient] 分开是有意的：客户端平面只在游戏客户端里存在，而单机客户端
+ * 一个进程里两个平面同时在跑，所以两条连接互不替代。
+ */
+fun withClientPlane(cli: McDebugCli, block: (RpcClient) -> Unit) {
+    if (batchActive) {
+        val c = batchClientPlane ?: RpcClient(cli.clientPlaneOptions()).also {
+            batchClientPlane = it
+            warnVersionMismatch(it, clientPlane = true)
+        }
+        block(c)
+        return
+    }
+    RpcClient(cli.clientPlaneOptions()).use { c ->
+        warnVersionMismatch(c, clientPlane = true)
+        block(c)
+    }
+}
+
+/**
+ * 按方法名选择平面：`gui.*` 走客户端平面，其余走服务端平面。
+ * `raw` 用这个，避免 agent 为了调一个 gui 方法还要记住多一层开关。
+ */
+fun withPlaneFor(cli: McDebugCli, method: String, block: (RpcClient) -> Unit) {
+    if (method.startsWith("gui.")) withClientPlane(cli, block) else withClient(cli, block)
+}
+
+/**
+ * 连接后（状态方法可得时）比较 mod jar 版本与 CLI 版本，不一致打 stderr 警告。
+ * 服务端平面查 `server.status`，客户端平面查 `gui.status`（两者都带 `modVersion`）。
+ */
+fun warnVersionMismatch(client: RpcClient, clientPlane: Boolean = false) {
     val v = cliVersion()
     if (v == "dev") return
-    val serverVersion = try {
-        val status = client.call("server.status")
+    val remoteVersion = try {
+        val status = client.call(if (clientPlane) "gui.status" else "server.status")
         status.takeIf { it.isJsonObject }?.asJsonObject?.get("modVersion")
             ?.takeIf { it.isJsonPrimitive }?.asString
     } catch (_: Exception) {
-        // 旧服务端无 server.status 或连接异常：静默跳过，不阻塞执行。
+        // 旧服务端/旧客户端无该方法或连接异常：静默跳过，不阻塞执行。
         return
     }
-    if (serverVersion.isNullOrBlank() || serverVersion == v) return
-    System.err.println("warning: server mcdebug $serverVersion != CLI $v，部分命令可能不可用")
+    if (remoteVersion.isNullOrBlank() || remoteVersion == v) return
+    val who = if (clientPlane) "client" else "server"
+    System.err.println("warning: $who mcdebug $remoteVersion != CLI $v，部分命令可能不可用")
 }
 
 /** 统一退出码映射：0=成功；1=CLI 用法/解析错误；2=服务端拒绝（RPC error，含 -320xx）；3=方法未实现。 */

@@ -19,14 +19,22 @@ import java.util.concurrent.ConcurrentHashMap
 class RpcException(val rpcCode: Int, message: String, val data: JsonElement? = null) :
     RuntimeException(message)
 
+/**
+ * 连接参数。`plane` 决定默认值：服务端平面（`world.*`…）默认 TCP 25580 + 发现文件
+ * `mcdebug/port`；客户端平面（`gui.*`，需要运行中的游戏客户端）默认 TCP 25581 +
+ * 发现文件 `mcdebug/clientPort`。两个平面的默认值必须不同——单机客户端在同一个
+ * 进程、同一个 gameDir 里同时跑两个平面。
+ */
 class RpcClientOptions(
     val socket: String? = null,
-    /** TCP 目标 "host:port"（port 可省略，默认 25580）；指定后优先于 socket。 */
+    /** TCP 目标 "host:port"（port 可省略，用该平面的默认端口）；指定后优先于 socket。 */
     val tcp: String? = null,
     val host: String? = null,
     val port: Int? = null,
     val portFile: String? = null,
     val timeoutMs: Int = 5000,
+    /** [PLANE_SERVER]（默认）或 [PLANE_CLIENT]。 */
+    val plane: String = PLANE_SERVER,
 ) {
     init {
         require(tcp == null || (host == null && port == null)) {
@@ -35,6 +43,38 @@ class RpcClientOptions(
         require((host == null) == (port == null)) {
             "--host 与 --port 必须成对使用"
         }
+        require(plane == PLANE_SERVER || plane == PLANE_CLIENT) { "unknown plane: $plane" }
+    }
+
+    val isClient: Boolean get() = plane == PLANE_CLIENT
+
+    /** 该平面 TCP 默认端口（--tcp/--client-tcp 省略端口时用）。 */
+    val defaultTcpPort: Int get() = if (isClient) CLIENT_TCP_PORT else SERVER_TCP_PORT
+
+    /** 该平面的 socket 发现文件候选（相对 CWD，按序尝试）。 */
+    val socketFileCandidates: List<String>
+        get() = if (isClient) CLIENT_SOCKET_FILES else SERVER_SOCKET_FILES
+
+    /** 该平面的 socket 覆盖环境变量名。 */
+    val socketEnvVar: String get() = if (isClient) CLIENT_SOCKET_ENV else SERVER_SOCKET_ENV
+
+    companion object {
+        const val PLANE_SERVER = "server"
+        const val PLANE_CLIENT = "client"
+
+        const val SERVER_TCP_PORT = 25580
+        const val CLIENT_TCP_PORT = 25581
+        const val SERVER_SOCKET_ENV = "MCDEBUG_SOCKET"
+        const val CLIENT_SOCKET_ENV = "MCDEBUG_CLIENT_SOCKET"
+
+        val SERVER_SOCKET_FILES =
+            listOf("mcdebug/port", "run/mcdebug/port", "../run/mcdebug/port", "../../run/mcdebug/port")
+        val CLIENT_SOCKET_FILES = listOf(
+            "mcdebug/clientPort",
+            "run/mcdebug/clientPort",
+            "../run/mcdebug/clientPort",
+            "../../run/mcdebug/clientPort",
+        )
     }
 }
 
@@ -57,14 +97,8 @@ class RpcClient(private val opts: RpcClientOptions) : AutoCloseable {
 
     private fun discoverSocket(): String {
         opts.socket?.takeIf { it.isNotBlank() }?.let { return it }
-        System.getenv("MCDEBUG_SOCKET")?.takeIf { it.isNotBlank() }?.let { return it }
-        val candidates = listOfNotNull(
-            opts.portFile,
-            "mcdebug/port",
-            "run/mcdebug/port",
-            "../run/mcdebug/port",
-            "../../run/mcdebug/port",
-        )
+        System.getenv(opts.socketEnvVar)?.takeIf { it.isNotBlank() }?.let { return it }
+        val candidates = listOfNotNull(opts.portFile) + opts.socketFileCandidates
         for (p in candidates) {
             try {
                 val txt = Files.readString(Path.of(p)).trim()
@@ -74,15 +108,17 @@ class RpcClient(private val opts: RpcClientOptions) : AutoCloseable {
             }
         }
         throw IllegalStateException(
-            "cannot discover mcdebug socket: pass --socket, set MCDEBUG_SOCKET, " +
-                "or run from a directory with a mcdebug/port discovery file",
+            "cannot discover mcdebug ${opts.plane} socket: pass " +
+                (if (opts.isClient) "--client-socket" else "--socket") +
+                ", set ${opts.socketEnvVar}, or run from a directory with a " +
+                "${opts.socketFileCandidates.first()} discovery file",
         )
     }
 
-    /** 解析 --tcp 参数：host[:port]，默认端口 25580（支持 [v6] 括号）。 */
+    /** 解析 TCP 目标 "host[:port]"；port 省略时用该平面默认端口（支持 [v6] 括号）。 */
     private fun tcpTarget(): InetSocketAddress? {
         val raw = opts.tcp ?: return (opts.host ?: return null).let { h ->
-            InetSocketAddress(h, opts.port ?: DEFAULT_TCP_PORT)
+            InetSocketAddress(h, opts.port ?: opts.defaultTcpPort)
         }
         val host: String
         val port: Int
@@ -91,12 +127,12 @@ class RpcClient(private val opts: RpcClientOptions) : AutoCloseable {
             require(close > 1) { "invalid --tcp address: $raw" }
             host = raw.substring(1, close)
             port = raw.substring(close + 1).removePrefix(":")
-                .takeIf { it.isNotEmpty() }?.toIntOrNull() ?: DEFAULT_TCP_PORT
+                .takeIf { it.isNotEmpty() }?.toIntOrNull() ?: opts.defaultTcpPort
         } else {
             val idx = raw.lastIndexOf(':')
             if (idx < 0) {
                 host = raw
-                port = DEFAULT_TCP_PORT
+                port = opts.defaultTcpPort
             } else {
                 host = raw.substring(0, idx)
                 port = raw.substring(idx + 1).toIntOrNull()
@@ -241,7 +277,6 @@ class RpcClient(private val opts: RpcClientOptions) : AutoCloseable {
     }
 
     companion object {
-        const val DEFAULT_TCP_PORT = 25580
         private const val NL_BYTE: Byte = '\n'.code.toByte()
         private const val CR_BYTE: Byte = '\r'.code.toByte()
     }

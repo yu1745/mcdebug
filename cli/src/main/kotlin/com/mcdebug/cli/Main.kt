@@ -50,6 +50,7 @@ fun buildCli(): McDebugCli =
             EntityCommands().subcommands(*entitySubcommands().toTypedArray()),
             FixtureCommands().subcommands(*fixtureSubcommands().toTypedArray()),
             ScreenCommands().subcommands(*screenSubcommands().toTypedArray()),
+            GuiCommands().subcommands(*guiSubcommands().toTypedArray()),
             RedstoneCommands().subcommands(*redstoneSubcommands().toTypedArray()),
             ReflectCommands().subcommands(*reflectSubcommands().toTypedArray()),
             WatchCommands().subcommands(*watchSubcommands().toTypedArray()),
@@ -58,7 +59,11 @@ fun buildCli(): McDebugCli =
 
 class McDebugCli : CliktCommand(
     name = "mcdebug",
-    help = "CLI for the mcdebug Minecraft debug server mod (JSON-RPC over unix socket or TCP)\n\n" +
+    help = "CLI for the mcdebug Minecraft debug mod (JSON-RPC over unix socket or TCP)\n\n" +
+        "两个平面（Planes）:\n" +
+        "  server  world.*/be.*/inv.*/... 走服务端平面（发现文件 mcdebug/port，TCP 25580）\n" +
+        "  client  gui.* 走客户端平面——必须有运行中的游戏客户端（发现文件 mcdebug/clientPort，TCP 25581\n" +
+        "          默认关闭）；gui 子命令与 raw gui.* 会自动选客户端平面\n\n" +
         "退出码（Exit Codes）:\n" +
         "  0  成功（含业务性 ok:false——如 set-block 目标越界/已是目标方块、diff equal:false；\n" +
         "     这类不是协议错误，要看输出 JSON 的 ok/equal 字段）\n" +
@@ -81,6 +86,15 @@ class McDebugCli : CliktCommand(
     val host by option("--host", help = "TCP host (must be used together with --port)")
     val port by option("--port", help = "TCP port (must be used together with --host)").int()
     val portFile by option("--port-file", help = "socket discovery file path")
+    val clientSocket by option(
+        "--client-socket",
+        help = "client-plane unix socket path for gui.* (overrides MCDEBUG_CLIENT_SOCKET and mcdebug/clientPort)",
+    )
+    val clientTcp by option(
+        "--client-tcp",
+        metavar = "HOST[:PORT]",
+        help = "connect to the client plane over TCP (default port 25581) — must be enabled on the client side",
+    )
     val timeout by option("--timeout", help = "connection timeout in ms (TCP connect)").int().default(5000)
     val commandStrings by option(
         "-c", "--command",
@@ -93,6 +107,23 @@ class McDebugCli : CliktCommand(
     fun clientOptions(): RpcClientOptions {
         try {
             return RpcClientOptions(socket, tcp, host, port, portFile, timeout)
+        } catch (e: IllegalArgumentException) {
+            throw UsageError(e.message ?: "invalid options")
+        }
+    }
+
+    /**
+     * 客户端平面（`gui.*`）连接参数。刻意**不**继承 `--socket`/`--tcp`：那是服务端
+     * 平面的地址，两个平面在单机客户端里是同一进程的两条不同 socket。
+     */
+    fun clientPlaneOptions(): RpcClientOptions {
+        try {
+            return RpcClientOptions(
+                socket = clientSocket,
+                tcp = clientTcp,
+                timeoutMs = timeout,
+                plane = RpcClientOptions.PLANE_CLIENT,
+            )
         } catch (e: IllegalArgumentException) {
             throw UsageError(e.message ?: "invalid options")
         }
@@ -114,9 +145,9 @@ class McDebugCli : CliktCommand(
 
     /** 批处理：连一次，顺序执行每条 -c 命令；任一失败即停，退出码 = 该失败的退出码。 */
     private fun runBatch() {
-        batchClient = RpcClient(clientOptions())
+        // 连接按需建立：一批命令可能只碰其中一个平面（甚至只有服务端平面）。
+        batchActive = true
         try {
-            warnVersionMismatch(batchClient!!)
             commandStrings.forEachIndexed { i, cmd ->
                 val tokens = tokenizeCommandLine(cmd)
                 if (tokens.isEmpty()) throw UsageError("empty command: $cmd")
@@ -130,8 +161,11 @@ class McDebugCli : CliktCommand(
                 }
             }
         } finally {
+            batchActive = false
             runCatching { batchClient?.close() }
+            runCatching { batchClientPlane?.close() }
             batchClient = null
+            batchClientPlane = null
         }
     }
 }
@@ -183,7 +217,8 @@ class RawCmd : CliktCommand(name = "raw", help = "call an arbitrary JSON-RPC met
 
     override fun run() {
         val cli = requireNotNull(currentContext.parent?.command as? McDebugCli)
-        withClient(cli) { client ->
+        // gui.* 只存在于客户端平面；raw 自动选平面，省掉一层开关。
+        withPlaneFor(cli, method) { client ->
             val params = jsonParams?.let { s ->
                 val txt = if (s.startsWith("@")) java.nio.file.Files.readString(java.nio.file.Path.of(s.substring(1))) else s
                 parseJson(txt)

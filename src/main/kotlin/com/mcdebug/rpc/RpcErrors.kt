@@ -32,4 +32,10 @@ object RpcErrors {
     const val TRACE_NOT_FOUND = -32017
     const val SCREEN_NOT_FOUND = -32018
     const val ENTITY_NOT_FOUND = -32019
+
+    // client plane (`gui.*`) — produced by the client-side agent, see RpcErrors KDoc
+    /** No client is running / not in a world / client plane not reachable. */
+    const val CLIENT_NOT_READY = -32020
+    /** A GUI element (widget, text, slot) matching the request was not found. */
+    const val GUI_ELEMENT_NOT_FOUND = -32021
 }

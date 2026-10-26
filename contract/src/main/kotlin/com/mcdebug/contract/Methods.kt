@@ -1,14 +1,27 @@
 package com.mcdebug.contract
 
 /**
- * 全部 JSON-RPC 方法名清单（唯一事实源）。
+ * 全部 JSON-RPC 方法名清单（唯一事实源），按**平面（plane）**分成两组：
  *
- * 服务端测试 `RpcContractTest` 会遍历 RpcDispatcher 注册表与本清单交叉校验：
- * 两端任何一方加了/改了/删了方法名都会编译期可见或测试失败，防止契约漂移。
+ * - **`SERVER_METHODS`**：服务端平面。由 `server` entrypoint（专用服务器 / 集成服务器的
+ *   服务端侧）注册，读写的都是世界/方块实体/物品栏等**服务端权威状态**。其中
+ *   `screen.*` 是服务端假玩家菜单（只返回槽位 JSON，**不产生任何像素**）。
+ * - **`CLIENT_METHODS`**：客户端平面（`gui.*`）。由 `client` entrypoint 注册，只在真实
+ *   客户端存在：真实渲染帧、真实 Screen、真实点击。像素只能由这里产生。
+ *
+ * 两个平面各自校验：`RpcContractTest` 静态校验服务端注册表 ↔ `SERVER_METHODS`、两平面
+ * 不相交、命名合规；客户端注册表的双向校验在客户端启动时做运行时自检
+ * （`McDebugClientMod` 比对 `GuiOps.methods()` 与 `CLIENT_METHODS`，不一致打 ERROR 并写进
+ * `gui.status.contractMismatch`），因为 `src/client` 不参与服务端单测的编译。
+ * 加/改/删方法名时两边都要同步，否则测试/自检失败。
  *
  * 方法名 = `<组>.<后缀>`，与 `RpcHandlerGroup.methods()` 的注册 key 一一对应。
  */
 object Methods {
+    // ------------------------------------------------------------------
+    // 服务端平面
+    // ------------------------------------------------------------------
+
     val world = setOf(
         "world.getBlock", "world.setBlock", "world.setBlocks", "world.placeAsPlayer",
         "world.useItem", "world.useItemHold", "world.useOnBlock", "world.attackBlock",
@@ -57,8 +70,8 @@ object Methods {
         "reflect.refs", "reflect.release", "reflect.mappings",
     )
 
-    /** 全部方法名（供服务端契约校验测试使用）。 */
-    val ALL: Set<String> = buildSet {
+    /** 服务端平面全部方法名（专用服务器与集成服务器的服务端侧都应完整注册）。 */
+    val SERVER_METHODS: Set<String> = buildSet {
         addAll(world)
         addAll(be)
         addAll(inv)
@@ -75,5 +88,27 @@ object Methods {
         addAll(entity)
         addAll(fixture)
         addAll(reflect)
+    }
+
+    // ------------------------------------------------------------------
+    // 客户端平面（gui.*）—— 真实渲染/真实 Screen/真实点击
+    // ------------------------------------------------------------------
+
+    val gui = setOf(
+        "gui.status", "gui.connect", "gui.openBlock", "gui.screenshot",
+        "gui.screen", "gui.click", "gui.close", "gui.reloadResources",
+    )
+
+    /** 客户端平面全部方法名。 */
+    val CLIENT_METHODS: Set<String> = gui
+
+    /** 全部方法名（两个平面的并集）。 */
+    val ALL: Set<String> = SERVER_METHODS + CLIENT_METHODS
+
+    /** 方法所属平面：`"server"` / `"client"`；未声明返回 null。 */
+    fun planeOf(method: String): String? = when (method) {
+        in SERVER_METHODS -> "server"
+        in CLIENT_METHODS -> "client"
+        else -> null
     }
 }

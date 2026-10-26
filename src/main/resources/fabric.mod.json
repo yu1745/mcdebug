@@ -3,7 +3,7 @@
 	"id": "mcdebug",
 	"version": "${version}",
 	"name": "mcdebug",
-	"description": "JSON-RPC debug server for mod development automation. Exposes world/block-entity/inventory inspection and modification over a unix socket (local) and TCP (cross-machine).",
+	"description": "JSON-RPC debug agent for mod development automation. Two planes in one jar: the server plane (world/block-entity/inventory inspection and modification over a unix socket + TCP) and the client plane (real GUI/rendering: screenshots and Screen-level clicks, method group gui.*).",
 	"authors": [
 		"mcdebug"
 	],
@@ -11,15 +11,28 @@
 		"homepage": "https://github.com/yu1745/mcdebug"
 	},
 	"license": "MIT",
-	"environment": "server",
+	"environment": "*",
 	"entrypoints": {
 		"server": [
 			{
 				"adapter": "kotlin",
 				"value": "com.mcdebug.McDebugMod"
 			}
+		],
+		"client": [
+			{
+				"adapter": "kotlin",
+				"value": "com.mcdebug.client.McDebugClientMod"
+			}
 		]
 	},
+	"mixins": [
+		"mcdebug.mixins.json",
+		{
+			"config": "mcdebug.client.mixins.json",
+			"environment": "client"
+		}
+	],
 	"depends": {
 		"fabricloader": ">=0.14.21",
 		"minecraft": "~1.21.1",

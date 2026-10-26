@@ -292,6 +292,71 @@ class ServerApi(private val rpc: RpcClient) {
         rpc.call("server.runCommand", params { p("command", command); p("dim", dim) })
 }
 
+/**
+ * 客户端平面（`gui.*`）类型化 API。**必须**用客户端平面的 [RpcClient]（见
+ * `withClientPlane` / `clientPlaneOptions()`）——服务端平面上这些方法不存在。
+ *
+ * 与 `screen.*`（[ScreenApi]）的区别：`screen.*` 在服务端用假玩家开容器、只返回槽位
+ * JSON（没有像素）；`gui.*` 在真实客户端里渲染、截图、派发 Screen 事件。
+ */
+class GuiApi(private val rpc: RpcClient) {
+    fun status(): JsonElement = rpc.call("gui.status")
+
+    fun connect(host: String, name: String? = null, waitTicks: Int? = null): JsonElement =
+        rpc.call("gui.connect", params { p("host", host); p("name", name); p("waitTicks", waitTicks) })
+
+    fun openBlock(
+        pos: Pos,
+        face: String? = null,
+        dim: String? = null,
+        hand: String? = null,
+        sneak: Boolean? = null,
+        clearHand: Boolean? = null,
+        waitTicks: Int? = null,
+    ): JsonElement = rpc.call("gui.openBlock", params {
+        p("pos", pos); p("face", face); p("dimension", dim); p("hand", hand)
+        p("sneak", sneak); p("clearHand", clearHand); p("waitTicks", waitTicks)
+    })
+
+    fun screenshot(mode: String? = null, inline: Boolean? = null, name: String? = null, delayTicks: Int? = null): JsonElement =
+        rpc.call("gui.screenshot", params { p("mode", mode); p("inline", inline); p("name", name); p("delayTicks", delayTicks) })
+
+    fun screen(): JsonElement = rpc.call("gui.screen")
+
+    /** 按槽位点击（走 `handleInventoryMouseClick`，服务端裁定结果）。 */
+    fun clickSlot(slot: Int, button: Int? = null, clickType: String? = null, waitTicks: Int? = null, moveCursor: Boolean? = null): JsonElement =
+        rpc.call("gui.click", params {
+            p("slot", slot); p("button", button); p("clickType", clickType)
+            p("waitTicks", waitTicks); p("moveCursor", moveCursor)
+        })
+
+    /** 按控件文本点击（大小写不敏感，`index` 选第几个匹配）。 */
+    fun clickText(text: String, index: Int? = null, button: Int? = null, waitTicks: Int? = null, moveCursor: Boolean? = null): JsonElement =
+        rpc.call("gui.click", params {
+            p("text", text); p("index", index); p("button", button)
+            p("waitTicks", waitTicks); p("moveCursor", moveCursor)
+        })
+
+    /** 按 GUI 单位坐标点击。 */
+    fun clickGui(x: Double, y: Double, button: Int? = null, waitTicks: Int? = null, moveCursor: Boolean? = null): JsonElement =
+        rpc.call("gui.click", params {
+            p("gui", listOf(x, y)); p("button", button)
+            p("waitTicks", waitTicks); p("moveCursor", moveCursor)
+        })
+
+    /** 按**上一张截图**的 PNG 像素坐标点击（自动换算回 GUI 单位）。 */
+    fun clickPng(x: Double, y: Double, button: Int? = null, waitTicks: Int? = null, moveCursor: Boolean? = null): JsonElement =
+        rpc.call("gui.click", params {
+            p("png", listOf(x, y)); p("button", button)
+            p("waitTicks", waitTicks); p("moveCursor", moveCursor)
+        })
+
+    fun close(waitTicks: Int? = null): JsonElement =
+        rpc.call("gui.close", params { p("waitTicks", waitTicks) })
+
+    fun reloadResources(): JsonElement = rpc.call("gui.reloadResources")
+}
+
 class DebugApi(val rpc: RpcClient) {
     val world = WorldApi(rpc)
     val be = BeApi(rpc)
@@ -308,4 +373,7 @@ class DebugApi(val rpc: RpcClient) {
     val craft = CraftApi(rpc)
     val scan = ScanApi(rpc)
     val server = ServerApi(rpc)
+
+    /** 客户端平面 API：只有用客户端平面的 [RpcClient] 构造时才有意义。 */
+    val gui = GuiApi(rpc)
 }
