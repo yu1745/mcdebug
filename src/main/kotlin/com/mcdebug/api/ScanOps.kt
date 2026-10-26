@@ -10,13 +10,13 @@ import com.mcdebug.rpc.RpcHandler
 import com.mcdebug.rpc.RpcHandlerGroup
 import com.mcdebug.util.NbtJson
 import com.mcdebug.util.ServerContext
-import net.minecraft.entity.Entity
-import net.minecraft.entity.LivingEntity
-import net.minecraft.registry.Registries
+import net.minecraft.world.entity.Entity
+import net.minecraft.world.entity.LivingEntity
+import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.server.MinecraftServer
-import net.minecraft.util.math.BlockPos
-import net.minecraft.util.math.Box
-import net.minecraft.util.math.Vec3d
+import net.minecraft.core.BlockPos
+import net.minecraft.world.phys.AABB
+import net.minecraft.world.phys.Vec3
 import java.util.concurrent.CompletableFuture
 
 object ScanOps : RpcHandlerGroup {
@@ -39,7 +39,7 @@ object ScanOps : RpcHandlerGroup {
             val target = ServerContext.blockById(server, blockId)
             val positions = JsonArray()
             var n = 0
-            BlockPos.iterate(box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ).forEach { pos ->
+            BlockPos.betweenClosed(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ()).forEach { pos ->
                 if (world.getBlockState(pos).block == target) {
                     positions.add(ServerContext.posAsJson(pos))
                     n++
@@ -60,9 +60,9 @@ object ScanOps : RpcHandlerGroup {
             val box = ServerContext.boxFrom(from, to)
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val counts = HashMap<String, Int>()
-            BlockPos.iterate(box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ).forEach { pos ->
+            BlockPos.betweenClosed(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ()).forEach { pos ->
                 val state = world.getBlockState(pos)
-                val key = Registries.BLOCK.getId(state.block).toString()
+                val key = BuiltInRegistries.BLOCK.getKey(state.block).toString()
                 counts.merge(key, 1) { a, b -> a + b }
             }
             JsonObject().apply {
@@ -87,36 +87,36 @@ object ScanOps : RpcHandlerGroup {
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val includeNbt = p.getBoolOrFalse("includeNbt")
 
-            // Use double-precision box for entity iteration (entities use Vec3d, not BlockPos)
-            val entityBox = Box(
+            // Use double-precision box for entity iteration (entities use Vec3, not BlockPos)
+            val entityBox = AABB(
                 from.x.toDouble(), from.y.toDouble(), from.z.toDouble(),
                 to.x.toDouble(), to.y.toDouble(), to.z.toDouble()
-            ).expand(1.0) // +1 block margin to catch entities on the edge
+            ).inflate(1.0) // +1 block margin to catch entities on the edge
 
             val typeId = p.getStringOrNull("type")
             lateinit var entityTypeFilter: (Entity) -> Boolean
             if (typeId != null) {
-                val identifier = net.minecraft.util.Identifier.tryParse(typeId)
+                val identifier = net.minecraft.resources.ResourceLocation.tryParse(typeId)
                     ?: throw RpcException(RpcErrors.INVALID_PARAMS, "invalid entity type: $typeId")
-                val key = net.minecraft.registry.RegistryKey.of(
-                    net.minecraft.registry.RegistryKeys.ENTITY_TYPE, identifier
+                val key = net.minecraft.resources.ResourceKey.create(
+                    net.minecraft.core.registries.Registries.ENTITY_TYPE, identifier
                 )
-                val resolved: net.minecraft.entity.EntityType<*> = server.registryManager
-                    .get(net.minecraft.registry.RegistryKeys.ENTITY_TYPE)
-                    .getOrEmpty(key)
-                    .orElseThrow { RpcException(RpcErrors.INVALID_PARAMS, "entity type not registered: $typeId") }
+                val resolved: net.minecraft.world.entity.EntityType<*> =
+                    server.registryAccess().registryOrThrow(net.minecraft.core.registries.Registries.ENTITY_TYPE)
+                        .get(key)
+                        ?: throw RpcException(RpcErrors.INVALID_PARAMS, "entity type not registered: $typeId")
                 entityTypeFilter = { e: Entity -> e.type == resolved }
             } else {
                 entityTypeFilter = { _: Entity -> true }
             }
 
-            val entities = world.getOtherEntities(null, entityBox, entityTypeFilter)
+            val entities = world.getEntities(null, entityBox, entityTypeFilter)
             val results = JsonArray()
             for (entity in entities) {
                 val entry = JsonObject().apply {
-                    addProperty("type", Registries.ENTITY_TYPE.getId(entity.type).toString())
-                    addProperty("uuid", entity.uuidAsString)
-                    val pos = entity.pos
+                    addProperty("type", BuiltInRegistries.ENTITY_TYPE.getKey(entity.type).toString())
+                    addProperty("uuid", entity.getStringUUID())
+                    val pos = entity.position()
                     addProperty("x", pos.x)
                     addProperty("y", pos.y)
                     addProperty("z", pos.z)
@@ -125,7 +125,7 @@ object ScanOps : RpcHandlerGroup {
                         addProperty("maxHealth", entity.maxHealth)
                     }
                     if (includeNbt) {
-                        val nbt = entity.writeNbt(net.minecraft.nbt.NbtCompound())
+                        val nbt = entity.saveWithoutId(net.minecraft.nbt.CompoundTag())
                         add("nbt", NbtJson.toJson(nbt))
                     }
                 }

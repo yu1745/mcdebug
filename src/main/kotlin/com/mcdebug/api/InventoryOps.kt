@@ -8,8 +8,8 @@ import com.mcdebug.rpc.RpcException
 import com.mcdebug.rpc.RpcHandler
 import com.mcdebug.rpc.RpcHandlerGroup
 import com.mcdebug.util.ServerContext
-import net.minecraft.inventory.Inventory
-import net.minecraft.item.ItemStack
+import net.minecraft.world.Container
+import net.minecraft.world.item.ItemStack
 import net.minecraft.server.MinecraftServer
 import java.util.concurrent.CompletableFuture
 
@@ -26,7 +26,7 @@ object InventoryOps : RpcHandlerGroup {
         RpcContext.onServer(server) {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
             val inv = resolveInv(server, p)
-            JsonObject().apply { addProperty("size", inv.size()) }
+            JsonObject().apply { addProperty("size", inv.containerSize) }
         }
 
     private fun getSlot(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
@@ -35,8 +35,8 @@ object InventoryOps : RpcHandlerGroup {
             val inv = resolveInv(server, p)
             val slot = p.requireString("slot").toIntOrNull() ?: throw RpcException(RpcErrors.INVALID_PARAMS, "slot must be int")
             requireSlot(inv, slot)
-            val stack = inv.getStack(slot)
-            val max = if (stack.isEmpty) 64 else stack.maxCount
+            val stack = inv.getItem(slot)
+            val max = if (stack.isEmpty) 64 else stack.maxStackSize
             JsonObject().apply {
                 add("slot", ServerContext.itemStackToJson(stack))
                 addProperty("maxCount", max)
@@ -53,8 +53,8 @@ object InventoryOps : RpcHandlerGroup {
             val count = p.getIntOr("count", 0)
             val nbtJson = p.get("nbt")
             val stack = ServerContext.itemStackFromJson(server, itemId, count, nbtJson)
-            inv.setStack(slot, stack)
-            inv.markDirty()
+            inv.setItem(slot, stack)
+            inv.setChanged()
             JsonObject().apply { addProperty("ok", true) }
         }
 
@@ -75,49 +75,49 @@ object InventoryOps : RpcHandlerGroup {
             val original = stack.count
             var remaining = stack.count
             if (targetSlot != null) {
-                val current = inv.getStack(targetSlot)
+                val current = inv.getItem(targetSlot)
                 if (current.isEmpty) {
-                    if (!simulate) inv.setStack(targetSlot, stack)
+                    if (!simulate) inv.setItem(targetSlot, stack)
                     remaining = 0
-                } else if (ItemStack.areItemsAndComponentsEqual(current, stack) && current.count < current.maxCount) {
-                    val space = current.maxCount - current.count
+                } else if (ItemStack.isSameItemSameComponents(current, stack) && current.count < current.maxStackSize) {
+                    val space = current.maxStackSize - current.count
                     val toAdd = minOf(space, remaining)
                     if (!simulate) {
                         val newStack = current.copy()
                         newStack.count = current.count + toAdd
-                        inv.setStack(targetSlot, newStack)
+                        inv.setItem(targetSlot, newStack)
                     }
                     remaining -= toAdd
                 }
             } else {
                 // First pass: stack onto existing same-item stacks
-                for (i in 0 until inv.size()) {
+                for (i in 0 until inv.containerSize) {
                     if (remaining <= 0) break
-                    val current = inv.getStack(i)
-                    if (current.isEmpty || !ItemStack.areItemsAndComponentsEqual(current, stack)) continue
-                    if (current.count >= current.maxCount) continue
-                    val space = current.maxCount - current.count
+                    val current = inv.getItem(i)
+                    if (current.isEmpty || !ItemStack.isSameItemSameComponents(current, stack)) continue
+                    if (current.count >= current.maxStackSize) continue
+                    val space = current.maxStackSize - current.count
                     val toAdd = minOf(space, remaining)
                     if (!simulate) {
                         val newStack = current.copy()
                         newStack.count = current.count + toAdd
-                        inv.setStack(i, newStack)
+                        inv.setItem(i, newStack)
                     }
                     remaining -= toAdd
                 }
                 // Second pass: fill empty slots
-                for (i in 0 until inv.size()) {
+                for (i in 0 until inv.containerSize) {
                     if (remaining <= 0) break
-                    val current = inv.getStack(i)
+                    val current = inv.getItem(i)
                     if (!current.isEmpty) continue
-                    val toAdd = minOf(stack.maxCount, remaining)
+                    val toAdd = minOf(stack.maxStackSize, remaining)
                     val newStack = stack.copy()
                     newStack.count = toAdd
-                    if (!simulate) inv.setStack(i, newStack)
+                    if (!simulate) inv.setItem(i, newStack)
                     remaining -= toAdd
                 }
             }
-            if (!simulate) inv.markDirty()
+            if (!simulate) inv.setChanged()
             JsonObject().apply {
                 addProperty("inserted", original - remaining)
                 addProperty("remaining", remaining)
@@ -140,31 +140,31 @@ object InventoryOps : RpcHandlerGroup {
             val maxExtract = count
             var remaining = maxExtract
             if (targetSlot != null) {
-                val current = inv.getStack(targetSlot)
-                if (!current.isEmpty && ItemStack.areItemsAndComponentsEqual(current, target)) {
+                val current = inv.getItem(targetSlot)
+                if (!current.isEmpty && ItemStack.isSameItemSameComponents(current, target)) {
                     val take = minOf(current.count, remaining)
                     if (!simulate) {
                         val newStack = current.copy()
                         newStack.count = current.count - take
-                        inv.setStack(targetSlot, newStack)
+                        inv.setItem(targetSlot, newStack)
                     }
                     remaining -= take
                 }
             } else {
-                for (i in 0 until inv.size()) {
+                for (i in 0 until inv.containerSize) {
                     if (remaining <= 0) break
-                    val current = inv.getStack(i)
-                    if (current.isEmpty || !ItemStack.areItemsAndComponentsEqual(current, target)) continue
+                    val current = inv.getItem(i)
+                    if (current.isEmpty || !ItemStack.isSameItemSameComponents(current, target)) continue
                     val take = minOf(current.count, remaining)
                     if (!simulate) {
                         val newStack = current.copy()
                         newStack.count = current.count - take
-                        inv.setStack(i, newStack)
+                        inv.setItem(i, newStack)
                     }
                     remaining -= take
                 }
             }
-            if (!simulate) inv.markDirty()
+            if (!simulate) inv.setChanged()
             JsonObject().apply {
                 addProperty("extracted", maxExtract - remaining)
                 addProperty("remaining", remaining)
@@ -173,15 +173,15 @@ object InventoryOps : RpcHandlerGroup {
 
     // ---- helpers ----
 
-    private fun resolveInv(server: MinecraftServer, p: JsonObject): Inventory {
+    private fun resolveInv(server: MinecraftServer, p: JsonObject): Container {
         val pos = ServerContext.pos(p.getAsJsonArray("pos"))
         val world = ServerContext.world(server, p.getStringOrNull("dim"))
         return ServerContext.inventory(world, pos)
     }
 
-    private fun requireSlot(inv: Inventory, slot: Int) {
-        if (slot < 0 || slot >= inv.size()) {
-            throw RpcException(RpcErrors.SLOT_OUT_OF_RANGE, "slot $slot out of range [0, ${inv.size()})")
+    private fun requireSlot(inv: Container, slot: Int) {
+        if (slot < 0 || slot >= inv.containerSize) {
+            throw RpcException(RpcErrors.SLOT_OUT_OF_RANGE, "slot $slot out of range [0, ${inv.containerSize})")
         }
     }
 }

@@ -10,23 +10,23 @@ import com.mcdebug.rpc.RpcHandler
 import com.mcdebug.rpc.RpcHandlerGroup
 import com.mcdebug.util.NbtJson
 import com.mcdebug.util.ServerContext
-import net.minecraft.entity.Entity
-import net.minecraft.entity.EntityType
-import net.minecraft.entity.ItemEntity
-import net.minecraft.entity.LivingEntity
-import net.minecraft.nbt.NbtCompound
-import net.minecraft.nbt.NbtDouble
-import net.minecraft.nbt.NbtFloat
-import net.minecraft.nbt.NbtList
-import net.minecraft.network.packet.s2c.play.PositionFlag
-import net.minecraft.registry.RegistryKey
-import net.minecraft.registry.RegistryKeys
-import net.minecraft.registry.Registries
+import net.minecraft.world.entity.Entity
+import net.minecraft.world.entity.EntityType
+import net.minecraft.world.entity.item.ItemEntity
+import net.minecraft.world.entity.LivingEntity
+import net.minecraft.nbt.CompoundTag
+import net.minecraft.nbt.DoubleTag
+import net.minecraft.nbt.FloatTag
+import net.minecraft.nbt.ListTag
+import net.minecraft.world.entity.RelativeMovement
+import net.minecraft.resources.ResourceKey
+import net.minecraft.core.registries.BuiltInRegistries
+import net.minecraft.core.registries.Registries
 import net.minecraft.server.MinecraftServer
-import net.minecraft.server.world.ServerWorld
-import net.minecraft.util.Identifier
-import net.minecraft.util.math.BlockPos
-import net.minecraft.util.math.Box
+import net.minecraft.server.level.ServerLevel
+import net.minecraft.resources.ResourceLocation
+import net.minecraft.core.BlockPos
+import net.minecraft.world.phys.AABB
 import java.util.Collections
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
@@ -53,14 +53,14 @@ object EntityOps : RpcHandlerGroup {
             val pos = p.getVec3("pos")
             val yaw = p.getFloatOr("yaw", 0f)
             val pitch = p.getFloatOr("pitch", 0f)
-            entity.refreshPositionAndAngles(pos.x, pos.y, pos.z, yaw, pitch)
+            entity.moveTo(pos.x, pos.y, pos.z, yaw, pitch)
             applySpawnNbt(server, entity, typeId, pos, yaw, pitch, p.get("nbt"))
             if (entity is ItemEntity && p.has("stack") && !p.get("stack").isJsonNull) {
                 val stackObj = p.requireObject("stack")
                 val itemId = stackObj.getStringOrNull("item") ?: "minecraft:air"
-                entity.setStack(ServerContext.itemStackFromJson(server, itemId, stackObj.getIntOr("count", 0), stackObj.get("nbt")))
+                entity.setItem(ServerContext.itemStackFromJson(server, itemId, stackObj.getIntOr("count", 0), stackObj.get("nbt")))
             }
-            val spawned = world.spawnEntity(entity)
+            val spawned = world.addFreshEntity(entity)
             JsonObject().apply {
                 addProperty("spawned", spawned)
                 add("entity", entityToJson(entity, includeNbt = p.getBoolOrFalse("includeNbt")))
@@ -73,7 +73,7 @@ object EntityOps : RpcHandlerGroup {
             val (_, entity) = resolveEntity(server, p)
             JsonObject().apply {
                 add("entity", entityToJson(entity, includeNbt = false))
-                add("nbt", NbtJson.toJson(entity.writeNbt(NbtCompound())))
+                add("nbt", NbtJson.toJson(entity.saveWithoutId(CompoundTag())))
             }
         }
 
@@ -82,15 +82,15 @@ object EntityOps : RpcHandlerGroup {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
             val (_, entity) = resolveEntity(server, p)
             val patch = p.get("nbt") ?: throw RpcException(RpcErrors.INVALID_PARAMS, "nbt required")
-            val patchNbt = NbtJson.fromJson(patch) as? NbtCompound
+            val patchNbt = NbtJson.fromJson(patch) as? CompoundTag
                 ?: throw RpcException(RpcErrors.NBT_PARSE_ERROR, "nbt must be a JSON object")
             val replace = p.getBoolOrFalse("replace")
-            val nbt = if (replace) patchNbt else entity.writeNbt(NbtCompound()).also { mergeNbt(it, patchNbt) }
+            val nbt = if (replace) patchNbt else entity.saveWithoutId(CompoundTag()).also { mergeNbt(it, patchNbt) }
             if (!replace) {
-                nbt.putUuid("UUID", entity.uuid)
-                nbt.putString("id", Registries.ENTITY_TYPE.getId(entity.type).toString())
+                nbt.putUUID("UUID", entity.uuid)
+                nbt.putString("id", BuiltInRegistries.ENTITY_TYPE.getKey(entity.type).toString())
             }
-            entity.readNbt(nbt)
+            entity.load(nbt)
             JsonObject().apply { add("entity", entityToJson(entity, includeNbt = true)) }
         }
 
@@ -98,11 +98,11 @@ object EntityOps : RpcHandlerGroup {
         RpcContext.onServer(server) {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
             val (currentWorld, entity) = resolveEntity(server, p)
-            val targetWorld = ServerContext.world(server, p.getStringOrNull("toDim") ?: p.getStringOrNull("targetDim") ?: currentWorld.registryKey.value.toString())
+            val targetWorld = ServerContext.world(server, p.getStringOrNull("toDim") ?: p.getStringOrNull("targetDim") ?: currentWorld.dimension().location().toString())
             val pos = p.getVec3("pos")
-            val yaw = p.getFloatOr("yaw", entity.yaw)
-            val pitch = p.getFloatOr("pitch", entity.pitch)
-            val ok = entity.teleport(targetWorld, pos.x, pos.y, pos.z, Collections.emptySet<PositionFlag>(), yaw, pitch)
+            val yaw = p.getFloatOr("yaw", entity.yRot)
+            val pitch = p.getFloatOr("pitch", entity.xRot)
+            val ok = entity.teleportTo(targetWorld, pos.x, pos.y, pos.z, Collections.emptySet<RelativeMovement>(), yaw, pitch)
             JsonObject().apply {
                 addProperty("teleported", ok)
                 add("entity", entityToJson(entity, includeNbt = p.getBoolOrFalse("includeNbt")))
@@ -156,26 +156,26 @@ object EntityOps : RpcHandlerGroup {
 
     internal fun entityToJson(entity: Entity, includeNbt: Boolean): JsonObject =
         JsonObject().apply {
-            addProperty("type", Registries.ENTITY_TYPE.getId(entity.type).toString())
-            addProperty("uuid", entity.uuidAsString)
-            addProperty("dim", entity.world.registryKey.value.toString())
+            addProperty("type", BuiltInRegistries.ENTITY_TYPE.getKey(entity.type).toString())
+            addProperty("uuid", entity.getStringUUID())
+            addProperty("dim", entity.level().dimension().location().toString())
             addProperty("x", entity.x)
             addProperty("y", entity.y)
             addProperty("z", entity.z)
-            addProperty("yaw", entity.yaw)
-            addProperty("pitch", entity.pitch)
+            addProperty("yaw", entity.yRot)
+            addProperty("pitch", entity.xRot)
             addProperty("removed", entity.isRemoved)
             if (entity is LivingEntity) {
                 addProperty("health", entity.health)
                 addProperty("maxHealth", entity.maxHealth)
             }
             if (entity is ItemEntity) {
-                add("stack", ServerContext.itemStackToJson(entity.stack))
+                add("stack", ServerContext.itemStackToJson(entity.item))
             }
-            if (includeNbt) add("nbt", NbtJson.toJson(entity.writeNbt(NbtCompound())))
+            if (includeNbt) add("nbt", NbtJson.toJson(entity.saveWithoutId(CompoundTag())))
         }
 
-    private fun resolveEntity(server: MinecraftServer, p: JsonObject): Pair<ServerWorld, Entity> {
+    private fun resolveEntity(server: MinecraftServer, p: JsonObject): Pair<ServerLevel, Entity> {
         val uuid = try {
             UUID.fromString(p.getStringOrNull("uuid") ?: p.getStringOrNull("entityUuid") ?: "")
         } catch (_: IllegalArgumentException) {
@@ -187,7 +187,7 @@ object EntityOps : RpcHandlerGroup {
             val entity = world.getEntity(uuid) ?: throwEntityNotFound(uuid)
             return world to entity
         }
-        for (world in server.worlds) {
+        for (world in server.getAllLevels()) {
             val entity = world.getEntity(uuid)
             if (entity != null) return world to entity
         }
@@ -195,12 +195,11 @@ object EntityOps : RpcHandlerGroup {
     }
 
     private fun resolveEntityType(server: MinecraftServer, typeId: String): EntityType<*> {
-        val identifier = Identifier.tryParse(typeId)
+        val identifier = ResourceLocation.tryParse(typeId)
             ?: throw RpcException(RpcErrors.INVALID_PARAMS, "invalid entity type: $typeId")
-        val key = RegistryKey.of(RegistryKeys.ENTITY_TYPE, identifier)
-        return server.registryManager.get(RegistryKeys.ENTITY_TYPE).getOrEmpty(key).orElseThrow {
-            RpcException(RpcErrors.INVALID_PARAMS, "entity type not registered: $typeId")
-        }
+        val key = ResourceKey.create(Registries.ENTITY_TYPE, identifier)
+        return server.registryAccess().registryOrThrow(Registries.ENTITY_TYPE).get(key)
+            ?: throw RpcException(RpcErrors.INVALID_PARAMS, "entity type not registered: $typeId")
     }
 
     private fun applySpawnNbt(
@@ -213,28 +212,28 @@ object EntityOps : RpcHandlerGroup {
         patchJson: JsonElement?,
     ) {
         if (patchJson == null || patchJson.isJsonNull) return
-        val patch = NbtJson.fromJson(patchJson) as? NbtCompound
+        val patch = NbtJson.fromJson(patchJson) as? CompoundTag
             ?: throw RpcException(RpcErrors.NBT_PARSE_ERROR, "nbt must be a JSON object")
-        val nbt = entity.writeNbt(NbtCompound())
+        val nbt = entity.saveWithoutId(CompoundTag())
         mergeNbt(nbt, patch)
         nbt.putString("id", typeId)
         nbt.put("Pos", doubleList(pos.x, pos.y, pos.z))
         nbt.put("Rotation", floatList(yaw, pitch))
-        if (!patch.containsUuid("UUID")) nbt.putUuid("UUID", entity.uuid)
-        entity.readNbt(nbt)
+        if (!patch.hasUUID("UUID")) nbt.putUUID("UUID", entity.uuid)
+        entity.load(nbt)
     }
 
-    private fun itemEntities(world: ServerWorld, box: Box, item: String?): List<ItemEntity> =
-        world.getOtherEntities(null, box) { entity ->
-            if (entity !is ItemEntity) return@getOtherEntities false
-            item == null || Registries.ITEM.getId(entity.stack.item).toString() == item
+    private fun itemEntities(world: ServerLevel, box: AABB, item: String?): List<ItemEntity> =
+        world.getEntities(null, box) { entity ->
+            if (entity !is ItemEntity) return@getEntities false
+            item == null || BuiltInRegistries.ITEM.getKey(entity.item.item).toString() == item
         }.filterIsInstance<ItemEntity>()
 
-    private fun entityBoxFromParams(p: JsonObject): Box {
+    private fun entityBoxFromParams(p: JsonObject): AABB {
         val boxObj = p.getAsJsonObject("box") ?: throw RpcException(RpcErrors.INVALID_PARAMS, "box required")
         val from = ServerContext.pos(boxObj.getAsJsonArray("from"))
         val to = ServerContext.pos(boxObj.getAsJsonArray("to"))
-        return Box(
+        return AABB(
             minOf(from.x, to.x).toDouble(),
             minOf(from.y, to.y).toDouble(),
             minOf(from.z, to.z).toDouble(),
@@ -253,21 +252,21 @@ object EntityOps : RpcHandlerGroup {
     private fun JsonObject.getFloatOr(name: String, default: Float): Float =
         if (has(name) && !get(name).isJsonNull) get(name).asFloat else default
 
-    private fun mergeNbt(base: NbtCompound, patch: NbtCompound) {
-        patch.keys.forEach { key -> base.put(key, patch[key]!!.copy()) }
+    private fun mergeNbt(base: CompoundTag, patch: CompoundTag) {
+        patch.allKeys.forEach { key -> base.put(key, patch[key]!!.copy()) }
     }
 
-    private fun doubleList(x: Double, y: Double, z: Double): NbtList =
-        NbtList().apply {
-            add(NbtDouble.of(x))
-            add(NbtDouble.of(y))
-            add(NbtDouble.of(z))
+    private fun doubleList(x: Double, y: Double, z: Double): ListTag =
+        ListTag().apply {
+            add(DoubleTag.valueOf(x))
+            add(DoubleTag.valueOf(y))
+            add(DoubleTag.valueOf(z))
         }
 
-    private fun floatList(yaw: Float, pitch: Float): NbtList =
-        NbtList().apply {
-            add(NbtFloat.of(yaw))
-            add(NbtFloat.of(pitch))
+    private fun floatList(yaw: Float, pitch: Float): ListTag =
+        ListTag().apply {
+            add(FloatTag.valueOf(yaw))
+            add(FloatTag.valueOf(pitch))
         }
 
     private fun throwEntityNotFound(uuid: UUID): Nothing {

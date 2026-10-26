@@ -11,13 +11,13 @@ import com.mcdebug.rpc.RpcHandler
 import com.mcdebug.rpc.RpcHandlerGroup
 import com.mcdebug.util.NbtJson
 import com.mcdebug.util.ServerContext
-import net.minecraft.entity.LivingEntity
-import net.minecraft.registry.Registries
+import net.minecraft.world.entity.LivingEntity
+import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.server.MinecraftServer
-import net.minecraft.server.world.ServerWorld
-import net.minecraft.util.math.BlockBox
-import net.minecraft.util.math.Box
-import net.minecraft.util.math.BlockPos
+import net.minecraft.server.level.ServerLevel
+import net.minecraft.world.level.levelgen.structure.BoundingBox
+import net.minecraft.world.phys.AABB
+import net.minecraft.core.BlockPos
 import java.util.concurrent.CompletableFuture
 
 object SnapshotOps : RpcHandlerGroup {
@@ -71,15 +71,15 @@ object SnapshotOps : RpcHandlerGroup {
 
     internal fun captureSnapshot(
         server: MinecraftServer,
-        world: ServerWorld,
-        box: BlockBox,
+        world: ServerLevel,
+        box: BoundingBox,
         include: Set<SnapshotKind>,
     ): JsonObject {
         ensureChunksLoaded(world, box)
         return JsonObject().apply {
-            addProperty("dim", world.registryKey.value.toString())
-            addProperty("tick", server.ticks)
-            addProperty("time", world.time)
+            addProperty("dim", world.dimension().location().toString())
+            addProperty("tick", server.tickCount)
+            addProperty("time", world.gameTime)
             add("box", boxToJson(box))
             add("include", JsonArray().apply { include.forEach { add(it.wireName) } })
             if (include.any { it != SnapshotKind.ENTITY }) {
@@ -102,9 +102,9 @@ object SnapshotOps : RpcHandlerGroup {
         return out
     }
 
-    private fun captureBlocks(world: ServerWorld, box: BlockBox, include: Set<SnapshotKind>): JsonArray =
+    private fun captureBlocks(world: ServerLevel, box: BoundingBox, include: Set<SnapshotKind>): JsonArray =
         JsonArray().apply {
-            BlockPos.iterate(box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ).forEach { mutablePos ->
+            BlockPos.betweenClosed(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ()).forEach { mutablePos ->
                 val pos = BlockPos(mutablePos)
                 val state = world.getBlockState(pos)
                 val be = world.getBlockEntity(pos)
@@ -114,7 +114,7 @@ object SnapshotOps : RpcHandlerGroup {
                         add("state", ServerContext.blockStateToJson(state))
                     }
                     if (SnapshotKind.BLOCK_ENTITY_NBT in include && be != null) {
-                        add("blockEntityNbt", NbtJson.toJson(be.createNbt(world.registryManager)))
+                        add("blockEntityNbt", NbtJson.toJson(be.saveWithoutMetadata(world.registryAccess())))
                     }
                     if ((SnapshotKind.INVENTORY in include || SnapshotKind.FLUID in include || SnapshotKind.ENERGY in include) && be != null) {
                         val resources = StorageOps.blockResourcesToJson(world, pos)
@@ -149,16 +149,16 @@ object SnapshotOps : RpcHandlerGroup {
             else -> false
         }
 
-    private fun captureEntities(world: ServerWorld, box: BlockBox): JsonArray {
-        val query = Box(
-            box.minX.toDouble(), box.minY.toDouble(), box.minZ.toDouble(),
-            (box.maxX + 1).toDouble(), (box.maxY + 1).toDouble(), (box.maxZ + 1).toDouble()
+    private fun captureEntities(world: ServerLevel, box: BoundingBox): JsonArray {
+        val query = AABB(
+            box.minX().toDouble(), box.minY().toDouble(), box.minZ().toDouble(),
+            (box.maxX() + 1).toDouble(), (box.maxY() + 1).toDouble(), (box.maxZ() + 1).toDouble()
         )
         return JsonArray().apply {
-            world.getOtherEntities(null, query).forEach { entity ->
+            world.getEntities(null, query).forEach { entity ->
                 add(JsonObject().apply {
-                    addProperty("type", Registries.ENTITY_TYPE.getId(entity.type).toString())
-                    addProperty("uuid", entity.uuidAsString)
+                    addProperty("type", BuiltInRegistries.ENTITY_TYPE.getKey(entity.type).toString())
+                    addProperty("uuid", entity.getStringUUID())
                     addProperty("id", entity.id)
                     add("pos", JsonArray().apply {
                         add(entity.x)
@@ -169,16 +169,16 @@ object SnapshotOps : RpcHandlerGroup {
                         addProperty("health", entity.health)
                         addProperty("maxHealth", entity.maxHealth)
                     }
-                    add("nbt", NbtJson.toJson(entity.writeNbt(net.minecraft.nbt.NbtCompound())))
+                    add("nbt", NbtJson.toJson(entity.saveWithoutId(net.minecraft.nbt.CompoundTag())))
                 })
             }
         }
     }
 
-    private fun boxToJson(box: BlockBox): JsonObject =
+    private fun boxToJson(box: BoundingBox): JsonObject =
         JsonObject().apply {
-            add("from", JsonArray().apply { add(box.minX); add(box.minY); add(box.minZ) })
-            add("to", JsonArray().apply { add(box.maxX); add(box.maxY); add(box.maxZ) })
+            add("from", JsonArray().apply { add(box.minX()); add(box.minY()); add(box.minZ()) })
+            add("to", JsonArray().apply { add(box.maxX()); add(box.maxY()); add(box.maxZ()) })
         }
 
     private fun diffJson(before: JsonElement, after: JsonElement): JsonObject {

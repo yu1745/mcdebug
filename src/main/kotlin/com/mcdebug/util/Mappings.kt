@@ -8,7 +8,7 @@ import java.util.zip.GZIPInputStream
 /**
  * Lazy-loaded Minecraft name mapper supporting all three naming schemes:
  *   - intermediary (runtime): class_1309, method_6076, field_6222
- *   - yarn (named):           net.minecraft.entity.LivingEntity, tickActiveItemStack
+ *   - yarn (named):           net.minecraft.world.entity.LivingEntity, tickActiveItemStack
  *   - mojang (official):      net.minecraft.world.entity.LivingEntity, tick
  *
  * At runtime (Fabric Loader + Kilt) Minecraft classes are remapped to

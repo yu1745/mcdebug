@@ -10,12 +10,12 @@ import com.mcdebug.rpc.RpcHandler
 import com.mcdebug.rpc.RpcHandlerGroup
 import com.mcdebug.util.ServerContext
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents
-import net.minecraft.block.Block
-import net.minecraft.block.LeverBlock
+import net.minecraft.world.level.block.Block
+import net.minecraft.world.level.block.LeverBlock
 import net.minecraft.server.MinecraftServer
-import net.minecraft.server.world.ServerWorld
-import net.minecraft.util.math.BlockPos
-import net.minecraft.util.math.Direction
+import net.minecraft.server.level.ServerLevel
+import net.minecraft.core.BlockPos
+import net.minecraft.core.Direction
 import java.util.concurrent.CompletableFuture
 
 object RedstoneOps : RpcHandlerGroup {
@@ -56,9 +56,9 @@ object RedstoneOps : RpcHandlerGroup {
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             JsonObject().apply {
                 add("pos", ServerContext.posAsJson(pos))
-                addProperty("dim", world.registryKey.value.toString())
-                addProperty("powered", world.isReceivingRedstonePower(pos))
-                addProperty("received", world.getReceivedRedstonePower(pos))
+                addProperty("dim", world.dimension().location().toString())
+                addProperty("powered", world.hasNeighborSignal(pos))
+                addProperty("received", world.getSignal(pos, null))
             }
         }
 
@@ -80,12 +80,12 @@ object RedstoneOps : RpcHandlerGroup {
             if (ticks < 1) throw RpcException(RpcErrors.INVALID_PARAMS, "ticks must be >= 1")
             val result = setLeverPowered(world, pos, true)
             pulses.removeIf { it.world == world && it.pos == pos }
-            pulses.add(LeverPulse(world, pos, server.ticks + ticks))
+            pulses.add(LeverPulse(world, pos, server.tickCount + ticks))
             JsonObject().apply {
                 add("pos", ServerContext.posAsJson(pos))
-                addProperty("dim", world.registryKey.value.toString())
+                addProperty("dim", world.dimension().location().toString())
                 addProperty("powered", result.get("powered").asBoolean)
-                addProperty("offTick", server.ticks + ticks)
+                addProperty("offTick", server.tickCount + ticks)
             }
         }
 
@@ -95,10 +95,10 @@ object RedstoneOps : RpcHandlerGroup {
             val pos = ServerContext.pos(p.getAsJsonArray("pos"))
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val state = world.getBlockState(pos)
-            world.updateNeighborsAlways(pos, state.block)
+            world.updateNeighborsAt(pos, state.block)
             JsonObject().apply {
                 add("pos", ServerContext.posAsJson(pos))
-                addProperty("dim", world.registryKey.value.toString())
+                addProperty("dim", world.dimension().location().toString())
                 add("state", ServerContext.blockStateToJson(state))
                 addProperty("notified", true)
             }
@@ -106,13 +106,13 @@ object RedstoneOps : RpcHandlerGroup {
 
     private fun tick(server: MinecraftServer) {
         if (pulses.isEmpty()) return
-        val due = pulses.filter { server.ticks >= it.offTick }
+        val due = pulses.filter { server.tickCount >= it.offTick }
         if (due.isEmpty()) return
         pulses.removeAll(due.toSet())
         for (pulse in due) {
             try {
                 val state = pulse.world.getBlockState(pulse.pos)
-                if (state.block is LeverBlock && state.get(LeverBlock.POWERED)) {
+                if (state.block is LeverBlock && state.getValue(LeverBlock.POWERED)) {
                     setLeverPowered(pulse.world, pulse.pos, false)
                 }
             } catch (e: Exception) {
@@ -121,49 +121,49 @@ object RedstoneOps : RpcHandlerGroup {
         }
     }
 
-    private fun setLeverPowered(world: ServerWorld, pos: BlockPos, powered: Boolean): JsonObject {
+    private fun setLeverPowered(world: ServerLevel, pos: BlockPos, powered: Boolean): JsonObject {
         val state = world.getBlockState(pos)
         val lever = state.block as? LeverBlock
             ?: throw RpcException(RpcErrors.INVALID_PARAMS, "block at $pos is not a vanilla lever")
-        val before = state.get(LeverBlock.POWERED)
+        val before = state.getValue(LeverBlock.POWERED)
         //1.21: togglePower returns void and mutates the world; read the resulting state back
         val afterState = if (before != powered) {
-            lever.togglePower(state, world, pos, null)
+            lever.pull(state, world, pos, null)
             world.getBlockState(pos)
         } else state
-        if (before == powered) world.updateNeighborsAlways(pos, afterState.block)
+        if (before == powered) world.updateNeighborsAt(pos, afterState.block)
         return JsonObject().apply {
             add("pos", ServerContext.posAsJson(pos))
-            addProperty("dim", world.registryKey.value.toString())
+            addProperty("dim", world.dimension().location().toString())
             addProperty("changed", before != powered)
-            addProperty("powered", afterState.get(LeverBlock.POWERED))
+            addProperty("powered", afterState.getValue(LeverBlock.POWERED))
             add("state", ServerContext.blockStateToJson(afterState))
         }
     }
 
-    private fun powerSnapshot(world: ServerWorld, pos: BlockPos, side: Direction?): JsonObject =
+    private fun powerSnapshot(world: ServerLevel, pos: BlockPos, side: Direction?): JsonObject =
         JsonObject().apply {
             add("pos", ServerContext.posAsJson(pos))
-            addProperty("dim", world.registryKey.value.toString())
-            addProperty("powered", world.isReceivingRedstonePower(pos))
-            addProperty("received", world.getReceivedRedstonePower(pos))
+            addProperty("dim", world.dimension().location().toString())
+            addProperty("powered", world.hasNeighborSignal(pos))
+            addProperty("received", world.getSignal(pos, null))
             add("state", ServerContext.blockStateToJson(world.getBlockState(pos)))
             add("inputs", JsonObject().apply {
                 Direction.entries.forEach { dir ->
-                    addProperty(dir.name.lowercase(), world.getEmittedRedstonePower(pos.offset(dir), dir))
+                    addProperty(dir.name.lowercase(), world.getSignal(pos.relative(dir), dir))
                 }
             })
             add("outputs", JsonObject().apply {
                 Direction.entries.forEach { dir ->
-                    addProperty(dir.name.lowercase(), world.getEmittedRedstonePower(pos, dir))
+                    addProperty(dir.name.lowercase(), world.getSignal(pos, dir))
                 }
             })
             if (side != null) {
                 addProperty("side", side.name.lowercase())
-                addProperty("sideInput", world.getEmittedRedstonePower(pos.offset(side), side))
-                addProperty("sideOutput", world.getEmittedRedstonePower(pos, side))
+                addProperty("sideInput", world.getSignal(pos.relative(side), side))
+                addProperty("sideOutput", world.getSignal(pos, side))
             }
         }
 
-    private data class LeverPulse(val world: ServerWorld, val pos: BlockPos, val offTick: Int)
+    private data class LeverPulse(val world: ServerLevel, val pos: BlockPos, val offTick: Int)
 }

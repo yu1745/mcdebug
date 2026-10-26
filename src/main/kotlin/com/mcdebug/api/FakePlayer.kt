@@ -5,32 +5,32 @@ import com.mcdebug.rpc.RpcErrors
 import com.mcdebug.rpc.RpcException
 import com.mojang.authlib.GameProfile
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents
-import net.minecraft.entity.Entity
-import net.minecraft.network.ClientConnection
-import net.minecraft.network.NetworkSide
-import net.minecraft.network.packet.Packet
+import net.minecraft.world.entity.Entity
+import net.minecraft.network.Connection
+import net.minecraft.network.protocol.PacketFlow
+import net.minecraft.network.protocol.Packet
 import net.minecraft.server.MinecraftServer
-import net.minecraft.server.network.ServerPlayNetworkHandler
-import net.minecraft.server.network.ServerPlayerEntity
-import net.minecraft.server.world.ServerWorld
-import net.minecraft.world.GameMode
+import net.minecraft.server.network.ServerGamePacketListenerImpl
+import net.minecraft.server.level.ServerPlayer
+import net.minecraft.server.level.ServerLevel
+import net.minecraft.world.level.GameType
 import org.slf4j.Logger
 import org.slf4j.LoggerFactory
 import java.util.UUID
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
-import net.minecraft.network.packet.c2s.common.SyncedClientOptions
-import net.minecraft.server.network.ConnectedClientData
+import net.minecraft.server.level.ClientInformation
+import net.minecraft.server.network.CommonListenerCookie
 
 /**
- * Fake ServerPlayerEntity used by the interaction RPCs (world.placeAsPlayer,
+ * Fake ServerPlayer used by the interaction RPCs (world.placeAsPlayer,
  * world.useOnBlock, world.attackBlock, world.breakBlock, world.useItem,
  * world.useItemHold, world.interactEntity, world.attackEntity, ...).
  *
  * The fake player is SPAWNED into the world: it is created through the same path
- * real players use (`ServerWorld.onPlayerConnected`), so it is registered in the
+ * real players use (`ServerLevel.onPlayerConnected`), so it is registered in the
  * world's entity manager and ticked every server tick. Consequences:
- *   - `world.getPlayers()`, `getEntitiesByClass(ServerPlayerEntity...)`, mob
+ *   - `world.getPlayers()`, `getEntitiesByClass(ServerPlayer...)`, mob
  *     targeting and per-player tick hooks all see it — mods that initialize
  *     per-player state in join/tick hooks no longer crash on null state.
  *   - It is NOT registered in PlayerManager: invisible to /list, @a, tab list
@@ -60,15 +60,15 @@ internal object FakePlayerPool {
         "[mcdebug_fake_player]"
     )
 
-    private val cache = HashMap<Pair<MinecraftServer, ServerWorld>, ServerPlayerEntity>()
+    private val cache = HashMap<Pair<MinecraftServer, ServerLevel>, ServerPlayer>()
 
     /** Every player created through this pool (cached + per-screen-session), for keepalive/pruning. */
-    private val allSpawned = HashSet<ServerPlayerEntity>()
+    private val allSpawned = HashSet<ServerPlayer>()
 
     /**
      * Single global lock serializing all fake-player interactions.
      *
-     * Why a lock is needed: the cached ServerPlayerEntity is mutated per call
+     * Why a lock is needed: the cached ServerPlayer is mutated per call
      * (position, yaw/pitch, hand stack, sneaking, game mode, abilities). The RPC
      * server dispatches each connection on its own thread inside
      * `RpcContext.onServer { ... }` (on the MC main thread, but multiple handler
@@ -85,7 +85,7 @@ internal object FakePlayerPool {
      */
     private val interactionLock = ReentrantLock()
 
-    fun get(server: MinecraftServer, world: ServerWorld): ServerPlayerEntity {
+    fun get(server: MinecraftServer, world: ServerLevel): ServerPlayer {
         val key = server to world
         cache[key]?.let { if (!it.isRemoved) return it }
         val p = create(server, world, PROFILE)
@@ -93,33 +93,33 @@ internal object FakePlayerPool {
         return p
     }
 
-    fun create(server: MinecraftServer, world: ServerWorld, profile: GameProfile): ServerPlayerEntity {
-        val p = ServerPlayerEntity(server, world, profile, SyncedClientOptions.createDefault())
+    fun create(server: MinecraftServer, world: ServerLevel, profile: GameProfile): ServerPlayer {
+        val p = ServerPlayer(server, world, profile, ClientInformation.createDefault())
         // Resting state: survival + protected (a spawned player must never die or drift).
-        p.abilities.creativeMode = false
-        p.abilities.allowModifyWorld = true
+        p.abilities.instabuild = false
+        p.abilities.mayBuild = true
         p.abilities.flying = false
-        p.abilities.allowFlying = false
+        p.abilities.mayfly = false
         ensureProtected(p)
 
         // Install a no-op network handler so mod code that calls
-        // player.openHandledScreen() / player.sendMessageToClient() /
+        // player.openMenu() / player.sendMessageToClient() /
         // Criteria.trigger() / etc. doesn't NPE on null networkHandler.
         // Packets are silently dropped — no real client receives them.
-        val connection = ClientConnection(NetworkSide.CLIENTBOUND)
-        val handler = object : ServerPlayNetworkHandler(server, connection, p, ConnectedClientData.createDefault(profile, false)) {
-            override fun sendPacket(packet: Packet<*>) {
+        val connection = Connection(PacketFlow.CLIENTBOUND)
+        val handler = object : ServerGamePacketListenerImpl(server, connection, p, CommonListenerCookie.createInitial(profile, false)) {
+            override fun send(packet: Packet<*>) {
                 // no-op: silently drop all outbound packets
             }
         }
-        p.networkHandler = handler
+        p.connection = handler
 
         // Spawn into the world through the same path real players use
         // (world.players list + entity manager): the player is ticked every server
         // tick, visible to world.getPlayers() / entity queries, and fires
         // entity-load / join hooks. It is NOT in PlayerManager and never receives
         // packets.
-        world.onPlayerConnected(p)
+        world.addFreshEntity(p)
         allSpawned.add(p)
 
         return p
@@ -132,19 +132,19 @@ internal object FakePlayerPool {
      */
     fun <T> withFakePlayer(
         server: MinecraftServer,
-        world: ServerWorld,
-        gamemode: GameMode = GameMode.SURVIVAL,
-        block: (ServerPlayerEntity) -> T,
+        world: ServerLevel,
+        gamemode: GameType = GameType.SURVIVAL,
+        block: (ServerPlayer) -> T,
     ): T = interactionLock.withLock {
         val player = get(server, world)
         val oldAbilities = AbilitiesSnapshot.capture(player)
-        val oldGameMode = player.interactionManager.gameMode
+        val oldGameMode = player.gameMode.gameModeForPlayer
         try {
             applyGameMode(player, gamemode)
             block(player)
         } finally {
             oldAbilities.restore(player)
-            player.changeGameMode(oldGameMode)
+            player.setGameMode(oldGameMode)
             ensureProtected(player)
         }
     }
@@ -153,11 +153,11 @@ internal object FakePlayerPool {
      * Parse the optional `gamemode` param of a fake-player command.
      * Default: survival. Override: "creative".
      */
-    fun gameModeFrom(p: JsonObject?): GameMode {
-        val s = p?.getStringOrNull("gamemode") ?: return GameMode.SURVIVAL
+    fun gameModeFrom(p: JsonObject?): GameType {
+        val s = p?.getStringOrNull("gamemode") ?: return GameType.SURVIVAL
         return when (s.lowercase()) {
-            "survival" -> GameMode.SURVIVAL
-            "creative" -> GameMode.CREATIVE
+            "survival" -> GameType.SURVIVAL
+            "creative" -> GameType.CREATIVE
             else -> throw RpcException(
                 RpcErrors.INVALID_PARAMS,
                 "invalid gamemode: $s (allowed: survival, creative)"
@@ -170,29 +170,29 @@ internal object FakePlayerPool {
      * (ServerPlayerInteractionManager.changeGameMode) so game-mode hooks fire,
      * then re-assert the protection flags survival mode clears.
      */
-    fun applyGameMode(player: ServerPlayerEntity, mode: GameMode) {
-        player.changeGameMode(mode)
-        player.abilities.allowModifyWorld = true
+    fun applyGameMode(player: ServerPlayer, mode: GameType) {
+        player.setGameMode(mode)
+        player.abilities.mayBuild = true
         ensureProtected(player)
     }
 
     /** Keep the spawned fake player from dying, falling or drifting. */
-    fun ensureProtected(player: ServerPlayerEntity) {
+    fun ensureProtected(player: ServerPlayer) {
         player.setInvulnerable(true)
         player.abilities.invulnerable = true
         player.setNoGravity(true)
-        player.setVelocity(0.0, 0.0, 0.0)
+        player.setDeltaMovement(0.0, 0.0, 0.0)
         player.fallDistance = 0f
         player.setOnGround(true)
     }
 
     /** Remove a fake player from its world (used by ScreenOps session teardown). */
-    fun discard(player: ServerPlayerEntity) {
+    fun discard(player: ServerPlayer) {
         allSpawned.remove(player)
         cache.entries.removeIf { (_, p) -> p === player }
-        val w = player.world
-        if (!player.isRemoved && w is ServerWorld) {
-            w.removePlayer(player, Entity.RemovalReason.DISCARDED)
+        val w = player.level()
+        if (!player.isRemoved && w is ServerLevel) {
+            w.removePlayerImmediately(player, Entity.RemovalReason.DISCARDED)
         }
     }
 
@@ -217,8 +217,8 @@ internal object FakePlayerPool {
         allSpawned.forEach { p ->
             runCatching {
                 if (!p.isRemoved) {
-                    val w = p.world
-                    if (w is ServerWorld) w.removePlayer(p, Entity.RemovalReason.DISCARDED)
+                    val w = p.level()
+                    if (w is ServerLevel) w.removePlayerImmediately(p, Entity.RemovalReason.DISCARDED)
                 }
             }
         }
@@ -228,9 +228,9 @@ internal object FakePlayerPool {
 
     private var installed = false
 
-    private fun pin(player: ServerPlayerEntity) {
+    private fun pin(player: ServerPlayer) {
         player.setNoGravity(true)
-        player.setVelocity(0.0, 0.0, 0.0)
+        player.setDeltaMovement(0.0, 0.0, 0.0)
         player.fallDistance = 0f
         player.setOnGround(true)
         player.setInvulnerable(true)
@@ -246,25 +246,25 @@ internal object FakePlayerPool {
         val flySpeed: Float,
         val walkSpeed: Float
     ) {
-        fun restore(player: ServerPlayerEntity) {
+        fun restore(player: ServerPlayer) {
             player.abilities.invulnerable = invulnerable
             player.abilities.flying = flying
-            player.abilities.allowFlying = allowFlying
-            player.abilities.creativeMode = creativeMode
-            player.abilities.allowModifyWorld = allowModifyWorld
-            player.abilities.setFlySpeed(flySpeed)
-            player.abilities.setWalkSpeed(walkSpeed)
+            player.abilities.mayfly = allowFlying
+            player.abilities.instabuild = creativeMode
+            player.abilities.mayBuild = allowModifyWorld
+            player.abilities.flyingSpeed = flySpeed
+            player.abilities.walkingSpeed = walkSpeed
         }
 
         companion object {
-            fun capture(player: ServerPlayerEntity): AbilitiesSnapshot = AbilitiesSnapshot(
+            fun capture(player: ServerPlayer): AbilitiesSnapshot = AbilitiesSnapshot(
                 invulnerable = player.abilities.invulnerable,
                 flying = player.abilities.flying,
-                allowFlying = player.abilities.allowFlying,
-                creativeMode = player.abilities.creativeMode,
-                allowModifyWorld = player.abilities.allowModifyWorld,
-                flySpeed = player.abilities.flySpeed,
-                walkSpeed = player.abilities.walkSpeed
+                allowFlying = player.abilities.mayfly,
+                creativeMode = player.abilities.instabuild,
+                allowModifyWorld = player.abilities.mayBuild,
+                flySpeed = player.abilities.flyingSpeed,
+                walkSpeed = player.abilities.walkingSpeed
             )
         }
     }

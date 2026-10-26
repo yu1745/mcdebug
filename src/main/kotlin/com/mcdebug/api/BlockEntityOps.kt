@@ -9,12 +9,12 @@ import com.mcdebug.rpc.RpcHandler
 import com.mcdebug.rpc.RpcHandlerGroup
 import com.mcdebug.util.NbtJson
 import com.mcdebug.util.ServerContext
-import net.minecraft.block.entity.BlockEntity
-import net.minecraft.block.entity.BlockEntityTicker
-import net.minecraft.nbt.NbtCompound
+import net.minecraft.world.level.block.entity.BlockEntity
+import net.minecraft.world.level.block.entity.BlockEntityTicker
+import net.minecraft.nbt.CompoundTag
 import net.minecraft.server.MinecraftServer
-import net.minecraft.server.world.ServerWorld
-import net.minecraft.util.math.BlockPos
+import net.minecraft.server.level.ServerLevel
+import net.minecraft.core.BlockPos
 import java.util.concurrent.CompletableFuture
 
 object BlockEntityOps : RpcHandlerGroup {
@@ -32,7 +32,7 @@ object BlockEntityOps : RpcHandlerGroup {
             val pos = ServerContext.pos(p.getAsJsonArray("pos"))
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val be = ServerContext.blockEntity(world, pos)
-            val nbt = be.createNbt(world.registryManager)
+            val nbt = be.saveWithoutMetadata(world.registryAccess())
             JsonObject().apply { add("nbt", NbtJson.toJson(nbt)) }
         }
 
@@ -43,7 +43,7 @@ object BlockEntityOps : RpcHandlerGroup {
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val be = ServerContext.blockEntity(world, pos)
             val nbtJson = p.get("nbt") ?: throw RpcException(RpcErrors.INVALID_PARAMS, "nbt required")
-            val nbt = NbtJson.fromJson(nbtJson) as? NbtCompound
+            val nbt = NbtJson.fromJson(nbtJson) as? CompoundTag
                 ?: throw RpcException(RpcErrors.NBT_PARSE_ERROR, "nbt must be a JSON object")
             applyBeNbt(world, pos, be, nbt)
             JsonObject().apply { addProperty("ok", true) }
@@ -56,7 +56,7 @@ object BlockEntityOps : RpcHandlerGroup {
             val path = p.requireString("path")
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val be = ServerContext.blockEntity(world, pos)
-            val nbt = be.createNbt(world.registryManager)
+            val nbt = be.saveWithoutMetadata(world.registryAccess())
             val value = NbtJson.getByPathAsJson(nbt, path)
             JsonObject().apply { add("value", value) }
         }
@@ -69,7 +69,7 @@ object BlockEntityOps : RpcHandlerGroup {
             val valueJson = p.get("value") ?: throw RpcException(RpcErrors.INVALID_PARAMS, "value required")
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val be = ServerContext.blockEntity(world, pos)
-            val nbt = be.createNbt(world.registryManager)
+            val nbt = be.saveWithoutMetadata(world.registryAccess())
             val newValue = NbtJson.fromJson(valueJson)
             NbtJson.setByPath(nbt, path, newValue)
             applyBeNbt(world, pos, be, nbt)
@@ -78,14 +78,14 @@ object BlockEntityOps : RpcHandlerGroup {
 
     /**
      * Apply a full NBT compound to a block entity and fire all the downstream
-     * notifications that `BlockEntity.readNbt` alone does NOT trigger:
+     * notifications that `BlockEntity.load` alone does NOT trigger:
      *
-     *   - `markDirty()` — flag the chunk for save (vanilla readNbt does not do this)
-     *   - `ServerWorld.updateListeners(pos, old, new, NOTIFY_ALL)` — re-broadcast the
+     *   - `setChanged()` — flag the chunk for save (vanilla readNbt does not do this)
+     *   - `ServerLevel.dirtyListeners(pos, old, new, NOTIFY_ALL)` — re-broadcast the
      *     block state to any tracking client (BE NBT deltas are part of this packet).
      *     On a dedicated server with no real player tracking the chunk this is a no-op,
      *     which is fine.
-     *   - `World.updateComparators(pos, block)` — re-evaluate adjacent comparators so
+     *   - `Level.updateComparators(pos, block)` — re-evaluate adjacent comparators so
      *     inventory/content changes (furnace cook progress, chest fullness, IC2 machine
      *     energy level via property delegate) propagate to redstone immediately. This is
      *     the bit the old implementation was missing, causing "set NBT but comparator
@@ -95,12 +95,12 @@ object BlockEntityOps : RpcHandlerGroup {
      * state) that `readNbt` doesn't fully rebuild. That is a per-subclass vanilla/mod
      * limitation; this helper covers the common inventory/comparator case.
      */
-    private fun applyBeNbt(world: ServerWorld, pos: BlockPos, be: BlockEntity, nbt: NbtCompound) {
-        be.read(nbt, world.registryManager)
-        be.markDirty()
+    private fun applyBeNbt(world: ServerLevel, pos: BlockPos, be: BlockEntity, nbt: CompoundTag) {
+        be.loadWithComponents(nbt, world.registryAccess())
+        be.setChanged()
         val state = world.getBlockState(pos)
-        world.updateListeners(pos, state, state, 3)
-        world.updateComparators(pos, state.block)
+        world.sendBlockUpdated(pos, state, state, 3)
+        world.updateNeighbourForOutputSignal(pos, state.block)
     }
 }
 
@@ -119,7 +119,7 @@ object BlockEntityOps : RpcHandlerGroup {
  *  - 只 tick 目标 BE，不 tick 邻居/世界（能量网络等全局逻辑不在其内）；
  *  - 不适用于依赖自然 tick 跨度的用例（如"机器在 300 自然 tick 内完成"
  *    的时序验证），这类仍用 `wait.until`；
- *  - 机器 tick 中可能主动 `markDirty` / 改变世界状态（如离心机加热），
+ *  - 机器 tick 中可能主动 `setChanged` / 改变世界状态（如离心机加热），
  *    与真实 tick 行为一致。
  */
 private fun tick(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
@@ -132,14 +132,14 @@ private fun tick(server: MinecraftServer, params: JsonObject?): CompletableFutur
         val state = world.getBlockState(pos)
         // 走 BlockState.getBlockEntityTicker —— 与自然 tick 完全相同的调用路径（BlockEntityTicker）。
         @Suppress("UNCHECKED_CAST")
-        val ticker = state.getBlockEntityTicker(world, be.type) as BlockEntityTicker<BlockEntity>? 
+        val ticker = state.getTicker(world, be.type) as BlockEntityTicker<BlockEntity>? 
             ?: throw RpcException(RpcErrors.INVALID_PARAMS, "block at $pos has no ticker (not a ticking block entity)")
         repeat(count) {
             ticker.tick(world, pos, state, be)
         }
         JsonObject().apply {
             add("pos", ServerContext.posAsJson(pos))
-            addProperty("dim", world.registryKey.value.toString())
+            addProperty("dim", world.dimension().location().toString())
             addProperty("ticked", count)
         }
     }

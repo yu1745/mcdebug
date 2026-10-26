@@ -7,28 +7,28 @@ import com.google.gson.JsonObject
 import com.google.gson.JsonPrimitive
 import com.mcdebug.rpc.RpcErrors
 import com.mcdebug.rpc.RpcException
-import net.minecraft.nbt.NbtByte
-import net.minecraft.nbt.NbtByteArray
-import net.minecraft.nbt.NbtCompound
-import net.minecraft.nbt.NbtDouble
-import net.minecraft.nbt.NbtElement
-import net.minecraft.nbt.NbtEnd
-import net.minecraft.nbt.NbtFloat
-import net.minecraft.nbt.NbtInt
-import net.minecraft.nbt.NbtIntArray
-import net.minecraft.nbt.NbtList
-import net.minecraft.nbt.NbtLong
-import net.minecraft.nbt.NbtLongArray
-import net.minecraft.nbt.NbtShort
-import net.minecraft.nbt.NbtString
-import net.minecraft.registry.Registries
+import net.minecraft.nbt.ByteTag
+import net.minecraft.nbt.ByteArrayTag
+import net.minecraft.nbt.CompoundTag
+import net.minecraft.nbt.DoubleTag
+import net.minecraft.nbt.Tag
+import net.minecraft.nbt.EndTag
+import net.minecraft.nbt.FloatTag
+import net.minecraft.nbt.IntTag
+import net.minecraft.nbt.IntArrayTag
+import net.minecraft.nbt.ListTag
+import net.minecraft.nbt.LongTag
+import net.minecraft.nbt.LongArrayTag
+import net.minecraft.nbt.ShortTag
+import net.minecraft.nbt.StringTag
+import net.minecraft.core.registries.BuiltInRegistries
 
 /**
- * Convert NbtElement <-> Gson JsonElement.
+ * Convert Tag <-> Gson JsonElement.
  *
- * JSON->NBT: numbers default to NbtInt for backward compatibility; use the
+ * JSON->NBT: numbers default to IntTag for backward compatibility; use the
  * `{"#nbt":"<type>","value":...}` sentinel (see [fromJson]) for precise scalar
- * and array types. NBT->JSON preserves the type (NbtLong → JSON number, etc.,
+ * and array types. NBT->JSON preserves the type (LongTag → JSON number, etc.,
  * so round-tripping a plain number is lossy — only the `#nbt` form is lossless).
  */
 object NbtJson {
@@ -36,62 +36,62 @@ object NbtJson {
     /** Reserved key marking a typed-NBT sentinel object. See [fromJson]. */
     const val TYPE_HINT_KEY = "#nbt"
 
-    fun toJson(nbt: NbtElement): JsonElement = when (nbt) {
-        is NbtEnd -> JsonNull.INSTANCE
-        is NbtCompound -> {
+    fun toJson(nbt: Tag): JsonElement = when (nbt) {
+        is EndTag -> JsonNull.INSTANCE
+        is CompoundTag -> {
             val obj = JsonObject()
-            nbt.keys.forEach { key -> obj.add(key, toJson(nbt[key]!!)) }
+            nbt.allKeys.forEach { key -> obj.add(key, toJson(nbt[key]!!)) }
             obj
         }
-        is NbtList -> {
+        is ListTag -> {
             val arr = JsonArray()
             for (i in 0 until nbt.size) {
                 arr.add(toJson(nbt[i]!!))
             }
             arr
         }
-        is NbtByte -> JsonPrimitive(nbt.byteValue().toInt())
-        is NbtShort -> JsonPrimitive(nbt.shortValue().toInt())
-        is NbtInt -> JsonPrimitive(nbt.intValue())
-        is NbtLong -> JsonPrimitive(nbt.longValue())
-        is NbtFloat -> JsonPrimitive(nbt.floatValue().toDouble())
-        is NbtDouble -> JsonPrimitive(nbt.doubleValue())
-        is NbtString -> JsonPrimitive(nbt.asString())
-        is NbtByteArray -> {
+        is ByteTag -> JsonPrimitive(nbt.getAsByte().toInt())
+        is ShortTag -> JsonPrimitive(nbt.getAsShort().toInt())
+        is IntTag -> JsonPrimitive(nbt.getAsInt())
+        is LongTag -> JsonPrimitive(nbt.getAsLong())
+        is FloatTag -> JsonPrimitive(nbt.getAsFloat().toDouble())
+        is DoubleTag -> JsonPrimitive(nbt.getAsDouble())
+        is StringTag -> JsonPrimitive(nbt.getAsString())
+        is ByteArrayTag -> {
             val arr = JsonArray()
-            nbt.byteArray.forEach { arr.add(JsonPrimitive(it.toInt())) }
+            nbt.asByteArray.forEach { arr.add(JsonPrimitive(it.toInt())) }
             arr
         }
-        is NbtIntArray -> {
+        is IntArrayTag -> {
             val arr = JsonArray()
-            nbt.intArray.forEach { arr.add(JsonPrimitive(it)) }
+            nbt.asIntArray.forEach { arr.add(JsonPrimitive(it)) }
             arr
         }
-        is NbtLongArray -> {
+        is LongArrayTag -> {
             val arr = JsonArray()
-            nbt.longArray.forEach { arr.add(JsonPrimitive(it)) }
+            nbt.asLongArray.forEach { arr.add(JsonPrimitive(it)) }
             arr
         }
-        else -> throw RpcException(RpcErrors.NBT_PARSE_ERROR, "unsupported NBT type: ${nbt.nbtType}")
+        else -> throw RpcException(RpcErrors.NBT_PARSE_ERROR, "unsupported NBT type: ${nbt.type}")
     }
 
     /**
      * Convert a Gson JsonElement to its NBT equivalent.
      *
-     * Default type promotion for JSON numbers is NbtInt (backward-compatible with v1).
+     * Default type promotion for JSON numbers is IntTag (backward-compatible with v1).
      * To force a precise NBT scalar type — needed for byte flags, long positions,
      * float vs double, or the various array types — wrap the value in an object with
      * a reserved `#nbt` key:
      *
-     *   {"#nbt":"long",  "value": 123}        → NbtLong
-     *   {"#nbt":"byte",  "value": 1}          → NbtByte   (also covers boolean flags)
-     *   {"#nbt":"short", "value": 32000}      → NbtShort
-     *   {"#nbt":"float", "value": 1.5}        → NbtFloat
-     *   {"#nbt":"double","value": 1.5}        → NbtDouble
-     *   {"#nbt":"string","value": 123}        → NbtString "123" (force string)
-     *   {"#nbt":"byteArray", "value": [1,2,3]} → NbtByteArray
-     *   {"#nbt":"intArray",  "value": [1,2,3]} → NbtIntArray
-     *   {"#nbt":"longArray", "value": [1,2,3]} → NbtLongArray
+     *   {"#nbt":"long",  "value": 123}        → LongTag
+     *   {"#nbt":"byte",  "value": 1}          → ByteTag   (also covers boolean flags)
+     *   {"#nbt":"short", "value": 32000}      → ShortTag
+     *   {"#nbt":"float", "value": 1.5}        → FloatTag
+     *   {"#nbt":"double","value": 1.5}        → DoubleTag
+     *   {"#nbt":"string","value": 123}        → StringTag "123" (force string)
+     *   {"#nbt":"byteArray", "value": [1,2,3]} → ByteArrayTag
+     *   {"#nbt":"intArray",  "value": [1,2,3]} → IntArrayTag
+     *   {"#nbt":"longArray", "value": [1,2,3]} → LongArrayTag
      *
      * The `#nbt` key is reserved: regular NBT compound keys beginning with `#` are
      * vanishingly rare (vanilla and mod NBT keys are plain identifiers), so this
@@ -101,22 +101,22 @@ object NbtJson {
      * @throws RpcException on an unknown `#nbt` type, missing `value`, or a value
      *         whose JSON shape doesn't match the requested type.
      */
-    fun fromJson(json: JsonElement): NbtElement = when {
-        json.isJsonNull -> NbtEnd.INSTANCE
+    fun fromJson(json: JsonElement): Tag = when {
+        json.isJsonNull -> EndTag.INSTANCE
         json.isJsonObject -> {
             val obj = json.asJsonObject
             val typeHint = obj.get(TYPE_HINT_KEY)?.takeIf { !it.isJsonNull }?.asString
             if (typeHint != null) parseTyped(obj, typeHint)
             else {
-                val compound = NbtCompound()
+                val compound = CompoundTag()
                 obj.entrySet().forEach { (k, v) -> compound.put(k, fromJson(v)) }
                 compound
             }
         }
         json.isJsonArray -> {
-            // Promote all elements to NbtInt for simplicity; users wanting precise types
+            // Promote all elements to IntTag for simplicity; users wanting precise types
             // should use {"#nbt":"intArray","value":[...]} etc.
-            val list = NbtList()
+            val list = ListTag()
             json.asJsonArray.forEach { list.add(fromJson(it)) }
             list
         }
@@ -124,14 +124,14 @@ object NbtJson {
         else -> throw RpcException(RpcErrors.NBT_PARSE_ERROR, "unsupported JSON element")
     }
 
-    private fun parsePrimitive(p: JsonPrimitive): NbtElement = when {
-        p.isBoolean -> NbtByte.of(if (p.asBoolean) 1.toByte() else 0.toByte())
-        p.isNumber -> NbtInt.of(p.asInt)
-        p.isString -> NbtString.of(p.asString)
+    private fun parsePrimitive(p: JsonPrimitive): Tag = when {
+        p.isBoolean -> ByteTag.valueOf(if (p.asBoolean) 1.toByte() else 0.toByte())
+        p.isNumber -> IntTag.valueOf(p.asInt)
+        p.isString -> StringTag.valueOf(p.asString)
         else -> throw RpcException(RpcErrors.NBT_PARSE_ERROR, "unsupported JSON primitive")
     }
 
-    private fun parseTyped(obj: JsonObject, type: String): NbtElement {
+    private fun parseTyped(obj: JsonObject, type: String): Tag {
         val valueEl = obj.get("value") ?: obj.get("v")
             ?: throw RpcException(RpcErrors.NBT_PARSE_ERROR, "#nbt='$type' requires a 'value' field")
         fun requireNumber() =
@@ -142,16 +142,16 @@ object NbtJson {
                 valueEl.asJsonPrimitive.asString
             else throw RpcException(RpcErrors.NBT_PARSE_ERROR, "#nbt='$type' requires a string value, got: $valueEl")
         return when (type) {
-            "byte" -> NbtByte.of(requireNumber().asInt.toByte())
-            "short" -> NbtShort.of(requireNumber().asInt.toShort())
-            "int" -> NbtInt.of(requireNumber().asInt)
-            "long" -> NbtLong.of(requireNumber().asLong)
-            "float" -> NbtFloat.of(requireNumber().asFloat)
-            "double" -> NbtDouble.of(requireNumber().asDouble)
-            "string" -> NbtString.of(requireString())
-            "byteArray" -> NbtByteArray(requireNumberArray(valueEl).map { it.toByte() }.toByteArray())
-            "intArray" -> NbtIntArray(requireNumberArray(valueEl).map { it.toInt() }.toIntArray())
-            "longArray" -> NbtLongArray(requireNumberArray(valueEl).map { it.toLong() }.toLongArray())
+            "byte" -> ByteTag.valueOf(requireNumber().asInt.toByte())
+            "short" -> ShortTag.valueOf(requireNumber().asInt.toShort())
+            "int" -> IntTag.valueOf(requireNumber().asInt)
+            "long" -> LongTag.valueOf(requireNumber().asLong)
+            "float" -> FloatTag.valueOf(requireNumber().asFloat)
+            "double" -> DoubleTag.valueOf(requireNumber().asDouble)
+            "string" -> StringTag.valueOf(requireString())
+            "byteArray" -> ByteArrayTag(requireNumberArray(valueEl).map { it.toByte() }.toByteArray())
+            "intArray" -> IntArrayTag(requireNumberArray(valueEl).map { it.toInt() }.toIntArray())
+            "longArray" -> LongArrayTag(requireNumberArray(valueEl).map { it.toLong() }.toLongArray())
             else -> throw RpcException(RpcErrors.NBT_PARSE_ERROR, "unknown #nbt type: '$type'")
         }
     }
@@ -170,14 +170,14 @@ object NbtJson {
      *   "Items.0.count" or "Items[0].count"
      * Returns null if the path doesn't resolve.
      */
-    fun getByPath(nbt: NbtElement, path: String): NbtElement? {
+    fun getByPath(nbt: Tag, path: String): Tag? {
         if (path.isEmpty()) return nbt
         val tokens = tokenizePath(path)
-        var current: NbtElement? = nbt
+        var current: Tag? = nbt
         for (tok in tokens) {
             current = when {
-                current is NbtCompound && tok is PathToken.Key -> current[tok.name]
-                current is NbtList && tok is PathToken.Index -> {
+                current is CompoundTag && tok is PathToken.Key -> current[tok.name]
+                current is ListTag && tok is PathToken.Index -> {
                     val idx = tok.index
                     if (idx < 0 || idx >= current.size) null
                     else current[idx]
@@ -189,29 +189,29 @@ object NbtJson {
     }
 
     /** Same as getByPath but JSON-encodes the result. Returns JsonNull if path doesn't resolve. */
-    fun getByPathAsJson(nbt: NbtElement, path: String): JsonElement {
+    fun getByPathAsJson(nbt: Tag, path: String): JsonElement {
         val v = getByPath(nbt, path) ?: return JsonNull.INSTANCE
         return toJson(v)
     }
 
     /**
      * Set a nested value by path. Creates intermediate compounds if needed.
-     * If a parent isn't a NbtCompound, this throws.
+     * If a parent isn't a CompoundTag, this throws.
      */
-    fun setByPath(root: NbtCompound, path: String, value: NbtElement) {
+    fun setByPath(root: CompoundTag, path: String, value: Tag) {
         val tokens = tokenizePath(path)
         if (tokens.isEmpty()) throw RpcException(RpcErrors.INVALID_PARAMS, "empty path")
-        var current: NbtElement = root
+        var current: Tag = root
         for (i in tokens.indices) {
             val tok = tokens[i]
             val isLast = i == tokens.size - 1
             if (isLast) {
                 when {
-                    current is NbtCompound && tok is PathToken.Key -> current.put(tok.name, value)
-                    current is NbtList && tok is PathToken.Index -> {
+                    current is CompoundTag && tok is PathToken.Key -> current.put(tok.name, value)
+                    current is ListTag && tok is PathToken.Index -> {
                         val idx = tok.index
-                        // pad with NbtEnd (will become NbtInt default) if needed
-                        while (current.size <= idx) current.add(NbtInt.of(0))
+                        // pad with EndTag (will become IntTag default) if needed
+                        while (current.size <= idx) current.add(IntTag.valueOf(0))
                         current.set(idx, value)
                     }
                     else -> throw RpcException(RpcErrors.INVALID_PARAMS, "cannot set path: parent not a container")
@@ -220,17 +220,17 @@ object NbtJson {
             } else {
                 val nextTok = tokens[i + 1]
                 val next = when {
-                    current is NbtCompound && tok is PathToken.Key -> {
+                    current is CompoundTag && tok is PathToken.Key -> {
                         val existing = current[tok.name]
                         if (existing == null) {
-                            val created = if (nextTok is PathToken.Index) NbtList() else NbtCompound()
+                            val created = if (nextTok is PathToken.Index) ListTag() else CompoundTag()
                             current.put(tok.name, created)
                             created
                         } else existing
                     }
-                    current is NbtList && tok is PathToken.Index -> {
+                    current is ListTag && tok is PathToken.Index -> {
                         val idx = tok.index
-                        while (current.size <= idx) current.add(NbtCompound())
+                        while (current.size <= idx) current.add(CompoundTag())
                         current[idx]!!
                     }
                     else -> throw RpcException(RpcErrors.INVALID_PARAMS, "cannot traverse path at '$tok'")
@@ -241,20 +241,20 @@ object NbtJson {
     }
 
     /** Convert Minecraft identifier to canonical string ("minecraft:stone") */
-    fun idToString(id: net.minecraft.util.Identifier): String = id.toString()
+    fun idToString(id: net.minecraft.resources.ResourceLocation): String = id.toString()
 
     /** Resolve "minecraft:stone" to a registered identifier, or null. */
-    fun identifier(s: String): net.minecraft.util.Identifier? =
-        try { net.minecraft.util.Identifier.tryParse(s) } catch (_: Exception) { null }
+    fun identifier(s: String): net.minecraft.resources.ResourceLocation? =
+        try { net.minecraft.resources.ResourceLocation.tryParse(s) } catch (_: Exception) { null }
 
-    fun blockId(s: String): net.minecraft.block.Block? {
+    fun blockId(s: String): net.minecraft.world.level.block.Block? {
         val id = identifier(s) ?: return null
-        return Registries.BLOCK.getOrEmpty(id).orElse(null)
+        return BuiltInRegistries.BLOCK.getOptional(id).orElse(null)
     }
 
-    fun itemId(s: String): net.minecraft.item.Item? {
+    fun itemId(s: String): net.minecraft.world.item.Item? {
         val id = identifier(s) ?: return null
-        return Registries.ITEM.getOrEmpty(id).orElse(null)
+        return BuiltInRegistries.ITEM.getOptional(id).orElse(null)
     }
 
     // ---- path tokenization ----

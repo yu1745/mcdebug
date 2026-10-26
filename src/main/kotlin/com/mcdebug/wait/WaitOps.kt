@@ -14,12 +14,12 @@ import com.mcdebug.rpc.RpcHandler
 import com.mcdebug.rpc.RpcHandlerGroup
 import com.mcdebug.util.NbtJson
 import com.mcdebug.util.ServerContext
-import net.minecraft.block.entity.BlockEntity
-import net.minecraft.inventory.Inventory
-import net.minecraft.item.ItemStack
-import net.minecraft.registry.Registries
+import net.minecraft.world.level.block.entity.BlockEntity
+import net.minecraft.world.Container
+import net.minecraft.world.item.ItemStack
+import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.server.MinecraftServer
-import net.minecraft.util.math.BlockPos
+import net.minecraft.core.BlockPos
 import org.slf4j.LoggerFactory
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CopyOnWriteArrayList
@@ -158,19 +158,19 @@ object WaitOps : RpcHandlerGroup {
         val srv = currentServer ?: return JsonNull.INSTANCE
         val pos = ref.pos?.let { BlockPos(it.first, it.second, it.third) }
         return when (ref.source) {
-            "tick" -> JsonPrimitive(srv.ticks)
+            "tick" -> JsonPrimitive(srv.tickCount)
             "block" -> {
                 val w = ServerContext.world(srv, null)
                 val state = w.getBlockState(pos!!)
                 val path = ref.path
                 when {
                     path.isEmpty() || path == "id" ->
-                        com.google.gson.JsonPrimitive(Registries.BLOCK.getId(state.block).toString())
+                        com.google.gson.JsonPrimitive(BuiltInRegistries.BLOCK.getKey(state.block).toString())
                     path.startsWith("prop.") -> {
                         val pname = path.removePrefix("prop.")
-                        val prop = state.block.stateManager.getProperty(pname)
+                        val prop = state.block.stateDefinition.getProperty(pname)
                             ?: return JsonNull.INSTANCE
-                        com.google.gson.JsonPrimitive(state.get(prop).toString())
+                        com.google.gson.JsonPrimitive(state.getValue(prop).toString())
                     }
                     else -> throw RpcException(RpcErrors.INVALID_PREDICATE, "block path must be 'id' or 'prop.<name>'")
                 }
@@ -179,12 +179,12 @@ object WaitOps : RpcHandlerGroup {
                 val w = ServerContext.world(srv, null)
                 val be: BlockEntity? = w.getBlockEntity(pos!!)
                 if (be == null) JsonNull.INSTANCE
-                else NbtJson.getByPathAsJson(be.createNbt(w.registryManager), ref.path)
+                else NbtJson.getByPathAsJson(be.saveWithoutMetadata(w.registryAccess()), ref.path)
             }
             "inv" -> {
                 val w = ServerContext.world(srv, null)
                 val be: BlockEntity? = w.getBlockEntity(pos!!)
-                val inv: Inventory? = be as? Inventory
+                val inv: Container? = be as? Container
                 if (inv == null) JsonNull.INSTANCE
                 else evaluateInvPath(inv, ref.path)
             }
@@ -204,11 +204,11 @@ object WaitOps : RpcHandlerGroup {
         val w = ServerContext.world(srv, null)
         val pos = BlockPos(agg.pos.first, agg.pos.second, agg.pos.third)
         val be = w.getBlockEntity(pos) ?: return JsonPrimitive(0)
-        val inv = be as? Inventory ?: return JsonPrimitive(0)
+        val inv = be as? Container ?: return JsonPrimitive(0)
         var sum = 0.0
         var count = 0
-        for (slot in 0 until inv.size()) {
-            val stack = inv.getStack(slot)
+        for (slot in 0 until inv.containerSize) {
+            val stack = inv.getItem(slot)
             when {
                 agg.field == "*" -> {
                     if (!stack.isEmpty) count++
@@ -233,24 +233,24 @@ object WaitOps : RpcHandlerGroup {
         }
     }
 
-    /** Path inside an Inventory slot. Accepts:
-     *    "size" | "<slot>.item" | "<slot>.count" | "<slot>.maxCount" | "<slot>.nbt.<jsonPointer>"
+    /** Path inside an Container slot. Accepts:
+     *    "size" | "<slot>.item" | "<slot>.count" | "<slot>.maxStackSize" | "<slot>.nbt.<jsonPointer>"
      */
-    private fun evaluateInvPath(inv: Inventory, path: String): JsonElement {
-        if (path == "size") return com.google.gson.JsonPrimitive(inv.size())
+    private fun evaluateInvPath(inv: Container, path: String): JsonElement {
+        if (path == "size") return com.google.gson.JsonPrimitive(inv.containerSize)
         val parts = path.split(".", limit = 2)
         val slot = parts[0].toIntOrNull()
             ?: throw RpcException(RpcErrors.INVALID_PREDICATE, "inv path slot must be int: $path")
-        if (slot < 0 || slot >= inv.size()) throw RpcException(RpcErrors.SLOT_OUT_OF_RANGE, "slot $slot out of range")
-        val stack: ItemStack = inv.getStack(slot)
+        if (slot < 0 || slot >= inv.containerSize) throw RpcException(RpcErrors.SLOT_OUT_OF_RANGE, "slot $slot out of range")
+        val stack: ItemStack = inv.getItem(slot)
         if (parts.size == 1) return com.google.gson.JsonPrimitive(stack.count)
         val field = parts[1]
         return when {
             field == "item" ->
                 if (stack.isEmpty) com.google.gson.JsonNull.INSTANCE
-                else com.google.gson.JsonPrimitive(Registries.ITEM.getId(stack.item).toString())
+                else com.google.gson.JsonPrimitive(BuiltInRegistries.ITEM.getKey(stack.item).toString())
             field == "count" -> com.google.gson.JsonPrimitive(stack.count)
-            field == "maxCount" -> com.google.gson.JsonPrimitive(stack.maxCount)
+            field == "maxCount" -> com.google.gson.JsonPrimitive(stack.maxStackSize)
             field.startsWith("nbt.") -> {
                 val nbt = if (!stack.isEmpty) ServerContext.stackNbt(stack) else null
                 if (nbt == null) com.google.gson.JsonNull.INSTANCE

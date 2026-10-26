@@ -12,8 +12,8 @@ import com.mcdebug.rpc.RpcHandlerGroup
 import com.mcdebug.util.ServerContext
 import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents
 import net.minecraft.server.MinecraftServer
-import net.minecraft.server.world.ServerWorld
-import net.minecraft.util.math.BlockBox
+import net.minecraft.server.level.ServerLevel
+import net.minecraft.world.level.levelgen.structure.BoundingBox
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 
@@ -52,7 +52,7 @@ object TraceOps : RpcHandlerGroup {
             val maxTicks = p.getIntOr("maxTicks", 0).coerceAtLeast(0)
             ensureChunksLoaded(world, box)
             val id = UUID.randomUUID().toString()
-            val trace = ActiveTrace(id, world, box, include, interval, maxTicks, server.ticks)
+            val trace = ActiveTrace(id, world, box, include, interval, maxTicks, server.tickCount)
             traces[id] = trace
             captureFrame(server, trace)
             JsonObject().apply {
@@ -85,7 +85,7 @@ object TraceOps : RpcHandlerGroup {
         val snapshot = traces.values.toList()
         for (trace in snapshot) {
             // maxTicks 到期：抓最后一帧后自动停止，移入 finished 供 trace.get 继续读取。
-            if (trace.maxTicks > 0 && server.ticks - trace.startedTick >= trace.maxTicks) {
+            if (trace.maxTicks > 0 && server.tickCount - trace.startedTick >= trace.maxTicks) {
                 try {
                     captureFrame(server, trace)
                 } catch (e: Exception) {
@@ -94,10 +94,10 @@ object TraceOps : RpcHandlerGroup {
                 trace.autoStopped = true
                 traces.remove(trace.id)
                 archiveFinished(trace)
-                McDebugMod.LOGGER.info("trace {} auto-stopped after {} ticks (maxTicks={})", trace.id, server.ticks - trace.startedTick, trace.maxTicks)
+                McDebugMod.LOGGER.info("trace {} auto-stopped after {} ticks (maxTicks={})", trace.id, server.tickCount - trace.startedTick, trace.maxTicks)
                 continue
             }
-            if (server.ticks - trace.lastCaptureTick < trace.intervalTicks) continue
+            if (server.tickCount - trace.lastCaptureTick < trace.intervalTicks) continue
             try {
                 captureFrame(server, trace)
             } catch (e: Exception) {
@@ -120,10 +120,10 @@ object TraceOps : RpcHandlerGroup {
     private fun captureFrame(server: MinecraftServer, trace: ActiveTrace) {
         val snapshot = SnapshotOps.captureSnapshot(server, trace.world, trace.box, trace.include)
         trace.frames.add(JsonObject().apply {
-            addProperty("tick", server.ticks)
+            addProperty("tick", server.tickCount)
             add("snapshot", snapshot)
         })
-        trace.lastCaptureTick = server.ticks
+        trace.lastCaptureTick = server.tickCount
     }
 
     private fun traceToJson(trace: ActiveTrace, active: Boolean, autoStopped: Boolean = false): JsonObject =
@@ -131,7 +131,7 @@ object TraceOps : RpcHandlerGroup {
             addProperty("traceId", trace.id)
             addProperty("active", active)
             addProperty("autoStopped", autoStopped)
-            addProperty("dim", trace.world.registryKey.value.toString())
+            addProperty("dim", trace.world.dimension().location().toString())
             addProperty("startedTick", trace.startedTick)
             addProperty("intervalTicks", trace.intervalTicks)
             addProperty("maxTicks", trace.maxTicks)
@@ -149,8 +149,8 @@ object TraceOps : RpcHandlerGroup {
 
     private data class ActiveTrace(
         val id: String,
-        val world: ServerWorld,
-        val box: BlockBox,
+        val world: ServerLevel,
+        val box: BoundingBox,
         val include: Set<SnapshotKind>,
         val intervalTicks: Int,
         val maxTicks: Int,

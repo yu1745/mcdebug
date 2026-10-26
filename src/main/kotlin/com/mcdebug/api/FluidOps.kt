@@ -16,12 +16,12 @@ import net.fabricmc.fabric.api.transfer.v1.storage.StorageView
 import net.fabricmc.fabric.api.transfer.v1.storage.base.CombinedStorage
 import net.fabricmc.fabric.api.transfer.v1.storage.base.SingleVariantStorage
 import net.fabricmc.fabric.api.transfer.v1.transaction.Transaction
-import net.minecraft.fluid.Fluid
-import net.minecraft.registry.Registries
+import net.minecraft.world.level.material.Fluid
+import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.server.MinecraftServer
-import net.minecraft.util.Identifier
-import net.minecraft.util.math.BlockPos
-import net.minecraft.util.math.Direction
+import net.minecraft.resources.ResourceLocation
+import net.minecraft.core.BlockPos
+import net.minecraft.core.Direction
 import java.util.concurrent.CompletableFuture
 
 /**
@@ -61,7 +61,7 @@ object FluidOps : RpcHandlerGroup {
             val storage = findStorage(world, pos, side)
             val parts = enumerateParts(storage)
             JsonObject().apply {
-                addProperty("side", side?.asString() ?: "null")
+                addProperty("side", side?.getSerializedName() ?: "null")
                 addProperty("type", typeNameOf(storage))
                 addProperty("supportsInsertion", storage.supportsInsertion())
                 addProperty("supportsExtraction", storage.supportsExtraction())
@@ -132,7 +132,7 @@ object FluidOps : RpcHandlerGroup {
                 else tx.abort()
                 JsonObject().apply {
                     addProperty("index", idx)
-                    addProperty("fluid", Registries.FLUID.getId(currentFluid.fluid).toString())
+                    addProperty("fluid", BuiltInRegistries.FLUID.getKey(currentFluid.fluid).toString())
                     addProperty("requested", amount)
                     addProperty("extracted", extracted)
                     addProperty("remaining", amount - extracted)
@@ -149,10 +149,10 @@ object FluidOps : RpcHandlerGroup {
         val capacity: Long,
     ) {
         val fluidId: String?
-            get() = if (variant.isBlank) null else Registries.FLUID.getId(variant.fluid).toString()
+            get() = if (variant.isBlank) null else BuiltInRegistries.FLUID.getKey(variant.fluid).toString()
     }
 
-    private fun resolve(server: MinecraftServer, params: JsonObject?): Triple<net.minecraft.server.world.ServerWorld, BlockPos, Direction?> {
+    private fun resolve(server: MinecraftServer, params: JsonObject?): Triple<net.minecraft.server.level.ServerLevel, BlockPos, Direction?> {
         val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
         val pos = ServerContext.pos(p.getAsJsonArray("pos"))
         val world = ServerContext.world(server, p.getStringOrNull("dim"))
@@ -160,7 +160,7 @@ object FluidOps : RpcHandlerGroup {
         return Triple(world, pos, side)
     }
 
-    private fun findStorage(world: net.minecraft.server.world.ServerWorld, pos: BlockPos, side: Direction?): Storage<FluidVariant> =
+    private fun findStorage(world: net.minecraft.server.level.ServerLevel, pos: BlockPos, side: Direction?): Storage<FluidVariant> =
         FluidStorage.SIDED.find(world, pos, side)
             ?: throw RpcException(
                 RpcErrors.FLUID_NOT_FOUND,
@@ -292,12 +292,12 @@ object FluidOps : RpcHandlerGroup {
     }
 
     private fun resolveFluid(server: MinecraftServer, id: String): Fluid {
-        val identifier = Identifier.tryParse(id)
+        val identifier = ResourceLocation.tryParse(id)
             ?: throw RpcException(RpcErrors.INVALID_PARAMS, "invalid fluid id: $id")
-        val key = net.minecraft.registry.RegistryKey.of(net.minecraft.registry.RegistryKeys.FLUID, identifier)
-        val fluid = server.registryManager.get(net.minecraft.registry.RegistryKeys.FLUID).getOrEmpty(key).orElse(null)
+        val key = net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.FLUID, identifier)
+        val fluid = server.registryAccess().registryOrThrow(net.minecraft.core.registries.Registries.FLUID).get(key)
             ?: throw RpcException(RpcErrors.INVALID_PARAMS, "fluid not registered: $id")
-        if (fluid == net.minecraft.fluid.Fluids.EMPTY) {
+        if (fluid == net.minecraft.world.level.material.Fluids.EMPTY) {
             throw RpcException(RpcErrors.INVALID_PARAMS, "fluid is EMPTY (no real fluid for: $id)")
         }
         return fluid

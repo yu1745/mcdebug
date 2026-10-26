@@ -21,27 +21,27 @@ import net.fabricmc.fabric.api.transfer.v1.storage.SlottedStorage
 import net.fabricmc.fabric.api.transfer.v1.storage.Storage
 import net.fabricmc.fabric.api.transfer.v1.storage.StorageView
 import net.fabricmc.fabric.api.transfer.v1.transaction.Transaction
-import net.minecraft.entity.Entity
-import net.minecraft.entity.InventoryOwner
-import net.minecraft.entity.player.PlayerEntity
-import net.minecraft.fluid.Fluid
-import net.minecraft.inventory.Inventory
-import net.minecraft.inventory.SidedInventory
-import net.minecraft.item.ItemStack
-import net.minecraft.registry.Registries
-import net.minecraft.screen.ScreenHandler
+import net.minecraft.world.entity.Entity
+import net.minecraft.world.entity.npc.InventoryCarrier
+import net.minecraft.world.entity.player.Player
+import net.minecraft.world.level.material.Fluid
+import net.minecraft.world.Container
+import net.minecraft.world.WorldlyContainer
+import net.minecraft.world.item.ItemStack
+import net.minecraft.core.registries.BuiltInRegistries
+import net.minecraft.world.inventory.AbstractContainerMenu
 import net.minecraft.server.MinecraftServer
-import net.minecraft.server.world.ServerWorld
-import net.minecraft.util.Identifier
-import net.minecraft.util.math.BlockBox
-import net.minecraft.util.math.BlockPos
-import net.minecraft.util.math.Direction
-import net.minecraft.world.World
+import net.minecraft.server.level.ServerLevel
+import net.minecraft.resources.ResourceLocation
+import net.minecraft.world.level.levelgen.structure.BoundingBox
+import net.minecraft.core.BlockPos
+import net.minecraft.core.Direction
+import net.minecraft.world.level.Level
 import java.lang.reflect.Method
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
-import net.minecraft.component.ComponentChanges
-import net.minecraft.inventory.SimpleInventory
+import net.minecraft.core.component.DataComponentPatch
+import net.minecraft.world.SimpleContainer
 import net.minecraft.nbt.NbtOps
 
 object StorageOps : RpcHandlerGroup {
@@ -84,7 +84,7 @@ object StorageOps : RpcHandlerGroup {
             val amount = p.requireLong("amount")
             val simulate = p.getBoolOrFalse("simulate")
             when (kindOfHandle(handle)) {
-                "item" -> insertItem(server, target, side, handle, resource, amount, simulate)
+                "item" -> moveItemStackTo(server, target, side, handle, resource, amount, simulate)
                 "fluid" -> insertFluid(server, target, side, resource, amount, simulate)
                 "energy" -> insertEnergy(target, side, amount, simulate)
                 else -> throwStorageNotFound(handle, target)
@@ -127,7 +127,7 @@ object StorageOps : RpcHandlerGroup {
             }
         }
 
-    private fun insertItem(
+    private fun moveItemStackTo(
         server: MinecraftServer,
         target: TargetRef,
         side: Direction?,
@@ -330,78 +330,78 @@ object StorageOps : RpcHandlerGroup {
         }
     }
 
-    private fun vanillaInsert(inv: Inventory, side: Direction?, stack: ItemStack, simulate: Boolean): Int {
+    private fun vanillaInsert(inv: Container, side: Direction?, stack: ItemStack, simulate: Boolean): Int {
         if (stack.isEmpty) return 0
         var remaining = stack.count
         val slots = slotsFor(inv, side)
 
         for (slot in slots) {
             if (remaining <= 0) break
-            val current = inv.getStack(slot)
-            if (current.isEmpty || !ItemStack.areItemsAndComponentsEqual(current, stack)) continue
+            val current = inv.getItem(slot)
+            if (current.isEmpty || !ItemStack.isSameItemSameComponents(current, stack)) continue
             if (!canInsert(inv, slot, stack, side)) continue
-            val space = minOf(current.maxCount, inv.maxCountPerStack) - current.count
+            val space = minOf(current.maxStackSize, inv.maxStackSize) - current.count
             if (space <= 0) continue
             val moved = minOf(space, remaining)
             if (!simulate) {
                 val next = current.copy()
-                next.increment(moved)
-                inv.setStack(slot, next)
+                next.grow(moved)
+                inv.setItem(slot, next)
             }
             remaining -= moved
         }
 
         for (slot in slots) {
             if (remaining <= 0) break
-            if (!inv.getStack(slot).isEmpty) continue
+            if (!inv.getItem(slot).isEmpty) continue
             if (!canInsert(inv, slot, stack, side)) continue
-            val moved = minOf(stack.maxCount, inv.maxCountPerStack, remaining)
+            val moved = minOf(stack.maxStackSize, inv.maxStackSize, remaining)
             if (!simulate) {
                 val next = stack.copy()
                 next.count = moved
-                inv.setStack(slot, next)
+                inv.setItem(slot, next)
             }
             remaining -= moved
         }
 
-        if (!simulate && remaining != stack.count) inv.markDirty()
+        if (!simulate && remaining != stack.count) inv.setChanged()
         return stack.count - remaining
     }
 
-    private fun vanillaExtract(inv: Inventory, side: Direction?, exemplar: ItemStack, amount: Int, simulate: Boolean): Int {
+    private fun vanillaExtract(inv: Container, side: Direction?, exemplar: ItemStack, amount: Int, simulate: Boolean): Int {
         if (exemplar.isEmpty || amount <= 0) return 0
         var remaining = amount
         for (slot in slotsFor(inv, side)) {
             if (remaining <= 0) break
-            val current = inv.getStack(slot)
-            if (current.isEmpty || !ItemStack.areItemsAndComponentsEqual(current, exemplar)) continue
+            val current = inv.getItem(slot)
+            if (current.isEmpty || !ItemStack.isSameItemSameComponents(current, exemplar)) continue
             if (!canExtract(inv, slot, current, side)) continue
             val moved = minOf(current.count, remaining)
             if (!simulate) {
                 val next = current.copy()
-                next.decrement(moved)
-                inv.setStack(slot, if (next.isEmpty) ItemStack.EMPTY else next)
+                next.shrink(moved)
+                inv.setItem(slot, if (next.isEmpty) ItemStack.EMPTY else next)
             }
             remaining -= moved
         }
-        if (!simulate && remaining != amount) inv.markDirty()
+        if (!simulate && remaining != amount) inv.setChanged()
         return amount - remaining
     }
 
-    private fun slotsFor(inv: Inventory, side: Direction?): List<Int> {
-        if (side != null && inv is SidedInventory) return inv.getAvailableSlots(side).toList()
-        return (0 until inv.size()).toList()
+    private fun slotsFor(inv: Container, side: Direction?): List<Int> {
+        if (side != null && inv is WorldlyContainer) return inv.getSlotsForFace(side).toList()
+        return (0 until inv.containerSize).toList()
     }
 
-    private fun canInsert(inv: Inventory, slot: Int, stack: ItemStack, side: Direction?): Boolean {
-        if (!inv.isValid(slot, stack)) return false
-        return side == null || inv !is SidedInventory || inv.canInsert(slot, stack, side)
+    private fun canInsert(inv: Container, slot: Int, stack: ItemStack, side: Direction?): Boolean {
+        if (!inv.canPlaceItem(slot, stack)) return false
+        return side == null || inv !is WorldlyContainer || inv.canPlaceItemThroughFace(slot, stack, side)
     }
 
-    private fun canExtract(inv: Inventory, slot: Int, stack: ItemStack, side: Direction?): Boolean =
-        side == null || inv !is SidedInventory || inv.canExtract(slot, stack, side)
+    private fun canExtract(inv: Container, slot: Int, stack: ItemStack, side: Direction?): Boolean =
+        side == null || inv !is WorldlyContainer || inv.canTakeItemThroughFace(slot, stack, side)
 
-    internal fun handlesFor(world: ServerWorld, pos: BlockPos, side: Direction?): JsonArray =
+    internal fun handlesFor(world: ServerLevel, pos: BlockPos, side: Direction?): JsonArray =
         handlesFor(TargetRef.Block(world, pos), side)
 
     private fun handlesFor(target: TargetRef, side: Direction?): JsonArray =
@@ -444,7 +444,7 @@ object StorageOps : RpcHandlerGroup {
             }
         }
 
-    internal fun getHandleJson(world: ServerWorld, pos: BlockPos, side: Direction?, handle: String): JsonObject =
+    internal fun getHandleJson(world: ServerLevel, pos: BlockPos, side: Direction?, handle: String): JsonObject =
         getHandleJson(TargetRef.Block(world, pos), side, handle)
 
     private fun getHandleJson(target: TargetRef, side: Direction?, handle: String): JsonObject =
@@ -468,7 +468,7 @@ object StorageOps : RpcHandlerGroup {
             else -> throwStorageNotFound(handle, target)
         }
 
-    internal fun blockResourcesToJson(world: ServerWorld, pos: BlockPos, side: Direction? = null): JsonObject =
+    internal fun blockResourcesToJson(world: ServerLevel, pos: BlockPos, side: Direction? = null): JsonObject =
         JsonObject().apply {
             add("handles", handlesFor(world, pos, side))
             val resources = JsonArray()
@@ -479,7 +479,7 @@ object StorageOps : RpcHandlerGroup {
             add("resources", resources)
         }
 
-    private fun inventoryToJson(inv: Inventory, side: Direction?, handle: String): JsonObject =
+    private fun inventoryToJson(inv: Container, side: Direction?, handle: String): JsonObject =
         JsonObject().apply {
             addProperty("handle", handle)
             addProperty("kind", "item")
@@ -489,8 +489,8 @@ object StorageOps : RpcHandlerGroup {
                 for (slot in slotsFor(inv, side)) {
                     add(JsonObject().apply {
                         addProperty("index", slot)
-                        add("stack", ServerContext.itemStackToJson(inv.getStack(slot)))
-                        addProperty("capacity", minOf(inv.maxCountPerStack, inv.getStack(slot).maxCount))
+                        add("stack", ServerContext.itemStackToJson(inv.getItem(slot)))
+                        addProperty("capacity", minOf(inv.maxStackSize, inv.getItem(slot).maxStackSize))
                     })
                 }
             })
@@ -555,7 +555,7 @@ object StorageOps : RpcHandlerGroup {
         JsonObject().apply {
             addProperty("index", index)
             val variant = view.resource
-            if (variant.isBlank) add("fluid", JsonNull.INSTANCE) else addProperty("fluid", Registries.FLUID.getId(variant.fluid).toString())
+            if (variant.isBlank) add("fluid", JsonNull.INSTANCE) else addProperty("fluid", BuiltInRegistries.FLUID.getKey(variant.fluid).toString())
             if (!variant.isBlank && variant.hasComponents()) add("nbt", fluidComponentsToJson(variant.components))
             addProperty("amount", view.amount)
             addProperty("capacity", view.capacity)
@@ -595,18 +595,18 @@ object StorageOps : RpcHandlerGroup {
             }
         }
 
-    private fun inventoryFor(target: TargetRef): Inventory? =
+    private fun inventoryFor(target: TargetRef): Container? =
         when (target) {
-            is TargetRef.Block -> target.world.getBlockEntity(target.pos) as? Inventory
+            is TargetRef.Block -> target.world.getBlockEntity(target.pos) as? Container
             is TargetRef.Entity -> entityInventory(target.entity)
             is TargetRef.Item -> null
         }
 
-    private fun entityInventory(entity: Entity): Inventory? =
+    private fun entityInventory(entity: Entity): Container? =
         when (entity) {
-            is Inventory -> entity
-            is InventoryOwner -> entity.inventory
-            is PlayerEntity -> entity.inventory
+            is Container -> entity
+            is InventoryCarrier -> entity.inventory
+            is Player -> entity.inventory
             else -> null
         }
 
@@ -617,16 +617,16 @@ object StorageOps : RpcHandlerGroup {
         if (mutable) {
             //withInitial was removed in fabric-transfer 1.21; a one-slot InventoryStorage reproduces its
             //mutable-copy container-item semantics
-            val inv = SimpleInventory(1)
-            inv.setStack(0, stack.copy())
+            val inv = SimpleContainer(1)
+            inv.setItem(0, stack.copy())
             ContainerItemContext.ofSingleSlot(InventoryStorage.of(inv, null).getSlot(0))
         } else ContainerItemContext.withConstant(stack.copy())
 
     /** 1.21: fluid variants carry component changes instead of NBT; encode them losslessly for the DTO. */
-    private fun fluidComponentsToJson(changes: net.minecraft.component.ComponentChanges): com.google.gson.JsonElement =
+    private fun fluidComponentsToJson(changes: net.minecraft.core.component.DataComponentPatch): com.google.gson.JsonElement =
         try {
             NbtJson.toJson(
-                net.minecraft.component.ComponentChanges.CODEC
+                net.minecraft.core.component.DataComponentPatch.CODEC
                     .encodeStart(net.minecraft.nbt.NbtOps.INSTANCE, changes)
                     .result()
                     .orElseThrow { RpcException(RpcErrors.INTERNAL_ERROR, "failed to encode fluid components") }
@@ -672,12 +672,12 @@ object StorageOps : RpcHandlerGroup {
     }
 
     private fun resolveFluid(server: MinecraftServer, id: String): Fluid {
-        val identifier = Identifier.tryParse(id)
+        val identifier = ResourceLocation.tryParse(id)
             ?: throw RpcException(RpcErrors.INVALID_PARAMS, "invalid fluid id: $id")
-        val key = net.minecraft.registry.RegistryKey.of(net.minecraft.registry.RegistryKeys.FLUID, identifier)
-        val fluid = server.registryManager.get(net.minecraft.registry.RegistryKeys.FLUID).getOrEmpty(key).orElse(null)
+        val key = net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.FLUID, identifier)
+        val fluid = server.registryAccess().registryOrThrow(net.minecraft.core.registries.Registries.FLUID).get(key)
             ?: throw RpcException(RpcErrors.INVALID_PARAMS, "fluid not registered: $id")
-        if (fluid == net.minecraft.fluid.Fluids.EMPTY) {
+        if (fluid == net.minecraft.world.level.material.Fluids.EMPTY) {
             throw RpcException(RpcErrors.INVALID_PARAMS, "fluid is EMPTY (no real fluid for: $id)")
         }
         return fluid
@@ -736,14 +736,14 @@ object StorageOps : RpcHandlerGroup {
     }
 
     private sealed class TargetRef {
-        data class Block(val world: ServerWorld, val pos: BlockPos) : TargetRef()
-        data class Entity(val world: ServerWorld, val entity: net.minecraft.entity.Entity) : TargetRef()
+        data class Block(val world: ServerLevel, val pos: BlockPos) : TargetRef()
+        data class Entity(val world: ServerLevel, val entity: net.minecraft.world.entity.Entity) : TargetRef()
         data class Item(val stack: ItemStack) : TargetRef()
 
         fun label(): String = when (this) {
-            is Block -> "block:${world.registryKey.value}:${pos.x},${pos.y},${pos.z}"
-            is Entity -> "entity:${world.registryKey.value}:${entity.uuidAsString}"
-            is Item -> "item:${Registries.ITEM.getId(stack.item)}:${stack.count}"
+            is Block -> "block:${world.dimension().location()}:${pos.x},${pos.y},${pos.z}"
+            is Entity -> "entity:${world.dimension().location()}:${entity.getStringUUID()}"
+            is Item -> "item:${BuiltInRegistries.ITEM.getKey(stack.item)}:${stack.count}"
         }
     }
 
@@ -779,7 +779,7 @@ object StorageOps : RpcHandlerGroup {
             itemLookup?.javaClass?.methods?.firstOrNull { it.name == "find" && it.parameterCount == 2 }
         }
 
-        fun find(world: World, pos: BlockPos, side: Direction?): Any? {
+        fun find(world: Level, pos: BlockPos, side: Direction?): Any? {
             val lookup = sidedLookup ?: return null
             val method = sidedFindMethod ?: return null
             return method.invoke(lookup, world, pos, side)
@@ -843,31 +843,31 @@ internal fun JsonObject.requireObject(name: String): JsonObject =
     if (has(name) && !get(name).isJsonNull && get(name).isJsonObject) getAsJsonObject(name)
     else throw RpcException(RpcErrors.INVALID_PARAMS, "missing object param: $name")
 
-internal fun boxFromParams(p: JsonObject): BlockBox {
+internal fun boxFromParams(p: JsonObject): BoundingBox {
     val box = p.getAsJsonObject("box") ?: throw RpcException(RpcErrors.INVALID_PARAMS, "box required")
     val from = ServerContext.pos(box.getAsJsonArray("from"))
     val to = ServerContext.pos(box.getAsJsonArray("to"))
     return ServerContext.boxFrom(from, to)
 }
 
-internal fun ensureChunksLoaded(world: World, box: BlockBox) {
-    val minCx = box.minX shr 4
-    val maxCx = box.maxX shr 4
-    val minCz = box.minZ shr 4
-    val maxCz = box.maxZ shr 4
+internal fun ensureChunksLoaded(world: Level, box: BoundingBox) {
+    val minCx = box.minX() shr 4
+    val maxCx = box.maxX() shr 4
+    val minCz = box.minZ() shr 4
+    val maxCz = box.maxZ() shr 4
     for (cx in minCx..maxCx) {
         for (cz in minCz..maxCz) {
-            if (!world.chunkManager.isChunkLoaded(cx, cz)) {
+            if (!world.chunkSource.hasChunk(cx, cz)) {
                 throw RpcException(RpcErrors.CHUNK_NOT_LOADED, "chunk not loaded: ($cx, $cz)")
             }
         }
     }
 }
 
-internal fun screenHandlerProperties(handler: ScreenHandler): List<Int> {
+internal fun screenHandlerProperties(handler: AbstractContainerMenu): List<Int> {
     val field = listOf("properties", "field_7765").firstNotNullOfOrNull { name ->
         runCatching {
-            ScreenHandler::class.java.getDeclaredField(name).apply { isAccessible = true }
+            AbstractContainerMenu::class.java.getDeclaredField(name).apply { isAccessible = true }
         }.getOrNull()
     } ?: return emptyList()
     val properties = field.get(handler) as? List<*> ?: return emptyList()

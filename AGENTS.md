@@ -8,10 +8,12 @@
 
 - MC 反编译源码（按版本）：`../mc_source_{version}/`
   - `../mc_source_1.21.1/`（Mojang 官方名）
-  - `../mc_source_1.20.1/`（yarn 名）
+  - `../mc_source_1.20.1/`（yarn 名，1.20.1 归档线用）
 - Fabric API 源码：`../fabric-api_{version}/`
-  - `../fabric-api_1.21.1/`、`../fabric-api_1.20.1/`（注意：fabric-api 仓库源码是 yarn 名，经 loom remap 编译，类名行为一致但方法名要换算）
-- mcdebug 源码是 yarn 名，与 `mc_source_1.21.1`（Mojang 名）对照时用 ic2-fabric 的映射表：`../ic2-fabric-1.21.1/docs/yarn-to-mojang-1.21.1.tsv`；或用本项目 `sh gradlew genSources` 生成的 yarn 名 MC 源码（产物在**项目根目录**下的 `.gradle/loom-cache/minecraftMaven/net/minecraft/`，解压其中 `*-sources.jar` 即得）。
+  - `../fabric-api_1.21.1/`、`../fabric-api_1.20.1/`（注意：fabric-api 树里它自己的 API 声明可信，但其中引用的 MC/JDK 方法名曾被工具损坏过，MC 名以 `mc_source_1.21.1` 为准）
+- **1.21.1 线（`port-fabric-1.21.1` 分支起）mcdebug 用 Mojang 官方映射**（`loom.officialMojangMappings()`），与 `mc_source_1.21.1` 直查一致；1.20.1 线（`main`）仍是 yarn。yarn→mojang 成员改名可复用 ic2 工具链：`../ic2-fabric-1.21.1/docs/yarn-to-mojang-1.21.1.tsv`（类/方法/字段）+ `tools/yarn2mojang.py` + `tools/bulk-rename-pass*.sed`。
+- mojang 侧两个 Kotlin 陷阱：私有字段与公有方法同名时（如 `Level.registryAccess`、`MinecraftServer.tickCount`、`BoundingBox.minX`），Kotlin 解析到私有字段报错，要用**调用形态**（`registryAccess()`、`minX()`）；`Registry.getId(x)` 在 mojang 是数字 id（IdMap），取注册名要用 `getKey(x)`。
+- 需要重新生成 MC 源码时：`sh gradlew genSources`，产物在**项目根目录**下的 `.gradle/loom-cache/minecraftMaven/net/minecraft/`（不是用户目录），解压其中 `*-sources.jar` 即得（按当前 mappings 命名）。
 - `mc_source_1.21.1` 里查不到的东西（fabric 专属 API）才去 `fabric-api_1.21.1` 查。
 
 ## 1. 为什么需要这个容器

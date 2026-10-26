@@ -10,14 +10,14 @@ import com.mcdebug.rpc.RpcHandler
 import com.mcdebug.rpc.RpcHandlerGroup
 import com.mcdebug.util.ServerContext
 import com.mojang.authlib.GameProfile
-import net.minecraft.registry.Registries
-import net.minecraft.screen.ScreenHandler
-import net.minecraft.screen.slot.SlotActionType
+import net.minecraft.core.registries.BuiltInRegistries
+import net.minecraft.world.inventory.AbstractContainerMenu
+import net.minecraft.world.inventory.ClickType
 import net.minecraft.server.MinecraftServer
-import net.minecraft.server.network.ServerPlayerEntity
-import net.minecraft.text.Text
-import net.minecraft.util.math.BlockPos
-import net.minecraft.util.math.Direction
+import net.minecraft.server.level.ServerPlayer
+import net.minecraft.network.chat.Component
+import net.minecraft.core.BlockPos
+import net.minecraft.core.Direction
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 
@@ -47,7 +47,7 @@ object ScreenOps : RpcHandlerGroup {
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val side = StorageOps.parseSide(p.getAsJsonObject("opts")?.getStringOrNull("side") ?: p.getStringOrNull("side"))
             val state = world.getBlockState(pos)
-            val factory = state.createScreenHandlerFactory(world, pos)
+            val factory = state.getMenuProvider(world, pos)
                 ?: throwScreenNotFound("no screen handler factory at $pos", null)
 
             val sessionUuid = UUID.randomUUID()
@@ -55,15 +55,15 @@ object ScreenOps : RpcHandlerGroup {
             positionPlayerForScreen(player, pos, side)
 
             closeSessionsForPlayer(player)
-            val opened = player.openHandledScreen(factory)
+            val opened = player.openMenu(factory)
             if (opened.isEmpty) {
                 throwScreenNotFound("screen handler factory returned empty at $pos", null)
             }
 
-            val handler = player.currentScreenHandler
+            val handler = player.containerMenu
             val id = UUID.randomUUID().toString()
-            val title = factory.displayName ?: Text.empty()
-            val session = ScreenSession(id, player, handler, title, world.registryKey.value.toString(), pos)
+            val title = factory.displayName ?: Component.empty()
+            val session = ScreenSession(id, player, handler, title, world.dimension().location().toString(), pos)
             sessions[id] = session
             screenSnapshot(session)
         }
@@ -84,9 +84,9 @@ object ScreenOps : RpcHandlerGroup {
             }
             val stack = itemStackFromJson(server, p.requireObject("stack"))
             requireUsable(session)
-            session.player.inventory.setStack(slot, stack)
-            session.player.inventory.markDirty()
-            session.handler.sendContentUpdates()
+            session.player.inventory.setItem(slot, stack)
+            session.player.inventory.setChanged()
+            session.handler.sendAllDataToRemote()
             screenSnapshot(session)
         }
 
@@ -98,8 +98,8 @@ object ScreenOps : RpcHandlerGroup {
             val button = p.getIntOr("button", 0)
             val actionType = parseActionType(p.requireString("actionType"))
             requireUsable(session)
-            session.handler.onSlotClick(slot, button, actionType, session.player)
-            session.handler.sendContentUpdates()
+            session.handler.clicked(slot, button, actionType, session.player)
+            session.handler.sendAllDataToRemote()
             screenSnapshot(session)
         }
 
@@ -109,8 +109,8 @@ object ScreenOps : RpcHandlerGroup {
             val session = session(p)
             val slot = p.requireLong("slot").toInt()
             requireUsable(session)
-            session.handler.onSlotClick(slot, 0, SlotActionType.QUICK_MOVE, session.player)
-            session.handler.sendContentUpdates()
+            session.handler.clicked(slot, 0, ClickType.QUICK_MOVE, session.player)
+            session.handler.sendAllDataToRemote()
             screenSnapshot(session)
         }
 
@@ -127,49 +127,49 @@ object ScreenOps : RpcHandlerGroup {
 
     private fun screenSnapshot(session: ScreenSession): JsonObject =
         JsonObject().apply {
-            session.handler.sendContentUpdates()
+            session.handler.sendAllDataToRemote()
             addProperty("screenId", session.id)
             addProperty("title", session.title.string)
             addProperty("handlerType", handlerTypeId(session.handler))
-            addProperty("syncId", session.handler.syncId)
+            addProperty("syncId", session.handler.containerId)
             addProperty("dim", session.dim)
             add("pos", ServerContext.posAsJson(session.pos))
             add("slots", JsonArray().apply {
                 session.handler.slots.forEach { slot ->
-                    add(ServerContext.itemStackToJson(slot.stack))
+                    add(ServerContext.itemStackToJson(slot.item))
                 }
             })
             add("slotDetails", JsonArray().apply {
                 session.handler.slots.forEachIndexed { index, slot ->
                     add(JsonObject().apply {
                         addProperty("index", index)
-                        addProperty("id", slot.id)
+                        addProperty("id", index)
                         addProperty("x", slot.x)
                         addProperty("y", slot.y)
-                        addProperty("canTake", runCatching { slot.canTakeItems(session.player) }.getOrDefault(false))
-                        addProperty("canInsert", runCatching { slot.canInsert(slot.stack) }.getOrDefault(false))
-                        add("stack", ServerContext.itemStackToJson(slot.stack))
+                        addProperty("canTake", runCatching { slot.mayPickup(session.player) }.getOrDefault(false))
+                        addProperty("canInsert", runCatching { slot.mayPlace(slot.item) }.getOrDefault(false))
+                        add("stack", ServerContext.itemStackToJson(slot.item))
                     })
                 }
             })
-            add("cursor", ServerContext.itemStackToJson(session.handler.cursorStack))
+            add("cursor", ServerContext.itemStackToJson(session.handler.carried))
             add("properties", JsonArray().apply {
                 screenHandlerProperties(session.handler).forEach { add(it) }
             })
         }
 
     private fun closeSession(session: ScreenSession) {
-        if (session.player.currentScreenHandler == session.handler) {
-            session.player.closeHandledScreen()
+        if (session.player.containerMenu == session.handler) {
+            session.player.closeContainer()
         } else {
-            session.handler.onClosed(session.player)
+            session.handler.removed(session.player)
         }
         // The session player was spawned into the world (FakePlayerPool.create) —
         // remove it so it stops ticking.
         FakePlayerPool.discard(session.player)
     }
 
-    private fun closeSessionsForPlayer(player: ServerPlayerEntity) {
+    private fun closeSessionsForPlayer(player: ServerPlayer) {
         val ids = sessions.values.filter { it.player == player }.map { it.id }
         for (id in ids) {
             val session = sessions.remove(id) ?: continue
@@ -184,25 +184,25 @@ object ScreenOps : RpcHandlerGroup {
     }
 
     private fun requireUsable(session: ScreenSession) {
-        if (session.player.currentScreenHandler != session.handler) {
+        if (session.player.containerMenu != session.handler) {
             throwScreenNotFound("screen is no longer the player's current handler: ${session.id}", session.id)
         }
-        if (!session.handler.canUse(session.player)) {
+        if (!session.handler.stillValid(session.player)) {
             throwScreenNotFound("screen can no longer be used: ${session.id}", session.id)
         }
     }
 
-    private fun handlerTypeId(handler: ScreenHandler): String? {
+    private fun handlerTypeId(handler: AbstractContainerMenu): String? {
         val type = runCatching { handler.type }.getOrNull() ?: return null
-        return Registries.SCREEN_HANDLER.getId(type)?.toString()
+        return BuiltInRegistries.MENU.getKey(type)?.toString()
     }
 
-    private fun positionPlayerForScreen(player: ServerPlayerEntity, pos: BlockPos, side: Direction?) {
+    private fun positionPlayerForScreen(player: ServerPlayer, pos: BlockPos, side: Direction?) {
         val face = side ?: Direction.NORTH
-        player.refreshPositionAndAngles(
-            pos.x + 0.5 + face.offsetX * 0.75,
-            pos.y + 0.5 + face.offsetY * 0.75,
-            pos.z + 0.5 + face.offsetZ * 0.75,
+        player.moveTo(
+            pos.x + 0.5 + face.stepX * 0.75,
+            pos.y + 0.5 + face.stepY * 0.75,
+            pos.z + 0.5 + face.stepZ * 0.75,
             yawFor(face.opposite),
             pitchFor(face.opposite),
         )
@@ -222,12 +222,12 @@ object ScreenOps : RpcHandlerGroup {
         else -> 0f
     }
 
-    private fun parseActionType(value: String): SlotActionType =
-        runCatching { SlotActionType.valueOf(value.uppercase()) }
+    private fun parseActionType(value: String): ClickType =
+        runCatching { ClickType.valueOf(value.uppercase()) }
             .getOrElse {
                 throw RpcException(
                     RpcErrors.INVALID_PARAMS,
-                    "invalid actionType: $value (allowed: ${SlotActionType.entries.joinToString { it.name.lowercase() }})"
+                    "invalid actionType: $value (allowed: ${ClickType.entries.joinToString { it.name.lowercase() }})"
                 )
             }
 
@@ -249,9 +249,9 @@ object ScreenOps : RpcHandlerGroup {
 
     private data class ScreenSession(
         val id: String,
-        val player: ServerPlayerEntity,
-        val handler: ScreenHandler,
-        val title: Text,
+        val player: ServerPlayer,
+        val handler: AbstractContainerMenu,
+        val title: Component,
         val dim: String,
         val pos: BlockPos,
     )

@@ -378,7 +378,7 @@ object ReflectOps : RpcHandlerGroup {
         if (value == null) return JsonObject().apply { addProperty("\$null", true) }
         val v = unwrapOptional(value)
         return when {
-            v is CharSequence || v is java.util.UUID || v is Enum<*> || v is net.minecraft.util.Identifier ->
+            v is CharSequence || v is java.util.UUID || v is Enum<*> || v is net.minecraft.resources.ResourceLocation ->
                 JsonPrimitive(v.toString())
             v is Boolean -> JsonPrimitive(v)
             v is Int -> JsonPrimitive(v)
@@ -410,7 +410,7 @@ object ReflectOps : RpcHandlerGroup {
                 if (len > 200) arr.add(JsonObject().apply { addProperty("\$truncated", len - 200) })
                 arr
             }
-            v is net.minecraft.item.ItemStack -> {
+            v is net.minecraft.world.item.ItemStack -> {
                 // friendly display for the most common debugging target;
                 // ALSO register a ref so callers can pass it back as an arg
                 val id = refCounter.getAndIncrement()

@@ -11,15 +11,15 @@ import com.mcdebug.rpc.RpcHandler
 import com.mcdebug.rpc.RpcHandlerGroup
 import com.mcdebug.util.ServerContext
 import net.minecraft.server.MinecraftServer
-import net.minecraft.world.World
-import net.minecraft.util.Hand
-import net.minecraft.item.ItemStack
-import net.minecraft.util.math.BlockPos
-import net.minecraft.world.GameMode
-import net.minecraft.entity.player.PlayerEntity
-import net.minecraft.server.command.CommandOutput
-import net.minecraft.server.command.ServerCommandSource
-import net.minecraft.text.Text
+import net.minecraft.world.level.Level
+import net.minecraft.world.InteractionHand
+import net.minecraft.world.item.ItemStack
+import net.minecraft.core.BlockPos
+import net.minecraft.world.level.GameType
+import net.minecraft.world.entity.player.Player
+import net.minecraft.commands.CommandSource
+import net.minecraft.commands.CommandSourceStack
+import net.minecraft.network.chat.Component
 import java.util.concurrent.CompletableFuture
 
 object ServerOps : RpcHandlerGroup {
@@ -38,21 +38,21 @@ object ServerOps : RpcHandlerGroup {
      */
     private fun health(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
         RpcContext.onServer(server) {
-            val mspt = server.averageTickTime
+            val mspt = server.currentSmoothedTickTime
             val tps = if (mspt > 0f) (1000.0 / mspt).coerceAtMost(20.0) else 20.0
             val dims = JsonArray()
-            server.worlds.forEach { w ->
+            server.getAllLevels().forEach { w ->
                 dims.add(JsonObject().apply {
-                    addProperty("dim", w.registryKey.value.toString())
-                    addProperty("entities", w.iterateEntities().count())
-                    addProperty("loadedChunks", w.chunkManager.loadedChunkCount)
+                    addProperty("dim", w.dimension().location().toString())
+                    addProperty("entities", w.getAllEntities().count())
+                    addProperty("loadedChunks", w.chunkSource.getLoadedChunksCount())
                 })
             }
             JsonObject().apply {
                 addProperty("tps", round2(tps))
                 addProperty("mspt", round2(mspt.toDouble()))
-                addProperty("tick", server.ticks)
-                addProperty("players", server.currentPlayerCount)
+                addProperty("tick", server.tickCount)
+                addProperty("players", server.playerCount)
                 add("dims", dims)
             }
         }
@@ -83,15 +83,15 @@ object ServerOps : RpcHandlerGroup {
             var methodDesc = ""
             var setItemInHandTest = ""
             FakePlayerPool.withFakePlayer(server, world, FakePlayerPool.gameModeFrom(p)) { fp ->
-                fp.setStackInHand(Hand.MAIN_HAND, stack.copy())
-                fp.refreshPositionAndAngles(pos.x + 0.5, pos.y + 1.5, pos.z + 0.5, 0f, 90f)
+                fp.setItemInHand(InteractionHand.MAIN_HAND, stack.copy())
+                fp.moveTo(pos.x + 0.5, pos.y + 1.5, pos.z + 0.5, 0f, 90f)
                 try {
                     val iFluidHandlerClass = Class.forName("net.minecraftforge.fluids.capability.IFluidHandler")
                     val fth = Class.forName("slimeknights.mantle.fluid.FluidTransferHelper")
                     val method = fth.getMethod(
                         "interactWithContainer",
-                        net.minecraft.world.World::class.java, BlockPos::class.java, iFluidHandlerClass,
-                        PlayerEntity::class.java, Hand::class.java,
+                        net.minecraft.world.level.Level::class.java, BlockPos::class.java, iFluidHandlerClass,
+                        Player::class.java, InteractionHand::class.java,
                     )
 
                     val be = world.getBlockEntity(pos)
@@ -104,15 +104,15 @@ object ServerOps : RpcHandlerGroup {
                         // Manually trace Mantle's tryTransfer steps on a fresh copy
                         val steps = JsonObject()
                         try {
-                            val heldStack = fp.getStackInHand(Hand.MAIN_HAND)
+                            val heldStack = fp.getItemInHand(InteractionHand.MAIN_HAND)
                             // Mantle uses ItemHandlerHelper.copyStackWithSize(stack, 1)
                             val ihhClass = Class.forName("net.minecraftforge.items.ItemHandlerHelper")
                             val csw = ihhClass.getMethod("copyStackWithSize", ItemStack::class.java, Int::class.javaPrimitiveType)
                             val copy = csw.invoke(null, heldStack, 1) as ItemStack
                             steps.addProperty("copyItem", copy.item.toString())
                             // Mantle's perspective: player.getItemInHand(hand) = intermediary method_5998
-                            val getItemInHand = fp.javaClass.getMethod("method_5998", Hand::class.java)
-                            val mantleStack = getItemInHand.invoke(fp, Hand.MAIN_HAND) as ItemStack
+                            val getItemInHand = fp.javaClass.getMethod("method_5998", InteractionHand::class.java)
+                            val mantleStack = getItemInHand.invoke(fp, InteractionHand.MAIN_HAND) as ItemStack
                             steps.addProperty("mantleStackItem", mantleStack.item.toString())
                             // Check Mantle's JSON transfer path activation
                             try {
@@ -192,14 +192,14 @@ object ServerOps : RpcHandlerGroup {
                                 steps.addProperty("getContainerEmpty", container.isEmpty)
                                 steps.addProperty("getContainerItem", container.item.toString())
 
-                                steps.addProperty("playerInstabuild", fp.abilities.creativeMode)
+                                steps.addProperty("playerInstabuild", fp.abilities.instabuild)
                                 steps.addProperty("playerAbilitiesClass", fp.abilities.javaClass.name)
                                 // Call the runtime (intermediary) ItemUtils.createFilledResult directly.
                                 try {
                                     val iuClass = Class.forName("net.minecraft.class_5328")
                                     val createFilled = iuClass.getMethod(
                                         "method_30012",
-                                        ItemStack::class.java, PlayerEntity::class.java, ItemStack::class.java,
+                                        ItemStack::class.java, Player::class.java, ItemStack::class.java,
                                     )
                                     val filledResult = createFilled.invoke(null, heldStack, fp, container) as ItemStack
                                     steps.addProperty("createFilledResultItem", filledResult.item.toString())
@@ -213,16 +213,18 @@ object ServerOps : RpcHandlerGroup {
                         }
                         traceJson = steps
                         methodDesc = method.toString()
-                        val result = method.invoke(null, world, pos, handler, fp, Hand.MAIN_HAND)
+                        val result = method.invoke(null, world, pos, handler, fp, InteractionHand.MAIN_HAND)
                         resultName = result.toString()
                         // sanity: does fakePlayer.setItemInHand stick?
-                        val oldHand = fp.getStackInHand(Hand.MAIN_HAND).copy()
-                        val setItemInHand = fp.javaClass.getMethod("method_6122", Hand::class.java, ItemStack::class.java)
-                        setItemInHand.invoke(fp, Hand.MAIN_HAND, ItemStack(net.minecraft.item.Items.BUCKET))
-                        val afterSet = fp.getStackInHand(Hand.MAIN_HAND)
+                        val oldHand = fp.getItemInHand(InteractionHand.MAIN_HAND).copy()
+                        val setItemInHand = listOf("setItemInHand", "method_6122").firstNotNullOfOrNull { n ->
+                            runCatching { fp.javaClass.getMethod(n, InteractionHand::class.java, ItemStack::class.java) }.getOrNull()
+                        } ?: throw IllegalStateException("no hand-item setter on player class")
+                        setItemInHand.invoke(fp, InteractionHand.MAIN_HAND, ItemStack(net.minecraft.world.item.Items.BUCKET))
+                        val afterSet = fp.getItemInHand(InteractionHand.MAIN_HAND)
                         setItemInHandTest = afterSet.item.toString() + "|count=" + afterSet.count
-                        setItemInHand.invoke(fp, Hand.MAIN_HAND, oldHand)
-                        val after = fp.getStackInHand(Hand.MAIN_HAND)
+                        setItemInHand.invoke(fp, InteractionHand.MAIN_HAND, oldHand)
+                        val after = fp.getItemInHand(InteractionHand.MAIN_HAND)
                         afterStack = if (after.isEmpty) "EMPTY" else after.item.toString()
 
 
@@ -230,8 +232,8 @@ object ServerOps : RpcHandlerGroup {
                 } catch (t: Throwable) {
                     error = t.cause?.toString() ?: t.toString()
                 } finally {
-                    fp.setStackInHand(Hand.MAIN_HAND, ItemStack.EMPTY)
-                    fp.isSneaking = false
+                    fp.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY)
+                    fp.isShiftKeyDown = false
                 }
             }
             JsonObject().apply {
@@ -300,25 +302,25 @@ object ServerOps : RpcHandlerGroup {
     private fun status(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
         RpcContext.onServer(server) {
             val dims = JsonArray()
-            server.worlds.forEach { dims.add(it.registryKey.value.toString()) }
-            val overworld = server.getWorld(World.OVERWORLD)
-            val dayTime = overworld?.timeOfDay ?: 0L
+            server.getAllLevels().forEach { dims.add(it.dimension().location().toString()) }
+            val overworld = server.getLevel(Level.OVERWORLD)
+            val dayTime = overworld?.getDayTime() ?: 0L
             JsonObject().apply {
-                addProperty("mcVersion", server.version)
+                addProperty("mcVersion", server.getServerVersion())
                 addProperty("modVersion", McDebugMod.MOD_VERSION)
                 addProperty("modLoader", "fabric")
                 addProperty("protocolVersion", 1)
                 add("dims", dims)
-                addProperty("players", server.currentPlayerCount)
+                addProperty("players", server.playerCount)
                 addProperty("dayTime", dayTime)
-                addProperty("tick", server.ticks)
+                addProperty("tick", server.tickCount)
             }
         }
 
     private fun listDimensions(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
         RpcContext.onServer(server) {
             val dims = JsonArray()
-            server.worlds.forEach { dims.add(it.registryKey.value.toString()) }
+            server.getAllLevels().forEach { dims.add(it.dimension().location().toString()) }
             JsonObject().apply { add("dims", dims) }
         }
 
@@ -342,27 +344,27 @@ object ServerOps : RpcHandlerGroup {
                 ServerContext.world(server, it)  // validate dim
             }
             // Build a command source rooted in the requested dimension (or overworld as default).
-            val sourceWorld: net.minecraft.server.world.ServerWorld =
-                dim ?: server.getWorld(World.OVERWORLD)!!
-            val source: ServerCommandSource = server.commandSource.withWorld(sourceWorld)
+            val sourceWorld: net.minecraft.server.level.ServerLevel =
+                dim ?: server.getLevel(Level.OVERWORLD)!!
+            val source: CommandSourceStack = server.createCommandSourceStack().withLevel(sourceWorld)
 
             val output = StringBuilder()
             // Capture the textual output the command would print.
-            val capturing = object : CommandOutput {
-                override fun sendMessage(message: Text) {
+            val capturing = object : CommandSource {
+                override fun sendSystemMessage(message: Component) {
                     if (output.isNotEmpty()) output.append('\n')
                     output.append(message.string)
                 }
-                override fun shouldReceiveFeedback(): Boolean = true
-                override fun shouldTrackOutput(): Boolean = true
-                override fun shouldBroadcastConsoleToOps(): Boolean = true
+                override fun acceptsSuccess(): Boolean = true
+                override fun acceptsFailure(): Boolean = true
+                override fun shouldInformAdmins(): Boolean = true
             }
-            val sourceWithCapture = source.withOutput(capturing)
+            val sourceWithCapture = source.withSource(capturing)
 
             //executeWithPrefix returns void in 1.21; parse+execute on the dispatcher keeps the int result
             val result: Int = try {
-                val commandManager = server.commandManager
-                commandManager.dispatcher.execute(commandManager.dispatcher.parse(command.removePrefix("/"), sourceWithCapture))
+                val commands = server.getCommands()
+                commands.dispatcher.execute(commands.dispatcher.parse(command.removePrefix("/"), sourceWithCapture))
             } catch (e: Exception) {
                 throw RpcException(
                     RpcErrors.INTERNAL_ERROR,

@@ -11,34 +11,34 @@ import com.mcdebug.rpc.RpcHandlerGroup
 import com.mcdebug.util.NbtJson
 import com.mcdebug.util.ServerContext
 import net.fabricmc.fabric.api.event.player.UseEntityCallback
-import net.minecraft.block.Block
-import net.minecraft.block.BlockState
-import net.minecraft.entity.Entity
-import net.minecraft.entity.EquipmentSlot
-import net.minecraft.entity.LivingEntity
+import net.minecraft.world.level.block.Block
+import net.minecraft.world.level.block.state.BlockState
+import net.minecraft.world.entity.Entity
+import net.minecraft.world.entity.EquipmentSlot
+import net.minecraft.world.entity.LivingEntity
 import com.google.common.collect.LinkedHashMultimap
-import net.minecraft.entity.attribute.EntityAttribute
-import net.minecraft.entity.attribute.EntityAttributeModifier
-import net.minecraft.entity.attribute.EntityAttributes
-import net.minecraft.registry.entry.RegistryEntry
-import net.minecraft.entity.player.PlayerEntity
-import net.minecraft.item.BlockItem
-import net.minecraft.item.ItemStack
-import net.minecraft.nbt.NbtCompound
-import net.minecraft.network.packet.c2s.play.PlayerActionC2SPacket
-import net.minecraft.registry.Registries
+import net.minecraft.world.entity.ai.attributes.Attribute
+import net.minecraft.world.entity.ai.attributes.AttributeModifier
+import net.minecraft.world.entity.ai.attributes.Attributes
+import net.minecraft.core.Holder
+import net.minecraft.world.entity.player.Player
+import net.minecraft.world.item.BlockItem
+import net.minecraft.world.item.ItemStack
+import net.minecraft.nbt.CompoundTag
+import net.minecraft.network.protocol.game.ServerboundPlayerActionPacket
+import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.server.MinecraftServer
-import net.minecraft.server.network.ServerPlayerEntity
-import net.minecraft.server.world.ServerWorld
-import net.minecraft.util.ActionResult
-import net.minecraft.util.Hand
-import net.minecraft.util.hit.BlockHitResult
-import net.minecraft.util.hit.EntityHitResult
-import net.minecraft.util.math.BlockBox
-import net.minecraft.util.math.BlockPos
-import net.minecraft.util.math.ChunkPos
-import net.minecraft.util.math.Direction
-import net.minecraft.util.math.Vec3d
+import net.minecraft.server.level.ServerPlayer
+import net.minecraft.server.level.ServerLevel
+import net.minecraft.world.InteractionResult
+import net.minecraft.world.InteractionHand
+import net.minecraft.world.phys.BlockHitResult
+import net.minecraft.world.phys.EntityHitResult
+import net.minecraft.world.level.levelgen.structure.BoundingBox
+import net.minecraft.core.BlockPos
+import net.minecraft.world.level.ChunkPos
+import net.minecraft.core.Direction
+import net.minecraft.world.phys.Vec3
 import kotlin.math.ceil
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
@@ -46,7 +46,7 @@ import java.util.concurrent.CompletableFuture
 object WorldOps : RpcHandlerGroup {
 
     private val LOGGER: org.slf4j.Logger = org.slf4j.LoggerFactory.getLogger("mcdebug-worldops")
-    private const val DEFAULT_FLAGS = Block.NOTIFY_LISTENERS or Block.NOTIFY_NEIGHBORS or Block.REDRAW_ON_MAIN_THREAD
+    private const val DEFAULT_FLAGS = Block.UPDATE_CLIENTS or Block.UPDATE_NEIGHBORS or Block.UPDATE_IMMEDIATE
 
     override fun methods(): Map<String, RpcHandler> = mapOf(
         "getBlock" to ::getBlock,
@@ -78,11 +78,11 @@ object WorldOps : RpcHandlerGroup {
             val includeNbt = p.getBoolOrFalse("includeNbt")
             JsonObject().apply {
                 add("pos", ServerContext.posAsJson(pos))
-                addProperty("dim", world.registryKey.value.toString())
+                addProperty("dim", world.dimension().location().toString())
                 add("state", ServerContext.blockStateToJson(state))
                 addProperty("hasBlockEntity", hasBe)
                 if (includeNbt && hasBe) {
-                    val nbt = world.getBlockEntity(pos)!!.createNbt(world.registryManager)
+                    val nbt = world.getBlockEntity(pos)!!.saveWithoutMetadata(world.registryAccess())
                     add("nbt", NbtJson.toJson(nbt))
                 }
             }
@@ -98,7 +98,7 @@ object WorldOps : RpcHandlerGroup {
             val flags = p.getIntOr("flags", DEFAULT_FLAGS)
             val state = ServerContext.blockState(server, blockId, stateProps)
             val previous = world.getBlockState(pos)
-            val ok = world.setBlockState(pos, state, flags)
+            val ok = world.setBlock(pos, state, flags)
             JsonObject().apply {
                 add("pos", ServerContext.posAsJson(pos))
                 addProperty("ok", ok)
@@ -117,7 +117,7 @@ object WorldOps : RpcHandlerGroup {
                 val op = el.asJsonObject
                 val pos = ServerContext.pos(op.getAsJsonArray("pos"))
                 val block = ServerContext.blockState(server, op.requireString("block"), op.getStringMapOrNull("stateProps"))
-                if (world.setBlockState(pos, block, flags)) count++
+                if (world.setBlock(pos, block, flags)) count++
             }
             JsonObject().apply { addProperty("count", count) }
         }
@@ -143,7 +143,7 @@ object WorldOps : RpcHandlerGroup {
      * events, onPlaced, and Criteria.PLACED_BLOCK. Can fail (canPlace()=false)
      * if the target pos is non-replaceable.
      *
-     * The placer is a stable fake ServerPlayerEntity (UUID 8c0a4d6e-..., name
+     * The placer is a stable fake ServerPlayer (UUID 8c0a4d6e-..., name
      * "[mcdebug_fake_player]"), spawned into the world and shared across all calls
      * and all dims, so mods that record "placed by" see a consistent identity.
      * Game mode defaults to SURVIVAL (the placed item is consumed from the hand);
@@ -183,7 +183,7 @@ object WorldOps : RpcHandlerGroup {
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
 
             val neighbor: BlockPos = p.getAsJsonArray("neighbor")?.let(ServerContext::pos)
-                ?: pos.offset(face.opposite)
+                ?: pos.relative(face.opposite)
 
             val playerFacing: Direction = p.getDirectionOrNull("playerFacing")
                 ?: face.opposite.let { if (it.axis == Direction.Axis.Y) Direction.NORTH else it }
@@ -198,7 +198,7 @@ object WorldOps : RpcHandlerGroup {
             val stack = ItemStack(blockItem, 1)
             val nbtEl = p.get("nbt")
             if (nbtEl != null && !nbtEl.isJsonNull) {
-                ServerContext.stackSetNbt(stack, NbtJson.fromJson(nbtEl) as? NbtCompound)
+                ServerContext.stackSetNbt(stack, NbtJson.fromJson(nbtEl) as? CompoundTag)
             }
 
             val gamemode = FakePlayerPool.gameModeFrom(p)
@@ -214,13 +214,13 @@ object WorldOps : RpcHandlerGroup {
 
                 // Click point: center of the neighbor face that was hit, offset by face*0.5
                 // (the EXACT world point the raycast would have struck).
-                val hitPos = Vec3d(
-                    neighbor.x + 0.5 + face.offsetX * 0.5,
-                    neighbor.y + 0.5 + face.offsetY * 0.5,
-                    neighbor.z + 0.5 + face.offsetZ * 0.5
+                val hitPos = Vec3(
+                    neighbor.x + 0.5 + face.stepX * 0.5,
+                    neighbor.y + 0.5 + face.stepY * 0.5,
+                    neighbor.z + 0.5 + face.stepZ * 0.5
                 )
                 val hitResult = BlockHitResult(hitPos, face, neighbor, false)
-                fakePlayer.setStackInHand(Hand.MAIN_HAND, stack.copy())
+                fakePlayer.setItemInHand(InteractionHand.MAIN_HAND, stack.copy())
 
                 // Real path: the full right-click pipeline
                 // (ServerPlayerInteractionManager.interactBlock) — the exact method a real
@@ -230,21 +230,21 @@ object WorldOps : RpcHandlerGroup {
                 // Note: if the neighbor block consumes the click itself (button, lever,
                 // chest, ...), the placement is skipped — exactly like a real player.
                 val before = world.getBlockState(pos)
-                val result: ActionResult = fakePlayer.interactionManager.interactBlock(
-                    fakePlayer, world, fakePlayer.getStackInHand(Hand.MAIN_HAND), Hand.MAIN_HAND, hitResult
+                val result: InteractionResult = fakePlayer.gameMode.useItemOn(
+                    fakePlayer, world, fakePlayer.getItemInHand(InteractionHand.MAIN_HAND), InteractionHand.MAIN_HAND, hitResult
                 )
                 val after = world.getBlockState(pos)
-                ok = result.isAccepted
-                itemAfter = fakePlayer.getStackInHand(Hand.MAIN_HAND)
+                ok = result.consumesAction()
+                itemAfter = fakePlayer.getItemInHand(InteractionHand.MAIN_HAND)
 
                 JsonObject().apply {
                     add("pos", ServerContext.posAsJson(pos))
                     add("neighbor", ServerContext.posAsJson(neighbor))
                     addProperty("ok", ok)
-                    addProperty("face", face.asString())
-                    addProperty("playerFacing", playerFacing.asString())
+                    addProperty("face", face.getName())
+                    addProperty("playerFacing", playerFacing.getName())
                     addProperty("placer", fakePlayer.name.string)
-                    addProperty("placerUuid", fakePlayer.uuidAsString)
+                    addProperty("placerUuid", fakePlayer.getStringUUID())
                     addProperty("gamemode", gamemode.name.lowercase())
                     add("itemAfter", ServerContext.itemStackToJson(itemAfter))
                     add("previous", ServerContext.blockStateToJson(before))
@@ -270,29 +270,29 @@ object WorldOps : RpcHandlerGroup {
             val sneaking = p.getBoolOrFalse("sneaking")
             val gamemode = FakePlayerPool.gameModeFrom(p)
 
-            var result: ActionResult = ActionResult.PASS
+            var result: InteractionResult = InteractionResult.PASS
             var itemAfter = ItemStack.EMPTY
 
             FakePlayerPool.withFakePlayer(server, world, gamemode) { fakePlayer ->
-                fakePlayer.isSneaking = sneaking
-                fakePlayer.setStackInHand(Hand.MAIN_HAND, itemBefore.copy())
+                fakePlayer.isShiftKeyDown = sneaking
+                fakePlayer.setItemInHand(InteractionHand.MAIN_HAND, itemBefore.copy())
 
                 // Real path: ServerPlayerInteractionManager.interactItem — the exact
                 // method a real right-click (use item) goes through: UseItemCallback
                 // (fabric mixin at HEAD), cooldown check, ItemStack.use, creative
                 // count/damage restore, inventory sync.
-                result = fakePlayer.interactionManager.interactItem(
-                    fakePlayer, world, fakePlayer.getStackInHand(Hand.MAIN_HAND), Hand.MAIN_HAND
+                result = fakePlayer.gameMode.useItem(
+                    fakePlayer, world, fakePlayer.getItemInHand(InteractionHand.MAIN_HAND), InteractionHand.MAIN_HAND
                 )
-                itemAfter = fakePlayer.getStackInHand(Hand.MAIN_HAND).copy()
+                itemAfter = fakePlayer.getItemInHand(InteractionHand.MAIN_HAND).copy()
 
-                fakePlayer.setStackInHand(Hand.MAIN_HAND, ItemStack.EMPTY)
-                fakePlayer.isSneaking = false
+                fakePlayer.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY)
+                fakePlayer.isShiftKeyDown = false
                 fakePlayer.isSprinting = false
             }
 
             JsonObject().apply {
-                addProperty("success", result.isAccepted)
+                addProperty("success", result.consumesAction())
                 addProperty("action", result.name.lowercase())
                 addProperty("sneaking", sneaking)
                 addProperty("gamemode", gamemode.name.lowercase())
@@ -316,7 +316,7 @@ object WorldOps : RpcHandlerGroup {
      *      held tick (crossbow loading, bow draw) — driven here by reflecting
      *      LivingEntity.tickActiveItemStack, the exact same method the server
      *      calls from LivingEntity.tick() every tick.
-     *   3. PlayerEntity.stopUsingItem() — the "release". This calls
+     *   3. Player.stopUsingItem() — the "release". This calls
      *      Item.onStoppedUsing (bow fires, crossbow finishes loading).
      *
      * Projectiles are real entities spawned into the world; they fly on normal
@@ -379,28 +379,28 @@ object WorldOps : RpcHandlerGroup {
             }
 
             // Snapshot projectiles before the call so we can diff afterwards.
-            val worldBox = net.minecraft.util.math.Box(
+            val worldBox = net.minecraft.world.phys.AABB(
                 -30_000_000.0, -30_000_000.0, -30_000_000.0,
                 30_000_000.0, 30_000_000.0, 30_000_000.0
             )
-            val projFilter: (net.minecraft.entity.Entity) -> Boolean = { it is net.minecraft.entity.projectile.ProjectileEntity }
-            val projectilesBefore = world.getOtherEntities(null, worldBox, projFilter).map { it.uuid }.toSet()
+            val projFilter: (net.minecraft.world.entity.Entity) -> Boolean = { it is net.minecraft.world.entity.projectile.Projectile }
+            val projectilesBefore = world.getEntities(null, worldBox, projFilter).map { it.uuid }.toSet()
 
             val gamemode = FakePlayerPool.gameModeFrom(p)
             val cycles = JsonArray()
             var ammoStack = ItemStack.EMPTY
 
             FakePlayerPool.withFakePlayer(server, world, gamemode) { fakePlayer ->
-                val oldMainHand = fakePlayer.getStackInHand(Hand.MAIN_HAND)
-                val oldOffHand = fakePlayer.getStackInHand(Hand.OFF_HAND)
+                val oldMainHand = fakePlayer.getItemInHand(InteractionHand.MAIN_HAND)
+                val oldOffHand = fakePlayer.getItemInHand(InteractionHand.OFF_HAND)
 
                 try {
                     // Main hand = hotbar selectedSlot; pin it to 0 so the held
                     // weapon is always written to a known slot (and ammo in slot 8
                     // can never collide with it).
-                    fakePlayer.inventory.selectedSlot = 0
-                    fakePlayer.setStackInHand(Hand.MAIN_HAND, itemBefore.copy())
-                    primeStackForGameplay(world, fakePlayer, fakePlayer.getStackInHand(Hand.MAIN_HAND), 0, true)
+                    fakePlayer.inventory.selected = 0
+                    fakePlayer.setItemInHand(InteractionHand.MAIN_HAND, itemBefore.copy())
+                    primeStackForGameplay(world, fakePlayer, fakePlayer.getItemInHand(InteractionHand.MAIN_HAND), 0, true)
 
                     // Ammo goes in the offhand (vanilla getProjectileType searches
                     // main hand, then offhand, then inventory) and also a copy in
@@ -410,27 +410,27 @@ object WorldOps : RpcHandlerGroup {
                     // there or it overwrites the held weapon.
                     p.getStringOrNull("ammo")?.let { ammoId ->
                         val ammo = ServerContext.itemStackFromJson(server, ammoId, ammoCount, null)
-                        fakePlayer.setStackInHand(Hand.OFF_HAND, ammo.copy())
-                        fakePlayer.inventory.setStack(8, ammo.copy())
+                        fakePlayer.setItemInHand(InteractionHand.OFF_HAND, ammo.copy())
+                        fakePlayer.inventory.setItem(8, ammo.copy())
                         ammoStack = ammo.copy()
                     }
 
                     // Position + aim. With a target we look at its eyes so the
                     // weapon's shot vector (derived from yaw/pitch) points at it.
                     if (target != null) {
-                        val eye = target!!.getEyePos()
+                        val eye = target!!.getEyePosition()
                         if (playerPos != null) {
-                            fakePlayer.refreshPositionAndAngles(
+                            fakePlayer.moveTo(
                                 playerPos.x + 0.5, playerPos.y.toDouble(), playerPos.z + 0.5,
-                                fakePlayer.yaw, fakePlayer.pitch
+                                fakePlayer.yRot, fakePlayer.xRot
                             )
                         } else {
                             // Default: 5 blocks in front of the target, at its eye level.
-                            val toPlayer = fakePlayer.pos.subtract(eye).normalize()
-                            val stand = eye.add(toPlayer.multiply(5.0))
-                            fakePlayer.refreshPositionAndAngles(stand.x, stand.y, stand.z, fakePlayer.yaw, fakePlayer.pitch)
+                            val toPlayer = fakePlayer.position().subtract(eye).normalize()
+                            val stand = eye.add(toPlayer.scale(5.0))
+                            fakePlayer.moveTo(stand.x, stand.y, stand.z, fakePlayer.yRot, fakePlayer.xRot)
                         }
-                        fakePlayer.lookAt(net.minecraft.command.argument.EntityAnchorArgumentType.EntityAnchor.EYES, eye)
+                        fakePlayer.lookAt(net.minecraft.commands.arguments.EntityAnchorArgument.Anchor.EYES, eye)
                     } else {
                         val dir = direction!!
                         val yaw = when (dir) {
@@ -438,7 +438,7 @@ object WorldOps : RpcHandlerGroup {
                             Direction.SOUTH -> 0f
                             Direction.EAST -> -90f
                             Direction.WEST -> 90f
-                            Direction.UP, Direction.DOWN -> fakePlayer.yaw
+                            Direction.UP, Direction.DOWN -> fakePlayer.yRot
                         }
                         val pitch = when (dir) {
                             Direction.UP -> -90f
@@ -446,17 +446,17 @@ object WorldOps : RpcHandlerGroup {
                             else -> 0f
                         }
                         if (playerPos != null) {
-                            fakePlayer.refreshPositionAndAngles(
+                            fakePlayer.moveTo(
                                 playerPos.x + 0.5, playerPos.y.toDouble(), playerPos.z + 0.5, yaw, pitch
                             )
                         } else {
-                            val spawn = world.getSpawnPos()
-                            fakePlayer.refreshPositionAndAngles(spawn.x + 0.5, spawn.y + 1.0, spawn.z + 0.5, yaw, pitch)
+                            val spawn = world.getSharedSpawnPos()
+                            fakePlayer.moveTo(spawn.x + 0.5, spawn.y + 1.0, spawn.z + 0.5, yaw, pitch)
                         }
                     }
                     fakePlayer.setOnGround(true)
                     fakePlayer.fallDistance = 0f
-                    fakePlayer.setVelocity(0.0, 0.0, 0.0)
+                    fakePlayer.setDeltaMovement(0.0, 0.0, 0.0)
                     fakePlayer.isSprinting = false
 
                     // Drive the use cycles.
@@ -465,16 +465,16 @@ object WorldOps : RpcHandlerGroup {
                         val cycleJson = JsonObject()
                         // 1. Right-click press — through the real interaction-manager
                         //    path (UseItemCallback, cooldown check, creative count restore).
-                        val useResult = fakePlayer.interactionManager.interactItem(
-                            fakePlayer, world, fakePlayer.getStackInHand(Hand.MAIN_HAND), Hand.MAIN_HAND
+                        val useResult = fakePlayer.gameMode.useItem(
+                            fakePlayer, world, fakePlayer.getItemInHand(InteractionHand.MAIN_HAND), InteractionHand.MAIN_HAND
                         )
-                        held = fakePlayer.getStackInHand(Hand.MAIN_HAND)
+                        held = fakePlayer.getItemInHand(InteractionHand.MAIN_HAND)
                         cycleJson.addProperty("cycle", cycle)
                         cycleJson.addProperty("useResult", useResult.name.lowercase())
                         cycleJson.addProperty("usingItem", fakePlayer.isUsingItem())
-                        cycleJson.addProperty("mainHand", fakePlayer.getStackInHand(Hand.MAIN_HAND).item.toString())
-                        cycleJson.addProperty("offHand", fakePlayer.getStackInHand(Hand.OFF_HAND).item.toString())
-                        cycleJson.addProperty("projectileType", fakePlayer.getProjectileType(fakePlayer.getStackInHand(Hand.MAIN_HAND)).item.toString())
+                        cycleJson.addProperty("mainHand", fakePlayer.getItemInHand(InteractionHand.MAIN_HAND).item.toString())
+                        cycleJson.addProperty("offHand", fakePlayer.getItemInHand(InteractionHand.OFF_HAND).item.toString())
+                        cycleJson.addProperty("projectileType", fakePlayer.getProjectile(fakePlayer.getItemInHand(InteractionHand.MAIN_HAND)).item.toString())
 
                         // 2. Hold: drive usageTick once per held tick. Reflecting
                         //    LivingEntity.tickActiveItemStack mirrors the exact
@@ -490,7 +490,7 @@ object WorldOps : RpcHandlerGroup {
                             cycleJson.addProperty("stopped", false)
                         }
                         cycleJson.addProperty("stillUsingAfterRelease", fakePlayer.isUsingItem())
-                        cycleJson.addProperty("useTimeLeft", fakePlayer.getItemUseTimeLeft())
+                        cycleJson.addProperty("useTimeLeft", fakePlayer.useItemRemainingTicks)
                         cycleJson.addProperty("tickMethodFound", TICK_ACTIVE_ITEM_STACK_METHOD != null)
                         cycleJson.add("itemAfter", ServerContext.itemStackToJson(held))
                         cycles.add(cycleJson)
@@ -503,17 +503,17 @@ object WorldOps : RpcHandlerGroup {
 
                     // Collect projectiles spawned by this call.
                     val projectiles = JsonArray()
-                    world.getOtherEntities(null, worldBox, projFilter)
+                    world.getEntities(null, worldBox, projFilter)
                         .filter { it.uuid !in projectilesBefore }
                         .forEach { proj ->
                             val obj = JsonObject()
-                            obj.addProperty("type", Registries.ENTITY_TYPE.getId(proj.type).toString())
-                            obj.addProperty("uuid", proj.uuidAsString)
+                            obj.addProperty("type", BuiltInRegistries.ENTITY_TYPE.getKey(proj.type).toString())
+                            obj.addProperty("uuid", proj.getStringUUID())
                             obj.add("pos", JsonArray().apply {
                                 add(proj.x); add(proj.y); add(proj.z)
                             })
                             obj.add("velocity", JsonArray().apply {
-                                add(proj.velocity.x); add(proj.velocity.y); add(proj.velocity.z)
+                                add(proj.deltaMovement.x); add(proj.deltaMovement.y); add(proj.deltaMovement.z)
                             })
                             projectiles.add(obj)
                         }
@@ -522,10 +522,10 @@ object WorldOps : RpcHandlerGroup {
                     if (fakePlayer.isUsingItem()) {
                         fakePlayer.stopUsingItem()
                     }
-                    fakePlayer.setStackInHand(Hand.MAIN_HAND, oldMainHand)
-                    fakePlayer.setStackInHand(Hand.OFF_HAND, oldOffHand)
-                    fakePlayer.inventory.setStack(8, ItemStack.EMPTY)
-                    fakePlayer.isSneaking = false
+                    fakePlayer.setItemInHand(InteractionHand.MAIN_HAND, oldMainHand)
+                    fakePlayer.setItemInHand(InteractionHand.OFF_HAND, oldOffHand)
+                    fakePlayer.inventory.setItem(8, ItemStack.EMPTY)
+                    fakePlayer.isShiftKeyDown = false
 
                     JsonObject().apply {
                         add("cycles", cycles)
@@ -538,10 +538,10 @@ object WorldOps : RpcHandlerGroup {
                     // Best-effort cleanup so the pooled fake player stays sane.
                     runCatching {
                         if (fakePlayer.isUsingItem()) fakePlayer.stopUsingItem()
-                        fakePlayer.setStackInHand(Hand.MAIN_HAND, oldMainHand)
-                        fakePlayer.setStackInHand(Hand.OFF_HAND, oldOffHand)
-                        fakePlayer.inventory.setStack(8, ItemStack.EMPTY)
-                        fakePlayer.isSneaking = false
+                        fakePlayer.setItemInHand(InteractionHand.MAIN_HAND, oldMainHand)
+                        fakePlayer.setItemInHand(InteractionHand.OFF_HAND, oldOffHand)
+                        fakePlayer.inventory.setItem(8, ItemStack.EMPTY)
+                        fakePlayer.isShiftKeyDown = false
                     }
                     throw e
                 }
@@ -573,7 +573,7 @@ object WorldOps : RpcHandlerGroup {
      *   item           string  optional   item id to hold (default: empty hand)
      *   count          int     optional   stack size (default 1)
      *   nbt            object  optional   item NBT (e.g. {"Energy": 30000} for batteries)
-     *   sneaking       bool    optional   player.isSneaking (default false)
+     *   sneaking       bool    optional   player.isShiftKeyDown (default false)
      *   playerFacing   string  optional   which direction the player is facing (one of
      *                                    north|south|east|west). Controls player.horizontalFacing
      *                                    which mods read for rotation. Default: face.opposite
@@ -624,47 +624,47 @@ object WorldOps : RpcHandlerGroup {
             val playerFacing = p.getDirectionOrNull("playerFacing")
                 ?: face.opposite.let { if (it.axis == Direction.Axis.Y) Direction.NORTH else it }
 
-            lateinit var eventResult: ActionResult
-            lateinit var blockResult: ActionResult
-            lateinit var itemResult: ActionResult
+            lateinit var eventResult: InteractionResult
+            lateinit var blockResult: InteractionResult
+            lateinit var itemResult: InteractionResult
             var itemAfter: ItemStack = ItemStack.EMPTY
             var creativeModeSnapshot: Boolean? = null
 
             FakePlayerPool.withFakePlayer(server, world, gamemode) { fakePlayer ->
-                fakePlayer.setStackInHand(Hand.MAIN_HAND, itemBefore.copy())
-                fakePlayer.isSneaking = sneaking
+                fakePlayer.setItemInHand(InteractionHand.MAIN_HAND, itemBefore.copy())
+                fakePlayer.isShiftKeyDown = sneaking
 
                 // Auto-position: keep the current spot if it can reach the click and does
                 // not obstruct the block this interaction may place (pos + face);
                 // otherwise teleport to the far side of the clicked block. yaw follows
                 // playerFacing so player.horizontalFacing matches it.
                 positionForPlacement(
-                    fakePlayer, pos.offset(face), pos, face,
+                    fakePlayer, pos.relative(face), pos, face,
                     yawFor(playerFacing), pitchFor(face.opposite),
                 )
 
                 // Hit point: center of the target face
-                val hitPos = Vec3d(
-                    pos.x + 0.5 + face.offsetX * 0.5,
-                    pos.y + 0.5 + face.offsetY * 0.5,
-                    pos.z + 0.5 + face.offsetZ * 0.5
+                val hitPos = Vec3(
+                    pos.x + 0.5 + face.stepX * 0.5,
+                    pos.y + 0.5 + face.stepY * 0.5,
+                    pos.z + 0.5 + face.stepZ * 0.5
                 )
                 val hitResult = BlockHitResult(hitPos, face, pos, false)
 
                 val stateBefore = world.getBlockState(pos)
-                val itemBeforeSnapshot = fakePlayer.getStackInHand(Hand.MAIN_HAND).copy()
+                val itemBeforeSnapshot = fakePlayer.getItemInHand(InteractionHand.MAIN_HAND).copy()
 
                 // Real path: ServerPlayerInteractionManager.interactBlock — the exact method
                 // a real right-click goes through: UseBlockCallback (fabric mixin at HEAD)
                 // → BlockState.onUse (with the vanilla sneaking rule) → ItemStack.useOnBlock,
                 // plus the cooldown check and Criteria.ITEM_USED_ON_BLOCK.
-                val result = fakePlayer.interactionManager.interactBlock(
-                    fakePlayer, world, fakePlayer.getStackInHand(Hand.MAIN_HAND), Hand.MAIN_HAND, hitResult
+                val result = fakePlayer.gameMode.useItemOn(
+                    fakePlayer, world, fakePlayer.getItemInHand(InteractionHand.MAIN_HAND), InteractionHand.MAIN_HAND, hitResult
                 )
 
                 val stateAfter = world.getBlockState(pos)
-                itemAfter = fakePlayer.getStackInHand(Hand.MAIN_HAND).copy()
-                creativeModeSnapshot = fakePlayer.abilities.creativeMode
+                itemAfter = fakePlayer.getItemInHand(InteractionHand.MAIN_HAND).copy()
+                creativeModeSnapshot = fakePlayer.abilities.instabuild
 
                 // The phase breakdown is inferred from observable side effects (the vanilla
                 // method does not expose per-phase results):
@@ -673,48 +673,48 @@ object WorldOps : RpcHandlerGroup {
                 //   - itemConsumed: the held stack changed (bucket pickup, survival placement...).
                 //   - blockConsumed: block.onUse handled it (lever, chest...) or the block
                 //     state changed (creative placement).
-                val itemChanged = !ItemStack.areEqual(itemBeforeSnapshot, itemAfter)
+                val itemChanged = !ItemStack.matches(itemBeforeSnapshot, itemAfter)
                 val stateChanged = stateBefore != stateAfter
-                val screenOpened = fakePlayer.currentScreenHandler !== fakePlayer.playerScreenHandler
+                val screenOpened = fakePlayer.containerMenu !== fakePlayer.inventoryMenu
                 if (screenOpened) {
                     // block.onUse opened a container GUI — close it so the shared fake
                     // player does not keep a stale open screen between calls.
-                    fakePlayer.closeHandledScreen()
+                    fakePlayer.closeContainer()
                 }
 
-                eventResult = if (result != ActionResult.PASS && !itemChanged && !stateChanged && !screenOpened) {
+                eventResult = if (result != InteractionResult.PASS && !itemChanged && !stateChanged && !screenOpened) {
                     result
                 } else {
-                    ActionResult.PASS
+                    InteractionResult.PASS
                 }
-                blockResult = if (result.isAccepted && !itemChanged && eventResult == ActionResult.PASS) result else ActionResult.PASS
-                itemResult = if (result.isAccepted && itemChanged) result else ActionResult.PASS
+                blockResult = if (result.consumesAction() && !itemChanged && eventResult == InteractionResult.PASS) result else InteractionResult.PASS
+                itemResult = if (result.consumesAction() && itemChanged) result else InteractionResult.PASS
 
                 // Clean up: clear hand and reset sneaking (mode/abilities restored by the pool).
-                fakePlayer.setStackInHand(Hand.MAIN_HAND, ItemStack.EMPTY)
-                fakePlayer.isSneaking = false
+                fakePlayer.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY)
+                fakePlayer.isShiftKeyDown = false
             }
 
-            val success = eventResult.isAccepted || blockResult.isAccepted || itemResult.isAccepted
+            val success = eventResult.consumesAction() || blockResult.consumesAction() || itemResult.consumesAction()
             val consumed = when {
-                eventResult.isAccepted || eventResult == ActionResult.FAIL -> eventResult
-                blockResult.isAccepted -> blockResult
-                itemResult.isAccepted -> itemResult
-                else -> ActionResult.PASS
+                eventResult.consumesAction() || eventResult == InteractionResult.FAIL -> eventResult
+                blockResult.consumesAction() -> blockResult
+                itemResult.consumesAction() -> itemResult
+                else -> InteractionResult.PASS
             }
 
             JsonObject().apply {
                 add("pos", ServerContext.posAsJson(pos))
                 addProperty("success", success)
                 addProperty("action", consumed.name.lowercase())
-                addProperty("face", face.asString())
+                addProperty("face", face.getName())
                 addProperty("sneaking", sneaking)
-                addProperty("playerFacing", playerFacing.asString())
+                addProperty("playerFacing", playerFacing.getName())
                 addProperty("gamemode", gamemode.name.lowercase())
                 addProperty("creativeMode", creativeModeSnapshot ?: false)
-                addProperty("eventConsumed", eventResult.isAccepted || eventResult == ActionResult.FAIL)
-                addProperty("blockConsumed", blockResult.isAccepted)
-                addProperty("itemConsumed", itemResult.isAccepted)
+                addProperty("eventConsumed", eventResult.consumesAction() || eventResult == InteractionResult.FAIL)
+                addProperty("blockConsumed", blockResult.consumesAction())
+                addProperty("itemConsumed", itemResult.consumesAction())
                 add("itemBefore", ServerContext.itemStackToJson(itemBefore))
                 add("itemAfter", ServerContext.itemStackToJson(itemAfter))
                 add("blockState", ServerContext.blockStateToJson(world.getBlockState(pos)))
@@ -802,14 +802,14 @@ object WorldOps : RpcHandlerGroup {
                 val oldArmor = installArmor(server, fakePlayer, p)
 
                 try {
-                    fakePlayer.setStackInHand(Hand.MAIN_HAND, itemBefore.copy())
-                    primeStackForGameplay(world, fakePlayer, fakePlayer.getStackInHand(Hand.MAIN_HAND), 0, true)
+                    fakePlayer.setItemInHand(InteractionHand.MAIN_HAND, itemBefore.copy())
+                    primeStackForGameplay(world, fakePlayer, fakePlayer.getItemInHand(InteractionHand.MAIN_HAND), 0, true)
 
                     val lookDir = face.opposite
-                    fakePlayer.refreshPositionAndAngles(
-                        pos.x + 0.5 + face.offsetX * 1.0,
-                        pos.y + 0.5 + face.offsetY * 1.0,
-                        pos.z + 0.5 + face.offsetZ * 1.0,
+                    fakePlayer.moveTo(
+                        pos.x + 0.5 + face.stepX * 1.0,
+                        pos.y + 0.5 + face.stepY * 1.0,
+                        pos.z + 0.5 + face.stepZ * 1.0,
                         yawFor(lookDir), pitchFor(lookDir)
                     )
 
@@ -817,20 +817,20 @@ object WorldOps : RpcHandlerGroup {
                     // server-side break pipeline (canMine check, creative instant break /
                     // survival drops + tool postMine, break events).
                     if (!world.getBlockState(pos).isAir) {
-                        broken = fakePlayer.interactionManager.tryBreakBlock(pos)
+                        broken = fakePlayer.gameMode.destroyBlock(pos)
                     }
 
-                    itemAfter = fakePlayer.getStackInHand(Hand.MAIN_HAND).copy()
+                    itemAfter = fakePlayer.getItemInHand(InteractionHand.MAIN_HAND).copy()
                 } finally {
-                    fakePlayer.setStackInHand(Hand.MAIN_HAND, ItemStack.EMPTY)
+                    fakePlayer.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY)
                     restoreArmor(fakePlayer, oldArmor)
-                    fakePlayer.isSneaking = false
+                    fakePlayer.isShiftKeyDown = false
                 }
             }
 
             JsonObject().apply {
                 add("pos", ServerContext.posAsJson(pos))
-                addProperty("face", face.asString())
+                addProperty("face", face.getName())
                 addProperty("broken", broken)
                 addProperty("gamemode", gamemode.name.lowercase())
                 add("itemBefore", ServerContext.itemStackToJson(itemBefore))
@@ -864,36 +864,36 @@ object WorldOps : RpcHandlerGroup {
                 val oldArmor = installArmor(server, fakePlayer, p)
 
                 try {
-                    fakePlayer.setStackInHand(Hand.MAIN_HAND, itemBefore.copy())
-                    primeStackForGameplay(world, fakePlayer, fakePlayer.getStackInHand(Hand.MAIN_HAND), 0, true)
+                    fakePlayer.setItemInHand(InteractionHand.MAIN_HAND, itemBefore.copy())
+                    primeStackForGameplay(world, fakePlayer, fakePlayer.getItemInHand(InteractionHand.MAIN_HAND), 0, true)
 
                     val lookDir = face.opposite
-                    fakePlayer.refreshPositionAndAngles(
-                        pos.x + 0.5 + face.offsetX * 1.0,
-                        pos.y + 0.5 + face.offsetY * 1.0,
-                        pos.z + 0.5 + face.offsetZ * 1.0,
+                    fakePlayer.moveTo(
+                        pos.x + 0.5 + face.stepX * 1.0,
+                        pos.y + 0.5 + face.stepY * 1.0,
+                        pos.z + 0.5 + face.stepZ * 1.0,
                         yawFor(lookDir), pitchFor(lookDir)
                     )
 
                     val stateBefore = world.getBlockState(pos)
                     if (!stateBefore.isAir) {
-                        val im = fakePlayer.interactionManager
+                        val im = fakePlayer.gameMode
                         // Real mining gesture: START → hold (fast-forwarded through the same
                         // interactionManager.update() the server tick runs) → STOP.
                         // AttackBlockCallback fires automatically (fabric mixin at HEAD of
                         // processBlockBreakingAction); a consuming handler cancels everything.
-                        im.processBlockBreakingAction(
-                            pos, PlayerActionC2SPacket.Action.START_DESTROY_BLOCK, face, world.topY, 0
+                        im.handleBlockBreakAction(
+                            pos, ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, face, world.maxBuildHeight, 0
                         )
                         if (!world.getBlockState(pos).isAir) {
                             // Survival: mine until the vanilla stop-check (>= 70% progress) passes.
-                            val delta = stateBefore.calcBlockBreakingDelta(fakePlayer, world, pos)
+                            val delta = stateBefore.getDestroyProgress(fakePlayer, world, pos)
                             val holdTicks = if (delta > 0f) {
                                 ceil(0.7 / delta - 1.0).toInt().coerceAtLeast(0)
                             } else 0
-                            repeat(holdTicks) { im.update() }
-                            im.processBlockBreakingAction(
-                                pos, PlayerActionC2SPacket.Action.STOP_DESTROY_BLOCK, face, world.topY, 0
+                            repeat(holdTicks) { im.tick() }
+                            im.handleBlockBreakAction(
+                                pos, ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, face, world.maxBuildHeight, 0
                             )
                         }
                     }
@@ -903,17 +903,17 @@ object WorldOps : RpcHandlerGroup {
                     // A consuming AttackBlockCallback cancels the whole method, leaving the
                     // block untouched (same observable as a refused break).
                     eventConsumed = !broken && stateAfter == stateBefore
-                    itemAfter = fakePlayer.getStackInHand(Hand.MAIN_HAND).copy()
+                    itemAfter = fakePlayer.getItemInHand(InteractionHand.MAIN_HAND).copy()
                 } finally {
-                    fakePlayer.setStackInHand(Hand.MAIN_HAND, ItemStack.EMPTY)
+                    fakePlayer.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY)
                     restoreArmor(fakePlayer, oldArmor)
-                    fakePlayer.isSneaking = false
+                    fakePlayer.isShiftKeyDown = false
                 }
             }
 
             JsonObject().apply {
                 add("pos", ServerContext.posAsJson(pos))
-                addProperty("face", face.asString())
+                addProperty("face", face.getName())
                 addProperty("broken", broken)
                 addProperty("eventConsumed", eventConsumed)
                 addProperty("gamemode", gamemode.name.lowercase())
@@ -926,7 +926,7 @@ object WorldOps : RpcHandlerGroup {
     /**
      * Simulate right-clicking (using) an entity with an item in hand.
      *
-     * Routes through the real PlayerEntity.interact(entity, hand) — the method a real
+     * Routes through the real Player.interact(entity, hand) — the method a real
      * player's right-click on an entity goes through:
      *   0. UseEntityCallback — fired here manually at the same position the fabric
      *      mixin fires it (HEAD of the packet handler's interact, before the real call).
@@ -940,7 +940,7 @@ object WorldOps : RpcHandlerGroup {
      *   item          string  optional   item id to hold (default: empty hand)
      *   count          int     optional   stack size (default 1)
      *   nbt            object  optional   item NBT
-     *   sneaking       bool    optional   player.isSneaking (default false)
+     *   sneaking       bool    optional   player.isShiftKeyDown (default false)
      *   playerFacing   string  optional   which direction the player faces (for
      *                                    events that read player.horizontalFacing)
      *   dim            string  optional
@@ -983,76 +983,76 @@ object WorldOps : RpcHandlerGroup {
 
             val playerFacing = p.getDirectionOrNull("playerFacing") ?: Direction.SOUTH
             val gamemode = FakePlayerPool.gameModeFrom(p)
-            var eventResult: ActionResult = ActionResult.PASS
-            var entityResult: ActionResult = ActionResult.PASS
-            var itemResult: ActionResult = ActionResult.PASS
+            var eventResult: InteractionResult = InteractionResult.PASS
+            var entityResult: InteractionResult = InteractionResult.PASS
+            var itemResult: InteractionResult = InteractionResult.PASS
             var itemAfter = ItemStack.EMPTY
 
             FakePlayerPool.withFakePlayer(server, world, gamemode) { fakePlayer ->
-                fakePlayer.setStackInHand(Hand.MAIN_HAND, itemBefore.copy())
-                fakePlayer.isSneaking = sneaking
+                fakePlayer.setItemInHand(InteractionHand.MAIN_HAND, itemBefore.copy())
+                fakePlayer.isShiftKeyDown = sneaking
 
                 // Position player near the entity, looking at it
-                val eyePos = entity.eyePos
-                fakePlayer.refreshPositionAndAngles(
+                val eyePos = entity.getEyePosition()
+                fakePlayer.moveTo(
                     eyePos.x, eyePos.y, eyePos.z,
                     yawFor(playerFacing), 0f
                 )
 
                 // Hit result pointing at entity center
                 val hitResult = EntityHitResult(entity, eyePos)
-                val itemBeforeSnapshot = fakePlayer.getStackInHand(Hand.MAIN_HAND).copy()
+                val itemBeforeSnapshot = fakePlayer.getItemInHand(InteractionHand.MAIN_HAND).copy()
 
                 // UseEntityCallback is fired by the fabric mixin on the PACKET handler
-                // (ServerPlayNetworkHandler.onPlayerInteractEntity), not by
-                // PlayerEntity.interact — fire it here at the same position (before the
+                // (ServerGamePacketListenerImpl.onPlayerInteractEntity), not by
+                // Player.interact — fire it here at the same position (before the
                 // real interact call, mirroring the mixin's order).
                 eventResult = UseEntityCallback.EVENT.invoker()
-                    .interact(fakePlayer, world, Hand.MAIN_HAND, entity, hitResult)
+                    .interact(fakePlayer, world, InteractionHand.MAIN_HAND, entity, hitResult)
 
-                if (eventResult.isAccepted || eventResult == ActionResult.FAIL) {
-                    entityResult = ActionResult.PASS
-                    itemResult = ActionResult.PASS
+                if (eventResult.consumesAction() || eventResult == InteractionResult.FAIL) {
+                    entityResult = InteractionResult.PASS
+                    itemResult = InteractionResult.PASS
                 } else {
-                    // Real path: PlayerEntity.interact — the method a real right-click on
+                    // Real path: Player.interact — the method a real right-click on
                     // an entity goes through: entity.interact(hand), then for living
                     // entities ItemStack.useOnEntity, creative count restore, GameEvent.
-                    val result = fakePlayer.interact(entity, Hand.MAIN_HAND)
-                    val itemChanged = !ItemStack.areEqual(
-                        itemBeforeSnapshot, fakePlayer.getStackInHand(Hand.MAIN_HAND)
+                    val result = fakePlayer.interactOn(entity, InteractionHand.MAIN_HAND)
+                    val itemChanged = !ItemStack.matches(
+                        itemBeforeSnapshot, fakePlayer.getItemInHand(InteractionHand.MAIN_HAND)
                     )
-                    entityResult = if (result.isAccepted && !itemChanged) result else ActionResult.PASS
-                    itemResult = if (result.isAccepted && itemChanged) result else ActionResult.PASS
+                    entityResult = if (result.consumesAction() && !itemChanged) result else InteractionResult.PASS
+                    itemResult = if (result.consumesAction() && itemChanged) result else InteractionResult.PASS
                 }
 
-                itemAfter = fakePlayer.getStackInHand(Hand.MAIN_HAND).copy()
+                itemAfter = fakePlayer.getItemInHand(InteractionHand.MAIN_HAND).copy()
 
-                fakePlayer.setStackInHand(Hand.MAIN_HAND, ItemStack.EMPTY)
-                fakePlayer.isSneaking = false
+                fakePlayer.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY)
+                fakePlayer.isShiftKeyDown = false
                 fakePlayer.isSprinting = false
             }
 
-            val success = eventResult.isAccepted || entityResult.isAccepted || itemResult.isAccepted
+            val success = eventResult.consumesAction() || entityResult.consumesAction() || itemResult.consumesAction()
             val consumed = when {
-                eventResult.isAccepted || eventResult == ActionResult.FAIL -> eventResult
-                entityResult.isAccepted -> entityResult
-                itemResult.isAccepted -> itemResult
-                else -> ActionResult.PASS
+                eventResult.consumesAction() || eventResult == InteractionResult.FAIL -> eventResult
+                entityResult.consumesAction() -> entityResult
+                itemResult.consumesAction() -> itemResult
+                else -> InteractionResult.PASS
             }
 
             JsonObject().apply {
                 addProperty("success", success)
                 addProperty("action", consumed.name.lowercase())
-                addProperty("entityType", Registries.ENTITY_TYPE.getId(entity.type).toString())
-                addProperty("entityUuid", entity.uuidAsString)
+                addProperty("entityType", BuiltInRegistries.ENTITY_TYPE.getKey(entity.type).toString())
+                addProperty("entityUuid", entity.getStringUUID())
                 addProperty("sneaking", sneaking)
-                addProperty("playerFacing", playerFacing.asString())
+                addProperty("playerFacing", playerFacing.getName())
                 addProperty("gamemode", gamemode.name.lowercase())
-                addProperty("eventConsumed", eventResult.isAccepted || eventResult == ActionResult.FAIL)
-                addProperty("entityConsumed", entityResult.isAccepted)
-                addProperty("itemConsumed", itemResult.isAccepted)
+                addProperty("eventConsumed", eventResult.consumesAction() || eventResult == InteractionResult.FAIL)
+                addProperty("entityConsumed", entityResult.consumesAction())
+                addProperty("itemConsumed", itemResult.consumesAction())
                 add("entityPos", JsonArray().apply {
-                    add(entity.pos.x); add(entity.pos.y); add(entity.pos.z)
+                    add(entity.position().x); add(entity.position().y); add(entity.position().z)
                 })
                 add("itemBefore", ServerContext.itemStackToJson(itemBefore))
                 add("itemAfter", ServerContext.itemStackToJson(itemAfter))
@@ -1065,7 +1065,7 @@ object WorldOps : RpcHandlerGroup {
      * Mirrors the server-side entity attack pipeline:
      *   0. AttackEntityCallback.EVENT.invoker().interact(player, world, hand, entity, hitResult)
      *      — Fabric API event. If non-PASS, skip vanilla attack.
-     *   1. PlayerEntity.attack(entity) — vanilla attack (damage, knockback, sweep, etc.)
+     *   1. Player.attack(entity) — vanilla attack (damage, knockback, sweep, etc.)
      *
      * Params:
      *   entityUuid    string  required   UUID of the target entity
@@ -1118,54 +1118,54 @@ object WorldOps : RpcHandlerGroup {
                 val oldArmor = installArmor(server, fakePlayer, p)
 
                 try {
-                    fakePlayer.setStackInHand(Hand.MAIN_HAND, itemBefore.copy())
-                    primeStackForGameplay(world, fakePlayer, fakePlayer.getStackInHand(Hand.MAIN_HAND), 0, true)
-                    addMainHandModifiers(fakePlayer, fakePlayer.getStackInHand(Hand.MAIN_HAND))
+                    fakePlayer.setItemInHand(InteractionHand.MAIN_HAND, itemBefore.copy())
+                    primeStackForGameplay(world, fakePlayer, fakePlayer.getItemInHand(InteractionHand.MAIN_HAND), 0, true)
+                    addMainHandModifiers(fakePlayer, fakePlayer.getItemInHand(InteractionHand.MAIN_HAND))
                     primeAttackCooldown(fakePlayer)
 
                     val playerFacing = p.getDirectionOrNull("playerFacing") ?: Direction.SOUTH
-                    val eyePos = entity.eyePos
-                    val playerOffset = Vec3d.of(playerFacing.opposite.vector).multiply(1.5)
-                    val playerPos = entity.pos.add(playerOffset)
-                    fakePlayer.refreshPositionAndAngles(
+                    val eyePos = entity.getEyePosition()
+                    val playerOffset = Vec3.atLowerCornerOf(playerFacing.opposite.normal).scale(1.5)
+                    val playerPos = entity.position().add(playerOffset)
+                    fakePlayer.moveTo(
                         playerPos.x, entity.y, playerPos.z,
                         yawFor(playerFacing), 0f
                     )
                     fakePlayer.setOnGround(true)
                     fakePlayer.fallDistance = 0f
-                    fakePlayer.setVelocity(0.0, 0.0, 0.0)
+                    fakePlayer.setDeltaMovement(0.0, 0.0, 0.0)
                     fakePlayer.isSprinting = false
 
-                    attackDamageBefore = fakePlayer.getAttributeValue(EntityAttributes.GENERIC_ATTACK_DAMAGE)
-                    attackSpeedBefore = fakePlayer.getAttributeValue(EntityAttributes.GENERIC_ATTACK_SPEED)
-                    attackCooldownBefore = fakePlayer.getAttackCooldownProgress(0.5f)
+                    attackDamageBefore = fakePlayer.getAttributeValue(Attributes.ATTACK_DAMAGE)
+                    attackSpeedBefore = fakePlayer.getAttributeValue(Attributes.ATTACK_SPEED)
+                    attackCooldownBefore = fakePlayer.getAttackStrengthScale(0.5f)
 
-                    // Real path: ServerPlayerEntity.attack. AttackEntityCallback fires
+                    // Real path: ServerPlayer.attack. AttackEntityCallback fires
                     // automatically (fabric mixin at HEAD of this method) — a consuming
                     // handler cancels the whole attack. Detection: a real attack resets
                     // the attack cooldown (resetLastAttackedTicks), a canceled one leaves
                     // it primed.
                     fakePlayer.attack(entity)
-                    eventConsumed = fakePlayer.getAttackCooldownProgress(0.5f) >= attackCooldownBefore - 0.05f
+                    eventConsumed = fakePlayer.getAttackStrengthScale(0.5f) >= attackCooldownBefore - 0.05f
 
-                    itemAfter = fakePlayer.getStackInHand(Hand.MAIN_HAND).copy()
+                    itemAfter = fakePlayer.getItemInHand(InteractionHand.MAIN_HAND).copy()
                 } finally {
-                    removeMainHandModifiers(fakePlayer, fakePlayer.getStackInHand(Hand.MAIN_HAND))
-                    fakePlayer.setStackInHand(Hand.MAIN_HAND, ItemStack.EMPTY)
+                    removeMainHandModifiers(fakePlayer, fakePlayer.getItemInHand(InteractionHand.MAIN_HAND))
+                    fakePlayer.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY)
                     restoreArmor(fakePlayer, oldArmor)
-                    fakePlayer.isSneaking = false
+                    fakePlayer.isShiftKeyDown = false
                     fakePlayer.isSprinting = false
                 }
             }
 
             JsonObject().apply {
                 addProperty("success", true)
-                addProperty("entityType", Registries.ENTITY_TYPE.getId(entity.type).toString())
-                addProperty("entityUuid", entity.uuidAsString)
+                addProperty("entityType", BuiltInRegistries.ENTITY_TYPE.getKey(entity.type).toString())
+                addProperty("entityUuid", entity.getStringUUID())
                 addProperty("eventConsumed", eventConsumed)
                 addProperty("gamemode", gamemode.name.lowercase())
                 add("entityPos", JsonArray().apply {
-                    add(entity.pos.x); add(entity.pos.y); add(entity.pos.z)
+                    add(entity.position().x); add(entity.position().y); add(entity.position().z)
                 })
                 if (entity is LivingEntity) {
                     addProperty("entityHealth", entity.health)
@@ -1192,7 +1192,7 @@ object WorldOps : RpcHandlerGroup {
      */
     private fun installArmor(
         server: MinecraftServer,
-        player: ServerPlayerEntity,
+        player: ServerPlayer,
         params: JsonObject,
     ): Map<EquipmentSlot, ItemStack> {
         val element = params.get("armor") ?: return emptyMap()
@@ -1205,7 +1205,7 @@ object WorldOps : RpcHandlerGroup {
             "legs" to EquipmentSlot.LEGS,
             "feet" to EquipmentSlot.FEET,
         )
-        val old = slots.values.associateWith { player.getEquippedStack(it).copy() }
+        val old = slots.values.associateWith { player.getItemBySlot(it).copy() }
         val armor = element.asJsonObject
         for ((name, slot) in slots) {
             val stackElement = armor.get(name) ?: continue
@@ -1216,15 +1216,15 @@ object WorldOps : RpcHandlerGroup {
             val item = stackObject.getStringOrNull("item") ?: "minecraft:air"
             val count = stackObject.getIntOr("count", 1)
             val stack = ServerContext.itemStackFromJson(server, item, count, stackObject.get("nbt"))
-            player.equipStack(slot, stack)
-            primeStackForGameplay(player.serverWorld, player, stack, slot.entitySlotId, false)
+            player.setItemSlot(slot, stack)
+            primeStackForGameplay(player.level() as ServerLevel, player, stack, slot.getIndex(), false)
         }
         return old
     }
 
     private fun primeStackForGameplay(
-        world: ServerWorld,
-        player: ServerPlayerEntity,
+        world: ServerLevel,
+        player: ServerPlayer,
         stack: ItemStack,
         slot: Int,
         selected: Boolean,
@@ -1237,39 +1237,39 @@ object WorldOps : RpcHandlerGroup {
         }
     }
 
-    private fun restoreArmor(player: ServerPlayerEntity, old: Map<EquipmentSlot, ItemStack>) {
-        old.forEach { (slot, stack) -> player.equipStack(slot, stack) }
+    private fun restoreArmor(player: ServerPlayer, old: Map<EquipmentSlot, ItemStack>) {
+        old.forEach { (slot, stack) -> player.setItemSlot(slot, stack) }
     }
 
     //1.21: ItemStack#getAttributeModifiers(EquipmentSlot) is gone; the attribute component lives on the item
-    private fun mainHandModifierMultimap(stack: ItemStack): com.google.common.collect.Multimap<RegistryEntry<EntityAttribute>, EntityAttributeModifier> {
-        val multimap = LinkedHashMultimap.create<RegistryEntry<EntityAttribute>, EntityAttributeModifier>()
-        stack.item.getAttributeModifiers().applyModifiers(EquipmentSlot.MAINHAND) { attribute, modifier ->
+    private fun mainHandModifierMultimap(stack: ItemStack): com.google.common.collect.Multimap<Holder<Attribute>, AttributeModifier> {
+        val multimap = LinkedHashMultimap.create<Holder<Attribute>, AttributeModifier>()
+        stack.item.getDefaultAttributeModifiers().forEach(EquipmentSlot.MAINHAND) { attribute, modifier ->
             multimap.put(attribute, modifier)
         }
         return multimap
     }
 
-    private fun addMainHandModifiers(player: ServerPlayerEntity, stack: ItemStack) {
+    private fun addMainHandModifiers(player: ServerPlayer, stack: ItemStack) {
         if (!stack.isEmpty) {
-            player.getAttributes().addTemporaryModifiers(mainHandModifierMultimap(stack))
+            player.getAttributes().addTransientAttributeModifiers(mainHandModifierMultimap(stack))
         }
     }
 
-    private fun removeMainHandModifiers(player: ServerPlayerEntity, stack: ItemStack) {
+    private fun removeMainHandModifiers(player: ServerPlayer, stack: ItemStack) {
         if (!stack.isEmpty) {
-            player.getAttributes().removeModifiers(mainHandModifierMultimap(stack))
+            player.getAttributes().removeAttributeModifiers(mainHandModifierMultimap(stack))
         }
     }
 
-    private fun primeAttackCooldown(player: ServerPlayerEntity) {
-        LAST_ATTACKED_TICKS_FIELD.setInt(player, ceil(player.getAttackCooldownProgressPerTick()).toInt())
+    private fun primeAttackCooldown(player: ServerPlayer) {
+        LAST_ATTACKED_TICKS_FIELD.setInt(player, ceil(player.getCurrentItemAttackStrengthDelay()).toInt())
     }
 
     private val LAST_ATTACKED_TICKS_FIELD by lazy {
         listOf("lastAttackedTicks", "field_6273", "aQ").firstNotNullOfOrNull { name ->
-            findDeclaredField(PlayerEntity::class.java, name)
-        } ?: error("Unable to resolve PlayerEntity lastAttackedTicks field")
+            findDeclaredField(Player::class.java, name)
+        } ?: error("Unable to resolve Player lastAttackedTicks field")
     }
 
     private fun findDeclaredField(type: Class<*>, name: String): java.lang.reflect.Field? {
@@ -1362,33 +1362,33 @@ object WorldOps : RpcHandlerGroup {
      *     entity-collision check reject the placement.
      */
     private fun positionForPlacement(
-        fakePlayer: ServerPlayerEntity,
+        fakePlayer: ServerPlayer,
         targetPos: BlockPos,
         clickedPos: BlockPos,
         face: Direction,
         yaw: Float,
         pitch: Float,
     ) {
-        val clickPoint = Vec3d(
-            clickedPos.x + 0.5 + face.offsetX * 0.5,
-            clickedPos.y + 0.5 + face.offsetY * 0.5,
-            clickedPos.z + 0.5 + face.offsetZ * 0.5,
+        val clickPoint = Vec3(
+            clickedPos.x + 0.5 + face.stepX * 0.5,
+            clickedPos.y + 0.5 + face.stepY * 0.5,
+            clickedPos.z + 0.5 + face.stepZ * 0.5,
         )
-        val targetBox = net.minecraft.util.math.Box(
+        val targetBox = net.minecraft.world.phys.AABB(
             targetPos.x.toDouble(), targetPos.y.toDouble(), targetPos.z.toDouble(),
             targetPos.x + 1.0, targetPos.y + 1.0, targetPos.z + 1.0,
         )
-        val reach = if (fakePlayer.abilities.creativeMode) 5.0 else 4.5
-        val inReach = fakePlayer.getEyePos().squaredDistanceTo(clickPoint) <= reach * reach
+        val reach = if (fakePlayer.abilities.instabuild) 5.0 else 4.5
+        val inReach = fakePlayer.getEyePosition().distanceToSqr(clickPoint) <= reach * reach
         val obstructs = fakePlayer.boundingBox.intersects(targetBox)
         if (inReach && !obstructs) return
 
-        val stand = Vec3d(
-            clickedPos.x + 0.5 + face.opposite.offsetX * 1.5,
-            clickedPos.y + 0.5 + face.opposite.offsetY * 1.5,
-            clickedPos.z + 0.5 + face.opposite.offsetZ * 1.5,
+        val stand = Vec3(
+            clickedPos.x + 0.5 + face.opposite.stepX * 1.5,
+            clickedPos.y + 0.5 + face.opposite.stepY * 1.5,
+            clickedPos.z + 0.5 + face.opposite.stepZ * 1.5,
         )
-        fakePlayer.refreshPositionAndAngles(stand.x, stand.y, stand.z, yaw, pitch)
+        fakePlayer.moveTo(stand.x, stand.y, stand.z, yaw, pitch)
     }
 
     private fun getRegion(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
@@ -1397,18 +1397,18 @@ object WorldOps : RpcHandlerGroup {
             val box = boxFromParams(p)
             val includeNbt = p.getBoolOrFalse("includeNbt")
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
-            // No ensureChunkLoaded: World.getChunk synchronously loads on the main thread
+            // No ensureChunkLoaded: Level.getChunk synchronously loads on the main thread
             // (create=true), so getBlockState never NPEs. This matches getBlock/setBlock/etc.
             val results = JsonArray()
-            BlockPos.iterate(box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ).forEach { pos ->
+            BlockPos.betweenClosed(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ()).forEach { pos ->
                 val state = world.getBlockState(pos)
                 val be = world.getBlockEntity(pos)
                 val entry = JsonObject().apply {
                     add("pos", ServerContext.posAsJson(pos))
-                    addProperty("dim", world.registryKey.value.toString())
+                    addProperty("dim", world.dimension().location().toString())
                     add("state", ServerContext.blockStateToJson(state))
                     addProperty("hasBlockEntity", be != null)
-                    if (includeNbt && be != null) add("nbt", NbtJson.toJson(be.createNbt(world.registryManager)))
+                    if (includeNbt && be != null) add("nbt", NbtJson.toJson(be.saveWithoutMetadata(world.registryAccess())))
                 }
                 results.add(entry)
             }
@@ -1427,13 +1427,13 @@ object WorldOps : RpcHandlerGroup {
             // No ensureChunkLoaded: see getRegion.
             val target = if (blockId != null) ServerContext.blockById(server, blockId) else null
             val matches = JsonArray()
-            BlockPos.iterate(box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ).forEach { pos ->
+            BlockPos.betweenClosed(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ()).forEach { pos ->
                 val state = world.getBlockState(pos)
                 if (target != null && state.block != target) return@forEach
                 val entry = JsonObject().apply { add("pos", ServerContext.posAsJson(pos)) }
                 if (includeNbt) {
                     val be = world.getBlockEntity(pos)
-                    if (be != null) entry.add("nbt", NbtJson.toJson(be.createNbt(world.registryManager)))
+                    if (be != null) entry.add("nbt", NbtJson.toJson(be.saveWithoutMetadata(world.registryAccess())))
                 }
                 matches.add(entry)
             }
@@ -1442,7 +1442,7 @@ object WorldOps : RpcHandlerGroup {
 
     /**
      * Force-load a chunk so its block entities tick.
-     * Uses ServerWorld.setChunkForced (persistent, same as /forceload command).
+     * Uses ServerLevel.setChunkForced (persistent, same as /forceload command).
      * This ensures the chunk stays in getForcedChunks(), which keeps tickBlockEntities() alive.
      *
      * 同步等待区块真正加载到 FULL 状态再返回。`setChunkForced` 只是把区块加入
@@ -1458,9 +1458,9 @@ object WorldOps : RpcHandlerGroup {
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val changed = world.setChunkForced(chunkPos.x, chunkPos.z, true)
             // 同步等到区块 FULL：在主线程调用，create=true 阻塞直到加载完成。
-            val chunk = world.chunkManager.getChunk(
+            val chunk = world.chunkSource.getChunk(
                 chunkPos.x, chunkPos.z,
-                net.minecraft.world.chunk.ChunkStatus.FULL, true,
+                net.minecraft.world.level.chunk.status.ChunkStatus.FULL, true,
             )
             val loaded = chunk != null
             JsonObject().apply {
@@ -1468,7 +1468,7 @@ object WorldOps : RpcHandlerGroup {
                 addProperty("forced", true)
                 addProperty("changed", changed)
                 addProperty("loaded", loaded)
-                addProperty("dim", world.registryKey.value.toString())
+                addProperty("dim", world.dimension().location().toString())
             }
         }
 
@@ -1485,7 +1485,7 @@ object WorldOps : RpcHandlerGroup {
                 add("chunk", JsonArray().apply { add(chunkPos.x); add(chunkPos.z) })
                 addProperty("forced", false)
                 addProperty("changed", changed)
-                addProperty("dim", world.registryKey.value.toString())
+                addProperty("dim", world.dimension().location().toString())
             }
         }
 
@@ -1498,27 +1498,27 @@ object WorldOps : RpcHandlerGroup {
 
     // ---- helpers ----
 
-    private fun boxFromParams(p: JsonObject): BlockBox {
+    private fun boxFromParams(p: JsonObject): BoundingBox {
         val box = p.getAsJsonObject("box") ?: throw RpcException(RpcErrors.INVALID_PARAMS, "box required")
         val from = ServerContext.pos(box.getAsJsonArray("from"))
         val to = ServerContext.pos(box.getAsJsonArray("to"))
         return ServerContext.boxFrom(from, to)
     }
-    private fun ensureChunkLoaded(world: ServerWorld, box: BlockBox) {
-        val minCx = box.minX shr 4
-        val maxCx = box.maxX shr 4
-        val minCz = box.minZ shr 4
-        val maxCz = box.maxZ shr 4
+    private fun ensureChunkLoaded(world: ServerLevel, box: BoundingBox) {
+        val minCx = box.minX() shr 4
+        val maxCx = box.maxX() shr 4
+        val minCz = box.minZ() shr 4
+        val maxCz = box.maxZ() shr 4
         for (cx in minCx..maxCx) for (cz in minCz..maxCz) {
             // ChunkNotLoaded: we just check; auto-loading is left to v2
-            if (!world.chunkManager.isChunkLoaded(cx, cz)) {
+            if (!world.chunkSource.hasChunk(cx, cz)) {
                 throw RpcException(RpcErrors.CHUNK_NOT_LOADED, "chunk not loaded: ($cx, $cz)")
             }
         }
     }
 
-    private fun boxBlockCount(box: BlockBox): Int =
-        (box.maxX - box.minX + 1) * (box.maxY - box.minY + 1) * (box.maxZ - box.minZ + 1)
+    private fun boxBlockCount(box: BoundingBox): Int =
+        (box.maxX() - box.minX() + 1) * (box.maxY() - box.minY() + 1) * (box.maxZ() - box.minZ() + 1)
 
     private fun fillBoxNow(
         server: MinecraftServer,
@@ -1537,13 +1537,13 @@ object WorldOps : RpcHandlerGroup {
         val flags = p.getIntOr("flags", DEFAULT_FLAGS)
         val state = ServerContext.blockState(server, blockId, stateProps)
         var changed = 0
-        BlockPos.iterate(box.minX, box.minY, box.minZ, box.maxX, box.maxY, box.maxZ).forEach { pos ->
-            if (world.setBlockState(pos, state, flags)) changed++
+        BlockPos.betweenClosed(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ()).forEach { pos ->
+            if (world.setBlock(pos, state, flags)) changed++
         }
         return JsonObject().apply {
             addProperty("count", total)
             addProperty("changed", changed)
-            addProperty("dim", world.registryKey.value.toString())
+            addProperty("dim", world.dimension().location().toString())
         }
     }
 }
