@@ -5,7 +5,8 @@
   "client": [
     "AbstractContainerScreenAccessor",
     "MinecraftRenderMixin",
-    "GameRendererMixin"
+    "GameRendererMixin",
+    "ScreenInputMixin"
   ],
   "injectors": {
     "defaultRequire": 1

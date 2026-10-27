@@ -127,6 +127,12 @@ tasks.register('verifyJarSelfContained') {
 			'com/mcdebug/McDebugMod.class',                        // server entrypoint
 			'com/mcdebug/client/McDebugClientMod.class',           // client entrypoint
 			'com/mcdebug/client/GuiOps.class',                     // gui.* handlers
+			'com/mcdebug/client/GuiInputOps.class',
+			'com/mcdebug/client/GuiInputParams.class',
+			'com/mcdebug/client/GuiInputValidation.class',
+			'com/mcdebug/client/GuiInputModifiers.class',
+			'com/mcdebug/client/GuiInputGestureState.class',
+			'com/mcdebug/client/mixin/ScreenInputMixin.class',
 			'com/mcdebug/client/Capture.class',
 			'com/mcdebug/client/CaptureGeometry.class',
 			'com/mcdebug/client/RenderCursor.class',

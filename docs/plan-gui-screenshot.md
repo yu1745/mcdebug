@@ -6,11 +6,11 @@
 > 已确认的边界：
 > - 只做 **1.21.1 线**（`port-fabric-1.21.1`，Mojang 官方映射），1.20.1/Kilt 线本次不做。
 > - 客户端跑在**本机 Linux `:0`（AMD radeonsi，真实 GPU）**，形态是开发用 `runClient`。
-> - 不做 golden 基线比对（回归测试不是本方案的目的）；确定性显示设置只作为可选开关保留。
+> - 原 P0 当时不做 golden 基线比对；后续已按用户要求实现本地 PNG 比较与 SDK 断言，见 `docs/plan-gui-input-regression.md`。
 
 > **状态：P0 已实现并验证**（mcdebug 自己的 `runClient` + 消费者项目 ic2-fabric-1.21.1 的 `run/mods`），
 > 落地细节与踩坑见 AGENTS.md §14；下面是设计与取舍的完整记录。
-> P1/P2 未做，见 §9。
+> 下文 §9 保留原 P1/P2 规划历史；key/type/drag/disconnect/golden 的当前实现与验证见 `docs/plan-gui-input-regression.md`。
 
 ## 0. 前提：像素只能由客户端产生
 

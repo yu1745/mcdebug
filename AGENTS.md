@@ -321,7 +321,9 @@ node scripts/set-version.mjs X.Y.Z
   已验证：客户端直接进世界，`mcdebug/socket`（集成服务器）随之出现，不需要点标题界面/存档列表。**没有这条需求时手动那套仍然有效**（`gui click --text Singleplayer` → `gui click --gui <存档行>` → `gui click --text "Play Selected World"`），存档列表坐标用 `gui screen --brief` 取。
   **坑**：同一个 gameDir 只能有一个客户端实例。上一个实例没死透时新实例会 `Failed to read level <name> data ... session.lock: already locked` 并**退回标题界面**（看起来就是"卡在大厅"）。重启前先确认 `ps -eo pid,args | grep devlaunchinjector` 为空，不要手删 `session.lock`。
 - **怎么验**：`DISPLAY=:0 ./gradlew runClient`（mcdebug 自己的 run/）验证代码；把发布 jar 拷到**消费者项目**的 `run/mods/` 再起它的 `runClient` 验证打包（Loom dev 会把生产 jar 重映射到官方名，`gui.status.jarPath` 显示 `run/.fabric/processedMods/...` 那个副本）。已按此在 ic2-fabric-1.21.1（1.21.1 + official mappings，窗口 2560x1440 @ 显示器 (640,360)、guiScale 6、`gui` 427x240）完整跑通「加载已有存档 → `inv.setSlot` 摆物品 → `gui open-block ic2_120:batbox` → `--mode gui` 截图（1073x1175）→ `gui click --slot 0`（报告中心 (188,47)、`slotAfter` 空、`carried` 红石 x7）→ 再截图（sha 变化）→ 服务端 `be.getNbt` 确认 `Items=[]`」；PNG→GUI 往返也精确：槽中心 (188,47) ↔ PNG (384,150) ↔ 回读 `guiX=187.98`。
-- **没做**：`gui.key`/`gui.type`（键盘输入）、滑块拖拽、`--repeat` 连拍、离屏定尺寸截图、golden image 回归；`gui.connect` 只能在非世界画面用（进世界后没有按键输入就出不来，P1 会补 `gui.key`/`gui.disconnect`）。
+- **后续GUI增强已实现**：见 `docs/plan-gui-input-regression.md`。`GuiInputOps` 提供当前Screen的 key/type/drag；`GuiInputModifiers` + `ScreenInputMixin` 只在事件调用栈覆盖静态修饰键查询，禁止全局键盘注入/跨请求持键。拖拽单操作、被动tick、有界30秒，切屏/改尺寸/错误/停止时释放原目标一次；CLIENT_STOPPING先调用GuiInputOps.close再关ClientTasks。`gui.disconnect`在服务端自身线程请求正常halt，客户端被动等shutdown后走原版清理/标题页，不停止进程、不从RPC泵runTick。加载/连接中拒绝，超时不回滚已请求的保存。
+- **golden回归**：CLI-only `gui compare` 和 SDK `GuiApi.assertScreenshot`（远端inline PNG）可由消费者JUnit使用，无新DSL/plugin。PngCodec是有界CRC校验RGB/RGBA8非交错PNG实现，无AWT/ImageIO/native-image反射依赖；不支持格式明确拒绝。默认精确RGBA，可显式tolerance/差异比例；尺寸不同直接失败，diff不能覆盖输入/别名，不自动更新golden。比较不匹配CLI exit1、SDK AssertionError。单测stdout capture必须@Isolated，不能与其它命令并发抢System.out。
+- **仍未做**：`--repeat`连拍、离屏定尺寸截图、全局游戏键绑定/移动、IME组合输入、连接尚未完成时的独立取消RPC、跨GPU像素确定性/自动基线更新。
 
 ---
 

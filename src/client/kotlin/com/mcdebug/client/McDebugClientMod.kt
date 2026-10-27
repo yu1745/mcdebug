@@ -52,7 +52,8 @@ class McDebugClientMod : ClientModInitializer {
                 client.stop()
             }
         }
-        ClientLifecycleEvents.CLIENT_STOPPING.register {
+        ClientLifecycleEvents.CLIENT_STOPPING.register { client ->
+            GuiInputOps.close(client)
             Capture.close()
             ClientTasks.close()
             ClientInfo.close()

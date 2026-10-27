@@ -198,6 +198,10 @@ launch then logs `Failed to read level ... already locked` and falls back to the
 | `gui.click` | click by container slot, widget text, GUI coordinates, or **PNG pixels from the previous screenshot** |
 | `gui.openBlock` | walk the client's own use-on-block path so a machine GUI opens |
 | `gui.close` / `gui.connect` / `gui.reloadResources` | close the screen (Esc) / join `host[:port]` / client-side F3+T |
+| `gui.key` / `gui.type` | one current-Screen key tap / Unicode char events, with scoped logical modifiers |
+| `gui.drag` | bounded press → mouseDragged steps → release on the same Screen, with passive natural-tick delays |
+| `gui.disconnect` | save/leave the world and return to title without stopping MC or client RPC |
+| CLI-only `gui compare` | local PNG golden regression comparison; no RPC/client required |
 
 ```bash
 # The agent loop: set the machine up on the server plane, look at it on the client plane.
@@ -234,9 +238,61 @@ Notes that save time:
   A request timeout closes the local connection, **not** a promise of remote cancellation/rollback.
 * Version warnings use the `server.ready` handshake, without an extra status RPC. Endpoints must
   speak the current handshake protocol; there is no old-server fallback.
-* `gui.connect` expects the client to be outside a world (`gui.key`/`gui.disconnect` are future work).
+* `gui.connect` expects the client to be outside a world; use `gui disconnect` to save/leave first.
+  Loading overlays and in-progress ConnectScreen cancellation are deliberately rejected by disconnect.
+  Its wait is passive; a timeout does not undo a stop/save already requested.
 * Java/Kotlin changes require a client restart; only textures/lang/models support
   `gui reload-resources`. Check `gui.status.jarPath` when deployment looks stale.
+
+### Screen input and golden assertions
+
+Focus a widget with `gui click` first. Key taps and text target only the current Screen, not system
+keys or global movement/debug bindings. Ctrl/Shift/Alt/Super are logical event-scoped modifiers;
+physical keyboard state is not changed. `--clear` sends select-all/backspace, not EditBox.setValue.
+Input reports distinguish dispatched/handled events from actual inserted text: use `gui screen`
+widget values or authoritative server data to verify state.
+
+```bash
+mcdebug --session demo gui key --key A --ctrl
+mcdebug --session demo gui type --text '机器 GUI 😀' --clear
+mcdebug --session demo gui key --key ENTER
+mcdebug --session demo gui drag --from 100,80 --to 220,80 --steps 8 --step-ticks 1
+mcdebug --session demo gui disconnect --wait-ticks 200
+pnpm dlx @yu1745/mcdebug --session demo raw gui.key '{"key":"A","modifiers":2}'
+pnpm dlx @yu1745/mcdebug --session demo raw gui.type '{"text":"机器 GUI","clear":true}'
+pnpm dlx @yu1745/mcdebug --session demo raw gui.drag '{"from":[100,80],"to":[220,80],"steps":8,"stepTicks":1}'
+pnpm dlx @yu1745/mcdebug --session demo raw gui.disconnect '{"waitTicks":200}'
+```
+
+Only one input operation is active at once. Drag has a 30-second total cap, 1..128 segments,
+0..20 passive ticks per segment and <=400 total ticks. Screen/size changes abort remaining steps
+and release the original target; `ok:false`/screenChanged may mean a key successfully navigated to
+another Screen, not that it had no effect. Errors/cancellation do not roll back partial edits.
+Text is limited to valid Unicode <=4096 UTF-16 units; newline/control keys use `gui key`.
+
+Local golden comparisons never update a baseline, align or resize images:
+
+```bash
+mcdebug gui compare --expected golden/chest.png --actual artifacts/chest.png --diff artifacts/diff.png
+mcdebug gui compare --expected golden/chest.png --actual artifacts/chest.png --channel-tolerance 2 --max-different-ratio 0.001
+```
+
+Mismatch exits **1** with JSON pixel counts/ratio/max channel delta/bounds; dimensions must match.
+Default is exact RGBA including alpha and hidden RGB; tolerance and allowed different-pixel ratio
+are explicit. Diff output cannot overwrite either input or their aliases. The bounded pure-Java PNG
+codec supports non-interlaced RGB8/RGBA8 without AWT/ImageIO; palette/grayscale/16-bit/interlaced PNG
+and tRNS are rejected explicitly. Fix GUI scale, dimensions, render mode, pointer/tooltips/animation
+and target GL/font environment yourself; comparison does not promise cross-GPU deterministic pixels.
+
+SDK/JUnit consumers can use a local compare, or request a new **inline** PNG and assert remotely:
+
+```kotlin
+ScreenshotComparison.compare(expected, actual, diff = diff).requireMatch()
+api.gui.assertScreenshot(expected, diff = diff, mode = "gui", channelTolerance = 0)
+```
+
+`expected`, `actual`, `diff` are `Path`s. SDK assertion throws `AssertionError` on mismatch and protects
+the baseline; it does not try to read a remote screenshot filesystem path. No new test DSL/plugin.
 
 ### Lightweight runtime (Fabric 1.21.1)
 

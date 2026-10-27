@@ -5,6 +5,7 @@ import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.mojang.blaze3d.platform.GlUtil
 import com.mcdebug.client.mixin.AbstractContainerScreenAccessor
+import com.mcdebug.ServerPlane
 import com.mcdebug.contract.Methods
 import com.mcdebug.rpc.RpcEnv
 import com.mcdebug.rpc.RpcErrors
@@ -14,6 +15,10 @@ import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.components.AbstractWidget
 import net.minecraft.client.gui.components.EditBox
 import net.minecraft.client.gui.screens.ConnectScreen
+import net.minecraft.client.gui.screens.GenericMessageScreen
+import net.minecraft.client.multiplayer.ClientLevel
+import net.minecraft.client.server.IntegratedServer
+import net.minecraft.network.chat.Component
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.gui.screens.TitleScreen
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen
@@ -59,7 +64,8 @@ object GuiOps : ClientRpcGroup {
         "close" to ::close,
         "reloadResources" to ::reloadResources,
         "stop" to ::stop,
-    )
+        "disconnect" to ::disconnect,
+    ) + GuiInputOps.methods()
 
     // ---------------------------------------------------------------- status
 
@@ -631,6 +637,63 @@ object GuiOps : ClientRpcGroup {
                     addProperty("containerId", client.player?.containerMenu?.containerId ?: -1)
                 }
             }
+        }
+    }
+
+    // -------------------------------------------------------------- disconnect
+
+    private data class DisconnectTarget(val level: ClientLevel?, val server: IntegratedServer?)
+    private var disconnectOperation: Any? = null // client thread only
+
+    private fun disconnect(client: Minecraft, params: JsonObject?): CompletableFuture<JsonElement> {
+        val waitTicks = (params ?: JsonObject()).int("waitTicks", 200)
+        if (waitTicks !in 1..1200) throw RpcException(RpcErrors.INVALID_PARAMS, "waitTicks must be in 1..1200")
+        val operation = Any()
+        val started = ClientTasks.onClient(client) {
+            if (disconnectOperation != null) throw RpcException(RpcErrors.CLIENT_NOT_READY, "disconnect already in progress")
+            if (!client.isGameLoadFinished || client.getOverlay() != null || client.screen is ConnectScreen) {
+                throw RpcException(RpcErrors.CLIENT_NOT_READY, "client is still loading/connecting; cancel that screen first")
+            }
+            disconnectOperation = operation
+            val target = DisconnectTarget(client.level, client.getSingleplayerServer())
+            if (target.server != null && target.server.isRunning) {
+                // Request the normal integrated-server halt on its own thread.
+                // Do not join it or pump runTick from this RPC. Vanilla network
+                // teardown can still run its ordinary engine cleanup callbacks.
+                target.server.execute { target.server.halt(false) }
+                client.setScreen(GenericMessageScreen(Component.translatable("menu.savingLevel")))
+            }
+            target
+        }
+        val stopped = ClientTasks.thenOnClient(client, started) { target ->
+            ClientTasks.until(waitTicks) { target.server == null || target.server.isShutdown }
+        }.thenCompose { it }
+        val ready = ClientTasks.thenOnClient(client, stopped) { complete ->
+            if (!complete) throw RpcException(RpcErrors.TICK_TIMEOUT, "world is still disconnecting/saving; the stop request is not rolled back")
+            // If vanilla connection cleanup observed server shutdown in a nested
+            // event pump, let it finish before our final title-screen transition.
+            ClientTasks.awaitTicks(1)
+        }.thenCompose { it }
+        return ClientTasks.thenOnClient(client, ready) {
+            val target = started.join() // completed, never blocks
+            if ((client.level != null && client.level !== target.level) ||
+                (client.getSingleplayerServer() != null && client.getSingleplayerServer() !== target.server)) {
+                throw RpcException(RpcErrors.CLIENT_NOT_READY, "world changed while disconnecting; refusing to disconnect a replacement")
+            }
+            client.level?.disconnect()
+            client.disconnect()
+            client.setScreen(TitleScreen())
+            JsonObject().apply {
+                addProperty("ok", client.level == null && client.player == null && !ServerPlane.running)
+                addProperty("disconnected", client.level == null && client.player == null)
+                addProperty("singleplayer", target.server != null)
+                addProperty("serverStopped", target.server == null || target.server.isShutdown)
+                addProperty("inWorld", client.level != null || client.player != null)
+                addProperty("screen", client.screen?.javaClass?.name ?: "")
+                add("process", RpcEnv.processInfo())
+            }
+        }.asElement().whenComplete { _, _ ->
+            ClientTasks.onClient(client) { if (disconnectOperation === operation) disconnectOperation = null }
         }
     }
 

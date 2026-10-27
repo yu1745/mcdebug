@@ -97,6 +97,7 @@ object Methods {
     val gui = setOf(
         "gui.status", "gui.connect", "gui.openBlock", "gui.screenshot",
         "gui.screen", "gui.click", "gui.close", "gui.reloadResources", "gui.stop",
+        "gui.key", "gui.type", "gui.drag", "gui.disconnect",
     )
 
     /** 客户端平面全部方法名。 */

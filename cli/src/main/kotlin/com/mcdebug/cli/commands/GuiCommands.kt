@@ -26,8 +26,8 @@ fun CliktCommand.withGuiApi(block: (DebugApi) -> Unit) {
 
 class GuiCommands : CliktCommand(
     name = "gui",
-    help = "drive a REAL game client: screenshots with pixel coordinates + Screen-level clicks " +
-        "(needs a running client with the mcdebug jar in mods/; the server plane alone cannot render)",
+    help = "drive a REAL game client: screenshots, Screen clicks/keys/text/drag and world disconnect " +
+        "(needs a running client; compare is a local PNG regression command and needs no connection)",
     epilog = """
 **What it needs**
 - a running game client that has the mcdebug jar in its `mods/` directory
@@ -50,7 +50,9 @@ class GuiCommands : CliktCommand(
 
 **Reading the result**
 - game state is authoritative: `gui screen`, the click report (`slotAfter`, `carried`, `changed`) or server-plane NBT
-- screenshots are for looking; `gui status` reports `windowFocused` because the carried stack, tooltips and hover highlight are drawn at the physical cursor
+- screenshots show the rendered client, not server acknowledgement; lightweight modes use a focus-independent virtual Screen pointer
+- `gui key` / `type` / `drag` dispatch Screen events, not desktop keys or global game bindings
+- `gui disconnect` leaves/saves the world but keeps the client; `gui compare` checks local PNGs without a connection
 
 Run `mcdebug gui <subcommand> --help` for options, examples and pitfalls of each one.
 """.trimIndent(),
@@ -450,6 +452,7 @@ class GuiReloadResourcesCmd : CliktCommand(
 fun guiSubcommands() = listOf(
     GuiStatusCmd(), GuiScreenCmd(), GuiScreenshotCmd(), GuiOpenBlockCmd(),
     GuiClickCmd(), GuiCloseCmd(), GuiConnectCmd(), GuiReloadResourcesCmd(),
+    GuiKeyCmd(), GuiTypeCmd(), GuiDragCmd(), GuiDisconnectCmd(), GuiCompareCmd(),
 )
 
 /** 供其他命令复用：把 `{"a":1}` 结果按键取字符串。 */
