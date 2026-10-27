@@ -57,6 +57,7 @@ object GuiOps : ClientRpcGroup {
         "click" to ::click,
         "close" to ::close,
         "reloadResources" to ::reloadResources,
+        "stop" to ::stop,
     )
 
     // ---------------------------------------------------------------- status
@@ -71,7 +72,9 @@ object GuiOps : ClientRpcGroup {
             val gameDir = gameDir()
             JsonObject().apply {
                 addProperty("ready", true)
+                add("process", RpcEnv.processInfo())
                 addProperty("clientTick", ClientTasks.currentTick())
+                add("render", RenderControl.statusJson())
                 addProperty("fps", client.getFps())
                 addProperty("paused", client.isPaused)
                 // 光标 warp 只在窗口"活跃"时才有视觉效果：MC 的 MouseHandler.onMove 被
@@ -285,12 +288,10 @@ object GuiOps : ClientRpcGroup {
         val inline = p.bool("inline", false)
         val name = p.string("name")
         val delayTicks = p.int("delayTicks", 1)
-        // Let the game render at least one more frame, so the PNG shows the state
-        // produced by the previous click rather than the frame before it. `Capture`
-        // re-enters the client thread itself, so only the delay needs the hop.
-        return ClientTasks.onClient(client) { ClientTasks.awaitTicks(delayTicks) }
-            .thenCompose { it }
-            .thenCompose { Capture.screenshot(client, mode, inline, name) }
+        // Passive delay, client hops, render wait and encoding share ONE deadline
+        // and settlement. A second wrapper timeout could report failure after the
+        // capture had already published its PNG-click transform.
+        return Capture.screenshot(client, mode, inline, name, delayTicks)
     }
 
     // ---------------------------------------------------------------- screen
@@ -386,8 +387,8 @@ object GuiOps : ClientRpcGroup {
             }
             pngElement != null -> {
                 val pair = p.pair("png")
-                val gui = Capture.pngToGui(pair.first, pair.second)
                 clickCoordinates(client, p, waitTicks, moveCursor) {
+                    val gui = Capture.pngToGui(pair.first, pair.second)
                     Target(gui.first, gui.second, "png", null, "png=${pair.first},${pair.second}")
                 }
             }
@@ -632,6 +633,23 @@ object GuiOps : ClientRpcGroup {
             .thenCompose { it }
             .thenCompose { ClientTasks.onClient(client) { JsonObject().apply { addProperty("ok", true) } } }
 
+    // ------------------------------------------------------------------ stop
+
+    private fun stop(client: Minecraft, params: JsonObject?): CompletableFuture<JsonElement> {
+        val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "instanceId and sessionToken are required")
+        if (p.string("instanceId") != RpcEnv.instanceId || p.string("sessionToken") != RpcEnv.sessionToken) {
+            throw RpcException(RpcErrors.INVALID_PARAMS, "client instance identity changed; refusing to stop")
+        }
+        return ClientTasks.onClient(client) {
+            client.stop()
+            JsonObject().apply {
+                addProperty("ok", true)
+                addProperty("stopping", true)
+                addProperty("instanceId", RpcEnv.instanceId)
+            }
+        }
+    }
+
     // --------------------------------------------------------------- helpers
 
     /**
@@ -642,13 +660,14 @@ object GuiOps : ClientRpcGroup {
     private fun <T : JsonElement> CompletableFuture<T>.asElement(): CompletableFuture<JsonElement> = thenApply { it }
 
     /**
-     * Moves the real cursor to the synthetic click position.
+     * Keeps hover/tooltips/carried stacks at the synthetic Screen click position.
+     * Lite mode uses the render gate's virtual Screen-space cursor, without focus
+     * or OS pointer movement. Continuous mode retains the real cursor path.
      *
-     * Not needed for the click itself — `Screen`/`AbstractContainerScreen` resolve the
-     * target from the coordinates we pass — but it keeps the *picture* honest: the
-     * carried stack, tooltips and slot highlight are all drawn at the physical cursor,
-     * so without this a screenshot shows the click somewhere the agent never clicked.
-     * Skipped while the mouse is grabbed (in-game look) to avoid spinning the camera.
+     * The latter deliberately inverts MouseHandler's ceil-sized guiScaled mapping,
+     * NOT GameRenderer's unrounded width/guiScale projection. PNG coordinates are
+     * converted to Screen semantics by Capture first; applying render guiScale here
+     * instead would make the click correct but leave hover at a different position.
      */
     private fun warpCursor(
         client: Minecraft,
@@ -658,14 +677,15 @@ object GuiOps : ClientRpcGroup {
         offsetY: Int = 0,
     ): Boolean {
         if (client.screen == null) return false
+        if (RenderControl.moveCursor(x + offsetX, y + offsetY)) return true
         val window = client.window
         val scaledWidth = window.getGuiScaledWidth()
         val scaledHeight = window.getGuiScaledHeight()
         if (scaledWidth <= 0 || scaledHeight <= 0 || window.getWindow() == 0L) return false
-        val windowX = (x + offsetX) * window.getScreenWidth() / scaledWidth
-        val windowY = (y + offsetY) * window.getScreenHeight() / scaledHeight
+        val cursor = CaptureGeometry.screenToWindow(x + offsetX, y + offsetY,
+            window.getScreenWidth(), window.getScreenHeight(), scaledWidth, scaledHeight)
         return try {
-            GLFW.glfwSetCursorPos(window.getWindow(), windowX, windowY)
+            GLFW.glfwSetCursorPos(window.getWindow(), cursor.first, cursor.second)
             true
         } catch (t: Throwable) {
             false

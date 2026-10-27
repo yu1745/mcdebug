@@ -5,8 +5,7 @@ import com.mcdebug.rpc.RpcException
 import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents
 import net.minecraft.client.Minecraft
 import java.util.concurrent.CompletableFuture
-import java.util.concurrent.ExecutionException
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.CancellationException
 
 /**
  * Client-thread plumbing for the `gui.*` plane.
@@ -37,6 +36,9 @@ object ClientTasks {
     @Volatile
     private var installed: Boolean = false
 
+    @Volatile
+    private var stopped: Boolean = false
+
     /** Touch only from the client thread (registration is client-thread-only by contract). */
     private val tickWaiters = ArrayList<TickWaiter>()
     private val condWaiters = ArrayList<CondWaiter>()
@@ -59,9 +61,11 @@ object ClientTasks {
      * the body.
      */
     fun <T> onClient(client: Minecraft, body: () -> T): CompletableFuture<T> {
+        if (stopped) return CompletableFuture.failedFuture(RpcException(RpcErrors.CLIENT_NOT_READY, "client is stopping"))
         val future = CompletableFuture<T>()
         val run = Runnable {
             try {
+                if (stopped) throw RpcException(RpcErrors.CLIENT_NOT_READY, "client is stopping")
                 future.complete(body())
             } catch (t: Throwable) {
                 future.completeExceptionally(t)
@@ -76,27 +80,12 @@ object ClientTasks {
         }
     }
 
-    /** Blocking variant of [onClient]; never call this from the client thread. */
-    fun <T> call(client: Minecraft, timeoutSeconds: Long = 30L, body: () -> T): T {
-        val future = onClient(client, body)
-        return try {
-            future.get(timeoutSeconds, TimeUnit.SECONDS)
-        } catch (e: ExecutionException) {
-            val cause = e.cause
-            if (cause is RpcException) throw cause
-            throw RpcException(RpcErrors.INTERNAL_ERROR, "client task failed: ${cause?.message ?: e.message}", null, cause)
-        } catch (e: RpcException) {
-            throw e
-        } catch (e: Exception) {
-            throw RpcException(RpcErrors.CLIENT_NOT_READY, "client thread did not answer within ${timeoutSeconds}s: $e", null, e)
-        }
-    }
-
     /**
      * Complete after [ticks] client ticks. Must be called on the client thread.
      * `ticks <= 0` completes immediately.
      */
     fun awaitTicks(ticks: Int): CompletableFuture<Unit> {
+        if (stopped) return CompletableFuture.failedFuture(CancellationException("client is stopping"))
         if (ticks <= 0) return CompletableFuture.completedFuture(Unit)
         val future = CompletableFuture<Unit>()
         tickWaiters.add(TickWaiter(tick + ticks, future))
@@ -109,6 +98,7 @@ object ClientTasks {
      * called on the client thread.
      */
     fun until(maxTicks: Int, check: () -> Boolean): CompletableFuture<Boolean> {
+        if (stopped) return CompletableFuture.failedFuture(CancellationException("client is stopping"))
         val satisfied = check()
         if (satisfied || maxTicks <= 0) return CompletableFuture.completedFuture(satisfied)
         val future = CompletableFuture<Boolean>()
@@ -125,42 +115,47 @@ object ClientTasks {
     fun <T, R> thenOnClient(client: Minecraft, future: CompletableFuture<T>, body: (T) -> R): CompletableFuture<R> =
         future.thenCompose { value -> onClient(client) { body(value) } }
 
-    fun reset() {
+    fun close() {
+        stopped = true
+        val futures = tickWaiters.map { it.future } + condWaiters.map { it.future }
         tickWaiters.clear()
         condWaiters.clear()
+        futures.forEach { it.completeExceptionally(CancellationException("client is stopping")) }
     }
 
     private fun onTick() {
         tick++
-        if (tickWaiters.isNotEmpty()) {
-            val iterator = tickWaiters.iterator()
-            while (iterator.hasNext()) {
-                val waiter = iterator.next()
-                if (tick >= waiter.deadline) {
-                    iterator.remove()
-                    waiter.future.complete(Unit)
-                }
+        if (tickWaiters.isEmpty() && condWaiters.isEmpty()) return
+        // Completing futures can immediately register another waiter. Finish both
+        // traversals before running continuations, or nested waits mutate iterators.
+        val completions = ArrayList<() -> Unit>()
+        val ticks = tickWaiters.iterator()
+        while (ticks.hasNext()) {
+            val waiter = ticks.next()
+            if (waiter.future.isDone || tick >= waiter.deadline) {
+                ticks.remove()
+                completions.add { waiter.future.complete(Unit) }
             }
         }
-        if (condWaiters.isNotEmpty()) {
-            val iterator = condWaiters.iterator()
-            while (iterator.hasNext()) {
-                val waiter = iterator.next()
-                val satisfied = try {
-                    waiter.check()
-                } catch (t: Throwable) {
-                    iterator.remove()
-                    waiter.future.completeExceptionally(t)
-                    continue
-                }
-                if (satisfied) {
-                    iterator.remove()
-                    waiter.future.complete(true)
-                } else if (tick >= waiter.deadline) {
-                    iterator.remove()
-                    waiter.future.complete(false)
-                }
+        val conditions = condWaiters.iterator()
+        while (conditions.hasNext()) {
+            val waiter = conditions.next()
+            if (waiter.future.isDone) {
+                conditions.remove()
+                continue
+            }
+            val satisfied = try {
+                waiter.check()
+            } catch (t: Throwable) {
+                conditions.remove()
+                completions.add { waiter.future.completeExceptionally(t) }
+                continue
+            }
+            if (satisfied || tick >= waiter.deadline) {
+                conditions.remove()
+                completions.add { waiter.future.complete(satisfied) }
             }
         }
+        completions.forEach { it() }
     }
 }

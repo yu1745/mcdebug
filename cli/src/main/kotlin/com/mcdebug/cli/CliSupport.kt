@@ -29,7 +29,8 @@ fun cliVersion(): String =
  */
 fun withClient(cli: McDebugCli, block: (RpcClient) -> Unit) {
     if (batchActive) {
-        val c = batchClient ?: RpcClient(cli.clientOptions()).also {
+        val options = cli.clientOptions()
+        val c = batchClient?.also { it.requireSameBatchOptions(options) } ?: RpcClient(options).also {
             batchClient = it
             warnVersionMismatch(it)
         }
@@ -51,15 +52,16 @@ fun withClient(cli: McDebugCli, block: (RpcClient) -> Unit) {
  */
 fun withClientPlane(cli: McDebugCli, block: (RpcClient) -> Unit) {
     if (batchActive) {
-        val c = batchClientPlane ?: RpcClient(cli.clientPlaneOptions()).also {
+        val options = cli.clientPlaneOptions()
+        val c = batchClientPlane?.also { it.requireSameBatchOptions(options) } ?: RpcClient(options).also {
             batchClientPlane = it
-            warnVersionMismatch(it, clientPlane = true)
+            warnVersionMismatch(it)
         }
         block(c)
         return
     }
     RpcClient(cli.clientPlaneOptions()).use { c ->
-        warnVersionMismatch(c, clientPlane = true)
+        warnVersionMismatch(c)
         block(c)
     }
 }
@@ -72,24 +74,11 @@ fun withPlaneFor(cli: McDebugCli, method: String, block: (RpcClient) -> Unit) {
     if (method.startsWith("gui.")) withClientPlane(cli, block) else withClient(cli, block)
 }
 
-/**
- * 连接后（状态方法可得时）比较 mod jar 版本与 CLI 版本，不一致打 stderr 警告。
- * 服务端平面查 `server.status`，客户端平面查 `gui.status`（两者都带 `modVersion`）。
- */
-fun warnVersionMismatch(client: RpcClient, clientPlane: Boolean = false) {
-    val v = cliVersion()
-    if (v == "dev") return
-    val remoteVersion = try {
-        val status = client.call(if (clientPlane) "gui.status" else "server.status")
-        status.takeIf { it.isJsonObject }?.asJsonObject?.get("modVersion")
-            ?.takeIf { it.isJsonPrimitive }?.asString
-    } catch (_: Exception) {
-        // 旧服务端/旧客户端无该方法或连接异常：静默跳过，不阻塞执行。
-        return
-    }
-    if (remoteVersion.isNullOrBlank() || remoteVersion == v) return
-    val who = if (clientPlane) "client" else "server"
-    System.err.println("warning: $who mcdebug $remoteVersion != CLI $v，部分命令可能不可用")
+/** 版本比较只读连接首条 server.ready，不调用 status，不依赖游戏主线程。 */
+fun warnVersionMismatch(client: RpcClient, localVersion: String = cliVersion()) {
+    val handshake = client.handshake()
+    if (localVersion == "dev" || handshake.modVersion == localVersion) return
+    System.err.println("warning: ${handshake.plane} mcdebug ${handshake.modVersion} != CLI $localVersion，部分命令可能不可用")
 }
 
 /** 统一退出码映射：0=成功；1=CLI 用法/解析错误；2=服务端拒绝（RPC error，含 -320xx）；3=方法未实现。 */

@@ -1,12 +1,19 @@
 package com.mcdebug.client
 
 import com.google.gson.JsonObject
+import com.google.gson.JsonParser
 import com.mcdebug.McDebugMod
 import com.mcdebug.ServerPlane
 import com.mcdebug.rpc.RpcServer
+import com.mcdebug.rpc.RpcEnv
 import com.mcdebug.rpc.TransportConfig
 import net.fabricmc.loader.api.FabricLoader
 import java.nio.file.Path
+import java.nio.file.Files
+import java.nio.file.StandardCopyOption
+import java.nio.channels.FileChannel
+import java.nio.channels.FileLock
+import java.nio.file.StandardOpenOption
 
 /**
  * Facts about the **client plane** process, published through `gui.status`.
@@ -33,10 +40,73 @@ object ClientInfo {
 
     @Volatile
     private var mismatch: List<String> = emptyList()
+    private var gameDirChannel: FileChannel? = null
+    private var gameDirLock: FileLock? = null
+
+    /** Hold for this JVM's lifetime, including bootstrap before client.json exists. */
+    fun claimGameDir() {
+        val path = RpcEnv.gameDir().resolve("mcdebug/client.lock")
+        Files.createDirectories(path.parent)
+        val channel = FileChannel.open(path, StandardOpenOption.CREATE, StandardOpenOption.WRITE)
+        try {
+            val lock = checkNotNull(channel.tryLock()) { "another Minecraft client already owns gameDir ${RpcEnv.gameDir()}" }
+            gameDirChannel = channel
+            gameDirLock = lock
+            Runtime.getRuntime().addShutdownHook(Thread({
+                try { gameDirLock?.release() } finally { gameDirChannel?.close() }
+            }, "mcdebug-game-dir-lock"))
+        } catch (e: Exception) {
+            channel.close()
+            throw e
+        }
+    }
 
     /** Called by [McDebugClientMod] once the client-plane listener is created. */
     fun attach(rpcServer: RpcServer?) {
         server = rpcServer
+    }
+
+    /** Bootstrap discovery is readable before the main thread can answer GUI RPCs. */
+    fun publish() {
+        val dir = RpcEnv.gameDir().resolve("mcdebug")
+        Files.createDirectories(dir)
+        val discovery = JsonObject().apply {
+            add("process", RpcEnv.processInfo())
+            addProperty("clientSocket", server?.socketPath?.toAbsolutePath()?.toString() ?: "")
+        }
+        val temporary = Files.createTempFile(dir, ".client-", ".json.part")
+        try {
+            Files.writeString(temporary, discovery.toString())
+            Files.move(temporary, dir.resolve("client.json"), StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING)
+        } finally {
+            Files.deleteIfExists(temporary)
+        }
+    }
+
+    /** A cancelled bootstrap may outlive its Gradle wrapper. Match this launch only. */
+    fun bootstrapStopRequested(): Boolean {
+        if (RpcEnv.sessionToken.isEmpty()) return false
+        val dir = RpcEnv.gameDir().resolve("mcdebug")
+        fun token(path: Path): String? = if (!Files.isRegularFile(path) || Files.size(path) > 65536) null else
+            Files.newBufferedReader(path).use { JsonParser.parseReader(it).asJsonObject.get("sessionToken")?.asString }
+        return try {
+            // A newer launch may have replaced the registry reservation while an
+            // old Gradle daemon was still bootstrapping. Never let that old JVM
+            // bind/unlink the new client's endpoints or overwrite its discovery.
+            val owner = token(dir.resolve("mdb-owner.json"))
+            (owner != null && owner != RpcEnv.sessionToken) || token(dir.resolve("session-stop.json")) == RpcEnv.sessionToken
+        } catch (e: Exception) {
+            McDebugMod.LOGGER.warn("Cannot read session bootstrap markers in {}: {}", dir, e.message)
+            false
+        }
+    }
+
+    /** Stop accepting calls before the client's event loop disappears. */
+    fun close() {
+        server?.stop()
+        server = null
+        // CLIENT_STOPPING precedes integrated-server saves. Keep the directory
+        // lock until JVM shutdown, not just until the RPC endpoints are closed.
     }
 
     /** The socket path the client plane *tries* to bind, for diagnostics before/without a listener. */

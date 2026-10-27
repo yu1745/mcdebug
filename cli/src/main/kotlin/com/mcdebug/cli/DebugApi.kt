@@ -355,6 +355,10 @@ class GuiApi(private val rpc: RpcClient) {
         rpc.call("gui.close", params { p("waitTicks", waitTicks) })
 
     fun reloadResources(): JsonElement = rpc.call("gui.reloadResources")
+
+    /** Stop this exact client instance, not an endpoint that replaced it. */
+    fun stop(instanceId: String, sessionToken: String): JsonElement =
+        rpc.call("gui.stop", params { p("instanceId", instanceId); p("sessionToken", sessionToken) })
 }
 
 class DebugApi(val rpc: RpcClient) {

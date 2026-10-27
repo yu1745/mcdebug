@@ -194,31 +194,33 @@ class GuiScreenshotCmd : CliktCommand(
 
 **What comes back**
 - `path` / `file` / `relPath` / `bytes` / `sha256` / `width` / `height`
-- `transform`: `framebuffer`, `window`, `guiScale`, `guiScaled`, `pixelsPerGui`, `crop` (framebuffer pixels), `cropInGui` (GUI units), `pngSize`
+- `frameId` / `clientTick` identify the newly rendered capture
+- `transform`: `framebuffer`, `window`, `guiScale`, `guiScaled`, `pixelsPerGuiXY`, `crop` (framebuffer pixels), `cropInGui` (fractional GUI units), `pngSize`
 - `png` - base64, only with `--inline`
 
 **Coordinate math**
-- `pngX = (guiX - cropInGui[0]) * pixelsPerGui`
-- `guiX = pngX / pixelsPerGui + cropInGui[0]`
+- `pngX = guiX * pixelsPerGuiXY[0] - crop[0]` (use axis 1 for Y)
+- `guiX = (pngX + crop[0]) / pixelsPerGuiXY[0]`
 - `gui click --png X,Y` does this for you, and only accepts pixels from the most recent screenshot of the same client process (otherwise `-32602 NO_SCREENSHOT`)
 
 **Options**
 - `--out PATH` - also copy the PNG there
 - `--name NAME` - file name inside `<gameDir>/mcdebug/screenshots` (default: timestamped)
-- `--delay-ticks N` - render N more client ticks first (default 1 = the frame after your last command; raise it for animations or tooltips)
+- `--delay-ticks N` - passive delay before requesting a fresh frame (default 1; 0 still waits for a new rendered frame)
 - `--path-only` - print just the path, for shell pipelines
 - `--inline` - embed base64 in the JSON (small images; the socket limit is 64 MiB)
 
 **Pitfalls**
-- the grab is the previous complete frame, so a shot taken in the same tick as a click can still show the old state: use `--delay-ticks` or a second screenshot
-- a picture that never changes usually means the window is unfocused (`gui status` -> `windowFocused`)
+- readback happens after a new frame has rendered and flushed; this is not an acknowledgement of a previous server operation
+- screenshots have a 30-second client-side cap including delay, render wait and encoding
+- lightweight modes use a focus-independent virtual GUI pointer; continuous mode keeps the normal physical cursor behavior
 """.trimIndent(),
 ) {
     private val mode by option("--mode", help = "window (whole framebuffer, default) | gui (container GUI rectangle)").default("window")
     private val out by option("--out", help = "also copy the PNG to this path (relative to CWD)")
     private val name by option("--name", help = "file name inside <gameDir>/mcdebug/screenshots (default: timestamped)")
     private val inline by option("--inline", help = "embed the PNG as base64 in the JSON (small images only)").flag()
-    private val delayTicks by option("--delay-ticks", help = "render N more ticks before capturing (default 1: the frame after your last click)").int()
+    private val delayTicks by option("--delay-ticks", help = "passively wait N ticks before requesting a fresh frame (default 1; 0 also captures a new frame)").int()
     private val pathOnly by option("--path-only", help = "print only the PNG path (for shell pipelines)").flag()
 
     override fun run() = withGuiApi { api ->

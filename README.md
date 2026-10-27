@@ -110,6 +110,72 @@ The server never exposes `tick.run`/`tick.runUntil`: `trace.*` and `wait.until` 
 ticks only. The predicate DSL (`be[x,y,z].<path> <op> <value>`, `AND/OR/NOT`, `sum(...)`,
 comparisons) is documented in `mcdebug --help` under `wait-until` and in AGENTS.md §7.
 
+## Managed sessions (Linux, local clients)
+
+A session manages a real client's lifecycle and both RPC planes. You no longer need to run
+Gradle in another terminal: mdb starts the **target project's own** wrapper, waits for readiness,
+then returns while the client stays running. There is no new daemon or alternate MC implementation.
+Install the current mod jar in consumer projects first; mcdebug's own dev launch injects its classes
+and must **not** have another mcdebug jar in its own `run/mods/`.
+
+```bash
+java -jar mcdebug-cli.jar session start demo --project . --world "New World" --render demand
+java -jar mcdebug-cli.jar session status demo
+java -jar mcdebug-cli.jar --session demo gui status
+java -jar mcdebug-cli.jar --session demo raw server.status '{}'
+java -jar mcdebug-cli.jar --session demo gui screenshot --mode window --out /tmp/window.png
+java -jar mcdebug-cli.jar session logs demo --lines 80
+java -jar mcdebug-cli.jar session stop demo
+```
+
+For a consumer with submodules, select its actual game directory explicitly (relative paths are
+relative to your current working directory, not `--project`):
+
+```bash
+java -jar mcdebug-cli.jar session start ic2 --project ../ic2-fabric-1.21.1 --task :core:runClient --game-dir ../ic2-fabric-1.21.1/core/run --world "New World" --render demand
+```
+
+| command / option | behavior |
+|---|---|
+| `session start NAME` | project defaults to CWD, task `runClient`, gameDir `project/run`, render `demand`, window 854×480, wait 180s |
+| `--world SAVE` | existing directory name under gameDir/saves; waits for single-player world readiness; omitted = client/main menu readiness |
+| `--game-dir PATH` / `--task TASK` / `--display DISPLAY` | explicit run directory / qualified runClient task / child display |
+| `--wait-seconds N` | bounded startup or shutdown wait; startup timeout is an error, not a stopped-process guarantee |
+| `session attach NAME --game-dir PATH` | verify an existing local client; does **not** gain stop ownership |
+| `session list` / `session status NAME` | report metadata, PID identity, endpoints, state and errors |
+| `session logs NAME --lines N` | finite UTF-8 log tail; no follow loop |
+| `session stop NAME [--force]` | normal owned-client shutdown; explicit force may kill only the exact owned MC process, never shared Gradle daemons or attached clients |
+| `--session NAME` | route gui.* to the client and other methods to that client's integrated server; no global current session |
+| `--sessions-dir PATH` | registry directory; otherwise MCDEBUG_SESSIONS_DIR, then XDG_STATE_HOME/mcdebug/sessions or ~/.local/state/mcdebug/sessions |
+
+Batch inherits the selected session and registry. Once a plane's shared connection is open, changing
+its session/transport/deadlines inside a `-c` command is rejected instead of silently reusing another
+target; use separate invocations for different sessions. Managed launches keep both TCP listeners disabled
+and pin Unix sockets inside the selected gameDir. Cross-machine/multiplayer-server pairing is not
+part of Session v1; use the existing explicit transport options outside `--session`.
+
+Sessions require a current identity-bearing `server.ready` and `mcdebug/client.json`: PID,
+OS process startTime, per-JVM instanceId, launch token and canonical gameDir. PID alone, a socket
+file alone, or a Gradle wrapper PID is **not** enough. Replaced endpoints fail rather than silently
+routing commands into another game. `--session` cannot be combined with explicit socket/TCP overrides.
+
+Same-name/same-config live starts reuse the session; another live instance/configuration or another
+session on the same canonical gameDir is refused, including across registries. Session operations
+never delete a world or Minecraft's session.lock. A stop during bootstrap can report `stopping`
+(nonzero exit): the launch-token marker cancels a late MC startup, but mdb does not invent an exited
+JVM identity. Inspect status/logs before retrying. The token is an ownership correlation value, **not
+RPC authentication**.
+
+`gui.stop` is the low-level identity-checked shutdown RPC (`instanceId`, `sessionToken`); normal use
+should go through `session stop`. After deploying/publishing this build, raw access is also available:
+
+```bash
+pnpm dlx @yu1745/mcdebug --session demo raw gui.stop '{"instanceId":"INSTANCE_FROM_GUI_STATUS_PROCESS","sessionToken":"TOKEN_FROM_GUI_STATUS_PROCESS"}'
+```
+
+Raw RPC bypasses the CLI's owned/attached policy deliberately; it is not a security boundary.
+See [Session design and safety rules](docs/plan-session-management.md).
+
 ## Client plane: `gui.*`
 
 Start the client straight in a save instead of clicking through the menus (the value is the
@@ -145,27 +211,67 @@ mcdebug gui close
 
 Notes that save time:
 
-* `gui.screenshot --mode gui` crops the rectangle reported by `gui.screen.gui`
-  (`left/top/imageWidth/imageHeight`) and returns `transform.cropInGui`; both always agree.
-* PNG pixel coordinates need a `gui.screenshot` **in the same client process** first, otherwise
-  you get `-32602` with `reason:"NO_SCREENSHOT"`.
-* Clicks dispatch ordinary `Screen` events — no GLFW synthesis, no window focus. The real cursor
-  is warped to the click point by default (`--no-cursor-move` disables) because the carried stack,
-  tooltips and hover highlight are drawn at the physical cursor; the OS pointer itself never
-  appears in a screenshot.
-* Every click report carries the landing point (`guiX`/`guiY` in GUI units; slot clicks report the
-  slot centre), so slot ↔ GUI ↔ PNG coordinates are interchangeable with the screenshot `transform`.
-* Cursor-dependent rendering (floating carried stack, tooltips, hover highlight) only follows the
-  warp while the game window is focused — check `gui.status.windowFocused`. Game state is
-  authoritative regardless: read `gui.screen`, the click report (`slotAfter`/`carried`) or the
-  server plane, never the pixels alone.
-* While the client main thread is busy (world load, `gui reload-resources`) `gui.*` calls block
-  until it frees up — wrap polling probes in `timeout 15 java -jar mcdebug-cli.jar …`.
-* In-world menus cannot be opened without key input (`gui.key` is future work), so `gui.connect`
-  expects the client to be outside a world.
-* Blank/stale PNG? The window must be visible and rendering (`gui.status.fps`), the client must be
-  the jar you think it is (`gui.status.jarPath`), and Java/Kotlin changes need a client restart —
-  only textures/lang/models can use `gui reload-resources`.
+* Screenshots wait for a **newly rendered frame**, not merely another tick. `delayTicks` is an
+  optional passive delay before requesting that frame; `frameId` and `clientTick` describe the
+  captured frame. This is not an acknowledgement of a previous server operation.
+* `--mode gui` clips the container rectangle to the framebuffer. `transform.cropInGui` retains
+  fractional boundaries, and `pixelsPerGuiXY=[sx,sy]` describes the actual rendering projection.
+  PNG coordinates are `[guiX*sx-crop[0], guiY*sy-crop[1]]`. Do not derive scaling from the rounded
+  GUI width. `gui click --png` performs the inverse for you and requires a preceding screenshot
+  in this client process; no prior capture gives `reason:"NO_SCREENSHOT"`.
+* Clicks use normal Screen events / server-authoritative slot packets. In continuous mode the
+  default cursor warp needs focus for hover/carried-item visuals. Lightweight modes instead use
+  a virtual GUI cursor, without warping the desktop pointer or requiring focus.
+  `--no-cursor-move` disables cursor updates. Trust server state, not the pixels alone.
+* Ordinary requests have a **30-second deadline**, over both transports. Use
+  `mcdebug --request-timeout 10 gui status` for a short probe, or `--request-timeout 0` to disable
+  it. Screenshots additionally have a client-side 30-second cap including passive delay and
+  encoding; disabling the CLI deadline does not disable that cap. `wait.until` defaults to its
+  server-side tick timeout without an extra wall-clock deadline;
+  an explicit option overrides this. `--timeout` controls connection/handshake milliseconds.
+  A request timeout closes the local connection, **not** a promise of remote cancellation/rollback.
+* Version warnings use the `server.ready` handshake, without an extra status RPC. Endpoints must
+  speak the current handshake protocol; there is no old-server fallback.
+* `gui.connect` expects the client to be outside a world (`gui.key`/`gui.disconnect` are future work).
+* Java/Kotlin changes require a client restart; only textures/lang/models support
+  `gui reload-resources`. Check `gui.status.jarPath` when deployment looks stale.
+
+### Lightweight runtime (Fabric 1.21.1)
+
+Keep the real MC client and its mod/resource/network lifecycle; do not fork MC. Put this in the
+client's `<gameDir>/config/mcdebug.json`, then restart:
+
+```json
+{"clientRenderMode":"demand","clientLoopFps":20,"clientIdleFps":1}
+```
+
+| mode | rendering policy |
+|---|---|
+| `continuous` (default) | Normal continuous rendering; unchanged for regular player clients. |
+| `demand` | Idle at 1 rendered frame/s; screenshots trigger a full frame, including the world background. |
+| `gui-only` | Same scheduling, but omit world/HUD rendering. Real Screen rendering stays; world previews/backgrounds can differ. Opt-in only. |
+
+`clientLoopFps` is 20..260 (the loop also services natural client ticks and RPC tasks).
+`clientIdleFps` is 0..loopFps; 0 means render only on capture requests/screen changes. Throttling
+applies only in a loaded world with no screen or a container screen. Startup, overlays/resource
+reloads and other screens keep normal rendering so their completion callbacks cannot starve.
+Lite mode prevents automatic lost-focus pausing, but explicit pause screens still follow MC rules.
+
+Priority: `-Dmcdebug.clientRenderMode` / `MCDEBUG_CLIENT_RENDER_MODE` / JSON / default;
+likewise `clientLoopFps` → `MCDEBUG_CLIENT_LOOP_FPS`, `clientIdleFps` → `MCDEBUG_CLIENT_IDLE_FPS`.
+For example (use the consumer project's own task/save):
+
+```bash
+MCDEBUG_CLIENT_RENDER_MODE=demand MCDEBUG_CLIENT_IDLE_FPS=0 DISPLAY=:0 \
+  ./gradlew runClient --args='--width 854 --height 480 --quickPlaySingleplayer "New World"'
+pnpm dlx @yu1745/mcdebug raw gui.status '{}'
+pnpm dlx @yu1745/mcdebug raw gui.screenshot '{"mode":"gui","delayTicks":0}'
+```
+
+`gui.status.render` reports policy, rendered/skipped counts and pending captures. This reduces
+**steady-state drawing**, not the required GL context, initial resource/model loading or necessarily
+resident memory. Some mods update state in render hooks: validate demand mode with your target mod,
+or use continuous mode for those screens. See [design and verification](docs/plan-lightweight-client.md).
 
 ## JUnit 5 runner
 

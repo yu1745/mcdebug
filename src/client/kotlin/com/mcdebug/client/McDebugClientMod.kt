@@ -7,6 +7,7 @@ import com.mcdebug.rpc.RpcEnv
 import com.mcdebug.rpc.RpcServer
 import com.mcdebug.rpc.TransportConfig
 import net.fabricmc.api.ClientModInitializer
+import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientLifecycleEvents
 import net.fabricmc.loader.api.FabricLoader
 import java.nio.file.Path
 
@@ -37,7 +38,25 @@ class McDebugClientMod : ClientModInitializer {
         RpcEnv.gameDir = { gameDir }
         log.info("mcdebug {} initializing (client) gameDir={}", McDebugMod.MOD_VERSION, gameDir)
 
+        if (ClientInfo.bootstrapStopRequested()) {
+            log.info("mcdebug session launch was cancelled or superseded; skipping RPC startup")
+            ClientLifecycleEvents.CLIENT_STARTED.register { it.stop() }
+            return
+        }
+        ClientInfo.claimGameDir()
+        RenderControl.install(gameDir)
         ClientTasks.install()
+        ClientLifecycleEvents.CLIENT_STARTED.register { client ->
+            if (ClientInfo.bootstrapStopRequested()) {
+                log.info("mcdebug session bootstrap was cancelled; stopping this client")
+                client.stop()
+            }
+        }
+        ClientLifecycleEvents.CLIENT_STOPPING.register {
+            Capture.close()
+            ClientTasks.close()
+            ClientInfo.close()
+        }
 
         val dispatcher = ClientRpcDispatcher().apply { registerGroup("gui", GuiOps) }
         val mismatch = contractMismatch(dispatcher.methods())
@@ -75,6 +94,12 @@ class McDebugClientMod : ClientModInitializer {
             log.error("mcdebug client plane failed to start (unix={}): {}", socket, t.message, t)
         }
 
+        try {
+            ClientInfo.publish()
+        } catch (e: Exception) {
+            log.warn("mcdebug client discovery could not be written: {}", e.message, e)
+        }
+
         log.info(
             "mcdebug client info: jar={} modVersion={} protocol={}",
             ClientInfo.jarPath(),
@@ -89,10 +114,10 @@ class McDebugClientMod : ClientModInitializer {
     /**
      * Compares the registered `gui.*` handlers against [Methods.CLIENT_METHODS].
      *
-     * This is a runtime self-check rather than a unit test on purpose: `src/client`
-     * does not compile into the server test source set, so a plain JUnit contract test
-     * cannot see it. A mismatch is reported (never thrown) because a stale jar must
-     * still be able to answer `gui.status` and *tell* you it is stale.
+     * Check the actual client registration as well as build-time contract lists.
+     * Pure client helpers have no-GL unit tests, but the installed game dispatcher
+     * must also be observable. A mismatch is reported (never thrown) so a stale
+     * jar can still answer `gui.status` and explain what is missing.
      */
     private fun contractMismatch(registered: Set<String>): List<String> {
         val missing = Methods.CLIENT_METHODS.filterNot { it in registered }.map { "missing:$it" }

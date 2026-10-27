@@ -14,10 +14,57 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.ExecutionException
+import java.util.concurrent.ScheduledThreadPoolExecutor
+import java.util.concurrent.TimeUnit
+import java.util.concurrent.TimeoutException
+import java.util.concurrent.atomic.AtomicLong
 
 /** JSON-RPC 错误（code -32700..-32603 标准 + -32099..-32000 自定义）。 */
 class RpcException(val rpcCode: Int, message: String, val data: JsonElement? = null) :
     RuntimeException(message)
+
+/** 本地墙钟 deadline，不是服务端 wait.until 的 tick 超时（RPC -32006）。 */
+class RpcRequestTimeoutException(val method: String, val timeoutMs: Long) :
+    IOException("request deadline exceeded for $method after ${timeoutMs}ms (connection closed)")
+
+/** 连接首条 server.ready 通知；不依赖游戏主线程或额外 status RPC。 */
+data class RpcProcessIdentity(
+    val pid: Long,
+    val startTime: String,
+    val instanceId: String,
+    val sessionToken: String,
+    val gameDir: String,
+) {
+    init {
+        require(pid > 0) { "invalid process PID" }
+        java.time.Instant.parse(startTime)
+        require(instanceId.isNotBlank()) { "missing process instanceId" }
+        // Remote TCP peers may use another OS's path syntax. Only local
+        // Session resolution interprets/canonicalizes this otherwise opaque path.
+        require(gameDir.isNotBlank()) { "missing process gameDir" }
+    }
+
+    fun toJson(): JsonObject = JsonObject().apply {
+        addProperty("pid", pid)
+        addProperty("startTime", startTime)
+        addProperty("instanceId", instanceId)
+        addProperty("sessionToken", sessionToken)
+        addProperty("gameDir", gameDir)
+    }
+
+    companion object {
+        fun fromJson(value: JsonObject): RpcProcessIdentity = RpcProcessIdentity(
+            value.get("pid").asLong,
+            value.get("startTime").asString,
+            value.get("instanceId").asString,
+            value.get("sessionToken").asString,
+            value.get("gameDir").asString,
+        )
+    }
+}
+
+data class RpcHandshake(val plane: String, val protocolVersion: Int, val modVersion: String, val process: RpcProcessIdentity)
 
 /**
  * 连接参数。`plane` 决定默认值：服务端平面（`world.*`…）默认 TCP 25580 + 发现文件
@@ -25,16 +72,21 @@ class RpcException(val rpcCode: Int, message: String, val data: JsonElement? = n
  * 发现文件 `mcdebug/clientPort`。两个平面的默认值必须不同——单机客户端在同一个
  * 进程、同一个 gameDir 里同时跑两个平面。
  */
-class RpcClientOptions(
+data class RpcClientOptions(
     val socket: String? = null,
     /** TCP 目标 "host:port"（port 可省略，用该平面的默认端口）；指定后优先于 socket。 */
     val tcp: String? = null,
     val host: String? = null,
     val port: Int? = null,
     val portFile: String? = null,
+    /** TCP connect 以及连接后 server.ready 握手的等待上限（各自计时）。 */
     val timeoutMs: Int = 5000,
     /** [PLANE_SERVER]（默认）或 [PLANE_CLIENT]。 */
     val plane: String = PLANE_SERVER,
+    /** null = 普通 RPC 30s / wait.until 无限；0 = 所有请求无限；正数覆盖所有 RPC。 */
+    val requestTimeoutMs: Long? = null,
+    /** Session connections must not follow a replaced endpoint into a different JVM. */
+    val expectedProcess: RpcProcessIdentity? = null,
 ) {
     init {
         require(tcp == null || (host == null && port == null)) {
@@ -44,7 +96,12 @@ class RpcClientOptions(
             "--host 与 --port 必须成对使用"
         }
         require(plane == PLANE_SERVER || plane == PLANE_CLIENT) { "unknown plane: $plane" }
+        require(timeoutMs > 0) { "--timeout must be > 0 ms" }
+        require(requestTimeoutMs == null || requestTimeoutMs >= 0) { "--request-timeout must be >= 0 seconds" }
     }
+
+    internal fun requestTimeoutFor(method: String): Long =
+        requestTimeoutMs ?: if (method == "wait.until") 0L else 30_000L
 
     val isClient: Boolean get() = plane == PLANE_CLIENT
 
@@ -90,10 +147,17 @@ class RpcClientOptions(
  * 已在 JUnit 并行测试中实测复现（JDK 21 的 Channels 无此问题，故 CLI 正常）。
  */
 class RpcClient(private val opts: RpcClientOptions) : AutoCloseable {
-    private var channel: SocketChannel? = null
-    private var readThread: Thread? = null
-    private var nextId = 0L
+    private val stateLock = Any()
+    private val writeLock = Any()
+    @Volatile private var channel: SocketChannel? = null
+    private var terminalError: Throwable? = null
+    private val ready = CompletableFuture<RpcHandshake>()
+    private val nextId = AtomicLong()
     private val pending = ConcurrentHashMap<Any, CompletableFuture<JsonElement>>()
+
+    internal fun requireSameBatchOptions(options: RpcClientOptions) {
+        require(opts == options) { "cannot change session, transport or deadlines inside a shared batch connection; use a separate invocation" }
+    }
 
     private fun discoverSocket(): String {
         opts.socket?.takeIf { it.isNotBlank() }?.let { return it }
@@ -142,17 +206,33 @@ class RpcClient(private val opts: RpcClientOptions) : AutoCloseable {
         return InetSocketAddress(host, port)
     }
 
-    private fun ensureConnected() {
-        if (channel?.isOpen == true) return
+    private fun ensureConnected() = synchronized(stateLock) {
+        terminalError?.let { throw it }
+        if (channel != null) return@synchronized
         val tcp = tcpTarget()
-        if (tcp != null) {
-            connectTcp(tcp)
-        } else {
-            connectUnix()
-        }
-        readThread = Thread(::readLoop, "mcdebug-rpc-read").apply {
+        if (tcp != null) connectTcp(tcp) else connectUnix()
+        val ch = requireNotNull(channel)
+        Thread({ readLoop(ch) }, "mcdebug-rpc-read").apply {
             isDaemon = true
             start()
+        }
+    }
+
+    /** 首条通知就是握手；没有旧服务器 status fallback。握手等待不受请求无限选项影响。 */
+    fun handshake(): RpcHandshake {
+        ensureConnected()
+        return try {
+            ready.get(opts.timeoutMs.toLong(), TimeUnit.MILLISECONDS)
+        } catch (e: TimeoutException) {
+            val error = IOException("server.ready handshake timed out after ${opts.timeoutMs}ms", e)
+            failConnection(error)
+            throw error
+        } catch (e: ExecutionException) {
+            throw (e.cause ?: e)
+        } catch (e: InterruptedException) {
+            failConnection(e)
+            Thread.currentThread().interrupt()
+            throw e
         }
     }
 
@@ -185,13 +265,13 @@ class RpcClient(private val opts: RpcClientOptions) : AutoCloseable {
      *
      * 注意：不能逐字节 cast 成 Char（0.5.x 的做法）——那会把 UTF-8 多字节序列拆成
      * 单个字节的 mojibake，导致非 ASCII 文本（set-nbt 写中文/emoji 后读回）乱码。 */
-    private fun readLoop() {
+    private fun readLoop(ch: SocketChannel) {
         val bb = ByteBuffer.allocate(64 * 1024)
         val lineBuf = java.io.ByteArrayOutputStream(64 * 1024)
         try {
             while (true) {
                 bb.clear()
-                val n = channel!!.read(bb)
+                val n = ch.read(bb)
                 if (n < 0) break
                 bb.flip()
                 while (bb.hasRemaining()) {
@@ -207,20 +287,33 @@ class RpcClient(private val opts: RpcClientOptions) : AutoCloseable {
                     }
                 }
             }
-        } catch (_: IOException) {
-            // connection dropped
-        } catch (_: Exception) {
-            // channel closed
+        } catch (e: Exception) {
+            failConnection(e)
         } finally {
-            val err = IllegalStateException("connection closed")
-            pending.values.forEach { it.completeExceptionally(err) }
-            pending.clear()
+            failConnection(IOException("connection closed"))
         }
     }
 
     private fun handleLine(line: String) {
         val msg = JsonParser.parseString(line).asJsonObject
-        if (!msg.has("id") || msg.get("id").isJsonNull) return  // server notification
+        if (!ready.isDone) {
+            require(msg.get("method")?.asString == "server.ready" && !msg.has("id")) {
+                "expected server.ready as first message"
+            }
+            val p = msg.getAsJsonObject("params")
+            val handshake = RpcHandshake(
+                p.get("plane").asString, p.get("protocolVersion").asInt, p.get("modVersion").asString,
+                RpcProcessIdentity.fromJson(requireNotNull(p.getAsJsonObject("process")) { "server.ready is missing process identity" }),
+            )
+            require(handshake.plane == opts.plane) { "expected ${opts.plane} plane, got ${handshake.plane}" }
+            require(handshake.protocolVersion == 1) { "unsupported protocolVersion: ${handshake.protocolVersion}" }
+            require(opts.expectedProcess == null || handshake.process == opts.expectedProcess) {
+                "session process identity mismatch: endpoint belongs to another client/server instance"
+            }
+            ready.complete(handshake)
+            return
+        }
+        if (!msg.has("id") || msg.get("id").isJsonNull) return  // other server notifications
         val id: Any = msg.get("id").let {
             when {
                 it.isJsonPrimitive && it.asJsonPrimitive.isNumber -> it.asLong
@@ -228,21 +321,33 @@ class RpcClient(private val opts: RpcClientOptions) : AutoCloseable {
                 else -> it.toString()
             }
         }
-        val f = pending.remove(id) ?: return
-        if (msg.has("error")) {
-            val err = msg.getAsJsonObject("error")
-            f.completeExceptionally(
-                RpcException(err.get("code").asInt, err.get("message").asString, err.get("data")),
-            )
-        } else {
-            f.complete(msg.get("result"))
+        synchronized(stateLock) {
+            val f = pending[id] ?: return
+            if (msg.has("error")) {
+                val err = msg.getAsJsonObject("error")
+                f.completeExceptionally(
+                    RpcException(err.get("code").asInt, err.get("message").asString, err.get("data")),
+                )
+            } else {
+                f.complete(msg.get("result"))
+            }
+            pending.remove(id)
         }
     }
 
-    @Synchronized
-    fun call(method: String, params: JsonElement? = null): JsonElement {
-        ensureConnected()
-        val id = nextId++
+    /**
+     * deadline 从握手完成后计时，包含写锁等待/写入/响应；0 = 无限。
+     * wait.until 默认由服务端 timeoutTicks 控制，不能从 tick 数推断墙钟时长。
+     * 超时关闭连接并终止所有 pending；不代表远端已经执行的操作已被取消或回滚。
+     */
+    fun call(
+        method: String,
+        params: JsonElement? = null,
+        requestTimeoutMs: Long = opts.requestTimeoutFor(method),
+    ): JsonElement {
+        require(requestTimeoutMs >= 0) { "requestTimeoutMs must be >= 0" }
+        handshake()
+        val id = nextId.getAndIncrement()
         val req = jsonObj {
             addProperty("jsonrpc", "2.0")
             addProperty("id", id)
@@ -250,34 +355,69 @@ class RpcClient(private val opts: RpcClientOptions) : AutoCloseable {
             if (params != null) add("params", params)
         }
         val f = CompletableFuture<JsonElement>()
-        pending[id] = f
-        writeLine(req.toString())
-        // 阻塞等待。wait.until 等长轮询方法会一直挂到条件满足，这里不做超时。
+        val ch = synchronized(stateLock) {
+            terminalError?.let { throw it }
+            pending[id] = f
+            requireNotNull(channel)
+        }
+        val deadline = if (requestTimeoutMs == 0L) null else deadlines.schedule({
+            // 与响应完成串行裁决，已经完成的请求不应关闭一条仍在复用的连接。
+            synchronized(stateLock) {
+                if (!f.isDone) failConnection(RpcRequestTimeoutException(method, requestTimeoutMs))
+            }
+        }, requestTimeoutMs, TimeUnit.MILLISECONDS)
         return try {
+            try {
+                synchronized(writeLock) {
+                    if (!f.isDone) writeLine(ch, req.toString())
+                }
+            } catch (e: Exception) {
+                failConnection(e)
+            }
             f.get()
-        } catch (e: java.util.concurrent.ExecutionException) {
+        } catch (e: ExecutionException) {
             throw (e.cause ?: e)
+        } catch (e: InterruptedException) {
+            failConnection(e)
+            Thread.currentThread().interrupt()
+            throw e
+        } finally {
+            deadline?.cancel(false)
+            pending.remove(id, f)
         }
     }
 
-    /** 整行写入（SocketChannel.write 直写，阻塞直到全部写出）。 */
-    private fun writeLine(s: String) {
+    /** 写锁仅覆盖整行写入，不持有连接状态锁、不持锁等待响应。 */
+    private fun writeLine(ch: SocketChannel, s: String) {
         val bytes = (s + "\n").toByteArray(StandardCharsets.UTF_8)
         var off = 0
         while (off < bytes.size) {
-            val n = channel!!.write(ByteBuffer.wrap(bytes, off, bytes.size - off))
-            if (n < 0) throw IllegalStateException("connection closed")
+            val n = ch.write(ByteBuffer.wrap(bytes, off, bytes.size - off))
+            if (n < 0) throw IOException("connection closed")
             off += n
         }
     }
 
-    override fun close() {
+    /** 终态：不自动重连，避免把有副作用的请求偷偷重发给新连接。 */
+    private fun failConnection(error: Throwable) = synchronized(stateLock) {
+        if (terminalError != null) return@synchronized
+        terminalError = error
         runCatching { channel?.close() }
         channel = null
+        ready.completeExceptionally(error)
+        pending.values.forEach { it.completeExceptionally(error) }
+        pending.clear()
+    }
+
+    override fun close() {
+        failConnection(IOException("connection closed"))
     }
 
     companion object {
         private const val NL_BYTE: Byte = '\n'.code.toByte()
         private const val CR_BYTE: Byte = '\r'.code.toByte()
+        private val deadlines = ScheduledThreadPoolExecutor(1) { task ->
+            Thread(task, "mcdebug-rpc-deadline").apply { isDaemon = true }
+        }.apply { removeOnCancelPolicy = true }
     }
 }

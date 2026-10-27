@@ -229,7 +229,7 @@ node scripts/set-version.mjs X.Y.Z
 - MCP adapter 没做（对话中"Layer 4"）
 - 专用 CLI 子命令暂未覆盖 `storage.*` / `snapshot.*` / `trace.*` / `screen.*`，目前通过 `raw`、REPL 和 TS `DebugApi` 调用
 - 自定义 storage adapter SPI 没做；特殊资源类型后续扩展
-- `modid.mixins.json` 是 Fabric 模板遗留；`mcdebug.mixins.json` 仍是空占位，真正在用的 mixin 只有客户端侧的 `mcdebug.client.mixins.json`（`AbstractContainerScreenAccessor`，给 `gui.screenshot --mode=gui` 提供 GUI 矩形）。三个配置文件都不要当成"没用的模板"删掉
+- `modid.mixins.json` 是 Fabric 模板遗留；`mcdebug.mixins.json` 仍是空占位，真正在用的 mixin 位于客户端侧的 `mcdebug.client.mixins.json`（GUI 矩形访问器、渲染调度/新帧屏障、失焦策略/虚拟光标，见 §14）。三个配置文件都不要当成"没用的模板"删掉
 - `inv.insert` / `inv.extract` 对目标方块已消失（如过压爆炸成 air）时报 `-32004 no block entity`，错误不够友好；改进：目标无 BE 时返回 `INVALID_TARGET`/`STORAGE_NOT_FOUND` 类错误并带 `reason`（ic2-fabric 过压测试曾踩中：机器放下即炸后 insertItem 必然撞上）
 
 ## 11b. 已完成变更记录（v2 → 0.5.x）
@@ -306,13 +306,13 @@ node scripts/set-version.mjs X.Y.Z
 
 - **entrypoint 语义**：`fabric.mod.json` 的 `environment` 是 `"*"`，`server` entrypoint = `com.mcdebug.McDebugMod`（`DedicatedServerModInitializer`），`client` entrypoint = `com.mcdebug.client.McDebugClientMod`（`ClientModInitializer`）。loader 0.19.x **没有** `net.fabricmc.api.ServerModInitializer`，所以专用服务器不会触发 client entrypoint，而 client 上 server entrypoint **根本不触发**——单机客户端要两个平面都有，必须由 client entrypoint 自己调 `ServerPlane.installLifecycleHooks()`（它挂的是 `ServerLifecycleEvents`，集成服务器同样触发）。
 - **两个平面的端点必须区分**（单机客户端同进程同 gameDir）：服务端 `<gameDir>/mcdebug/socket` + 发现文件 `mcdebug/port`，TCP 25580 默认开；客户端 `<gameDir>/mcdebug/clientSocket` + `mcdebug/clientPort`，TCP **25581 默认关**（真实玩家客户端绝不能开）。配置键 `mcdebug.clientSocket`/`MCDEBUG_CLIENT_SOCKET`/json `clientSocket`（TCP 同理加 `client` 前缀）。`RpcServer` 的 `TransportConfig` 就是为这个抽的——它在 `RpcServer.kt` 里（Forge 会同步这个文件，所以不要把它挪到新文件）。
-- **线程规则**：`gui.*` handler 的入参在 RPC 连接线程，一切客户端状态读写都要 `ClientTasks.onClient(client)`（`client.execute{}`，在客户端线程时内联执行）。**续接 future 也要用 `ClientTasks.thenOnClient`**：`thenApply` 在前一个 future 已完成时会跑在 RPC 线程上。截图在客户端线程内联抓帧（`Screenshot.takeScreenshot(mainRenderTarget)`，抓的是上一帧完整画面），PNG 编码/落盘才丢到 `Util.ioPool()`；**不要**用 `RenderSystem.recordRenderCall`（它只入队，要等 `flipFrame` 才 drain）。等待一律是被动 tick 回调（`ClientTickEvents.END_CLIENT_TICK`），同 §7 的"只观察不驱动"。
-- **点击报告**：`gui.click` 的返回里，`slot`/`text`/`gui`/`png` 四种方式都会给出落点的 `guiX/guiY`（GUI 单位；`slot` 给的是槽位中心）。配合 `gui.screenshot` 的 `transform`（`cropInGui` + `pixelsPerGui`），agent 可以在「槽号 ↔ GUI 坐标 ↔ PNG 像素」之间双向换算：PNG 坐标 = `(guiX - cropInGui[0]) * pixelsPerGui`，反过来 `gui click --png x,y` 由客户端代算。
-- **点击方式**：`Screen.mouseClicked/mouseReleased` 直接派发（控件按坐标命中，容器槽位由 `AbstractContainerScreen.findSlot(d,e)` 按坐标解析），不合成 GLFW 输入、不需要窗口焦点。`--slot` 走 `GameMode.handleInventoryMouseClick`（等价于受保护的 `slotClicked`，服务端裁定结果）。默认会把真实光标 warp 到点击点（`--no-cursor-move` 关闭）：手持物品/悬浮提示/槽位高亮都是按**物理光标**画的，不 warp 截图里就会出现"没点过的地方有东西"。
-- **窗口焦点与光标 warp（实测）**：`MouseHandler.onMove` 同时被 `Minecraft.isWindowActive()` 守卫，所以窗口失焦时 `glfwSetCursorPos` 只移动了 OS 指针，MC 内部 `mouseX/mouseY` 不动 → 截图里手持物品/悬浮提示/槽位高亮会停在旧位置（**游戏状态不受影响**：`gui.screen`、点击报告的 `slotAfter`/`carried`、服务端 NBT 都是权威）。`gui.status.windowFocused` 就是给 agent 判断这件事用的；先 `xdotool windowactivate <窗口>` 再截图即可让这些光标相关的渲染跟上。
-- **探测要设上限**：客户端主线程忙的时候（进世界、`gui reload-resources`、大 GUI 首次布局）`gui.*` 调用会一直挂着——CLI 的 `--timeout` 只管 TCP connect，unix 通道没有读超时。轮询时用 `timeout 15 java -jar mcdebug-cli.jar gui status --brief` 包一层；判断「世界加载好了」用文件信号更稳：integrated server 起来后会创建服务端平面的 `mcdebug/socket`，`while [ ! -S mcdebug/socket ]` 即可，不必打 RPC。
-- **唯一的 mixin**：`src/client/java/.../AbstractContainerScreenAccessor.java`（`@Accessor` 取 `leftPos/topPos/imageWidth/imageHeight`，`gui.screenshot --mode=gui` 用它裁剪 GUI 矩形）。**不需要 refmap**：build.gradle 没有 `loom { mixin {} }`，Loom 1.15 在 `remapJar` 时直接把注解值重映射（`javap -v` 验证过 jar 里是 `@Accessor("field_2776")` + `@Mixin(class_465)`），dev 环境用官方名。
-- **契约自检**：`src/client` 不参与服务端单测的编译，所以 `McDebugClientMod` 在启动时把 `GuiOps.methods()` 与 `Methods.CLIENT_METHODS` 对账，不一致打 ERROR 并写进 `gui.status.contractMismatch`（`missing:` / `undeclared:` / `wrongPrefix:`），不抛异常——jar 过期时还得能回答"我是过期的"。
+- **线程规则**：`gui.*` handler 的入参在 RPC 连接线程，一切客户端状态读写都要 `ClientTasks.onClient(client)`（`client.execute{}`，在客户端线程时内联执行）。**续接 future 也要用 `ClientTasks.thenOnClient`**：`thenApply` 在前一个 future 已完成时会跑在 RPC 线程上。截图先入有界队列，`MinecraftRenderMixin` 调原 `GameRenderer.render` 并 flush 后再由 `Capture.afterFrame` 在客户端线程读回新帧，PNG 编码/落盘才丢到 `Util.ioPool()`。**tick 不是新帧屏障**；不要用 `RenderSystem.recordRenderCall` 代替明确渲染完成点。业务等待仍是被动 tick 回调，同 §7 的"只观察不驱动"。
+- **点击报告与坐标**：四种点击方式都返回 `guiX/guiY`（slot = 槽中心）。截图 `transform.pixelsPerGuiXY=[sx,sy]` 来自实际渲染投影，不能用经过 ceil 的 guiScaledWidth 反推；PNG 坐标 = `[guiX*sx-crop[0], guiY*sy-crop[1]]`，`cropInGui` 保留浮点精度。`gui click --png` 反算 Screen 坐标；变换不是 GLFW 窗口坐标。
+- **点击与光标**：`Screen.mouseClicked/mouseReleased` 直接派发，slot 走 `GameMode.handleInventoryMouseClick`，服务端裁定。continuous 模式保留真实光标 warp（失焦时 MC 不更新内部鼠标）；轻量模式使用虚拟 Screen 光标，让手持物品/提示/高亮在后台也跟随 RPC 点击，不干扰桌面指针。`--no-cursor-move` 禁止更新光标。状态确认仍以服务端数据为准，截图不等于网络确认。
+- **轻量运行**：见 `docs/plan-lightweight-client.md`。`RenderControl` + `RenderSchedule` 只门控 GameRenderer，不取消 runTick/自然 tick/网络/窗口事件泵。`clientRenderMode=continuous` 默认不变；`demand` 按需完整出帧，`gui-only` 显式跳世界/HUD（像素语义可能不同）。配置优先级 JVM属性 → 环境变量 → config/mcdebug.json；`clientLoopFps=20`（20..260）、`clientIdleFps=1`（0..loopFps，0=只响应截图/切屏）。仅在稳定世界/容器界面节流，加载/overlay/其他 Screen 保持正常渲染；模式不省略资源/GL初始化，不承诺低内存。失焦不自动暂停，显式暂停界面仍遵循引擎语义。
+- **探测要设上限**：CLI `--timeout` 管连接/握手（毫秒），`--request-timeout` 管请求（秒；0=无限）。普通请求默认30秒，`wait.until` 默认遵循服务端 tick timeout、不额外套墙钟限制；显式选项可覆盖。超时结束本地等待并关闭连接，**不代表远端操作取消/回滚**。版本检查读 server.ready，不再先发 status。发现 socket 只代表端点存在，世界就绪还需检查 `gui.status.inWorld`。
+- **mixins**：客户端有 `AbstractContainerScreenAccessor`（GUI矩形）、`MinecraftRenderMixin`（渲染完成屏障/调度/限帧）、`GameRendererMixin`（轻量模式失焦策略/虚拟光标）。锁定1.21.1，不加旧版分支。Loom 1.15 在 remapJar 直接重映射注解值，不需要 refmap；必须用真实客户端验证注入点，编译通过不等于注入成功。
+- **契约与测试**：启动时仍将 `GuiOps.methods()` 与 `Methods.CLIENT_METHODS` 对账，将 mismatch 写进 `gui.status`。test classpath 含 client output，用于无GL的纯调度/几何单测；真实截图/线程/mixin 仍靠客户端冒烟验证。停止时取消截图和 tick waiters 并关闭客户端 RPC。
 - **自包含 jar（踩过的坑）**：发布 jar 是**单个**文件丢进 `mods/`，所以 `contract` 的源码被 `sourceSets.main.kotlin.srcDir` 直接编进 mod（不是 `implementation project(':contract')`，那样 dev 能跑、装到别的项目里就 `NoClassDefFoundError`）。`verifyJarSelfContained` 守住这条线。
 - **一条命令进存档（快捷方式）**：MC 从 1.20 起支持 `--quickPlaySingleplayer <存档目录名>`，所以「起客户端 + 点存档」可以合成一行（`<存档目录名>` 是 `saves/` 下的**目录名**，不是显示名；Gradle `--args` 支持引号，带空格的目录名写成 `\"New World\"`）：
   ```bash
@@ -324,6 +324,20 @@ node scripts/set-version.mjs X.Y.Z
 - **没做**：`gui.key`/`gui.type`（键盘输入）、滑块拖拽、`--repeat` 连拍、离屏定尺寸截图、golden image 回归；`gui.connect` 只能在非世界画面用（进世界后没有按键输入就出不来，P1 会补 `gui.key`/`gui.disconnect`）。
 
 ---
+
+## 14a. Session 管理（本机 Linux）
+
+设计见 `docs/plan-session-management.md`。CLI 新目录 `cli/.../session/`：`SessionRecord` 显式 JSON schema（不用 Gson 类反射，兼顾 native CLI）、`SessionRegistry` 原子写/锁/CAS、`SessionRuntime` OS/RPC 边界、`SessionManager` 生命周期。命令 `session start|attach|list|status|logs|stop`，根 `--session NAME` 自动选择两平面，`--sessions-dir`/`MCDEBUG_SESSIONS_DIR` 控制 registry；无隐式全局 current session，batch 必须继承会话/registry。与显式 transport 参数互斥。
+
+- 第一版 backend 是目标项目自己的 Gradle wrapper + runClient（qualified task 也只允许 runClient），Linux setsid、日志重定向，无新 daemon、无 Gradle 插件、无独立 MC 实现。project 默认 CWD、gameDir 默认 project/run，子模块须显式 gameDir；显式相对路径相对 CWD。world 必须是已有 saves 目录名，不自动建/删世界，拒绝路径穿越及逃逸 symlink。
+- Registry 默认 XDG_STATE_HOME/mcdebug/sessions 或 ~/.local/state/mcdebug/sessions，每会话 JSON 含 schemaVersion/recordId、本次 token、启动配置、wrapper 与真实 MC 的 PID/startTime、instanceId、端点和日志。recordId 是 CAS 世代，不能只用 sessionToken（attached token 可以为空）。锁不能跨主线程 RPC/长等待持有；同 canonical gameDir 的 mdb.lock + mdb-owner.json 覆盖跨 registry/bootstrap 窗口。
+- server.ready 现在必须有 process 对象：pid、startTime（OS ProcessHandle 的 ISO Instant）、instanceId（每 JVM UUID）、sessionToken、canonical gameDir。两平面同 JVM 共用 RpcEnv 身份（Forge 同步 RpcEnv/RpcServer）；改共享文件两端都要编译。客户端原子发布 mcdebug/client.json，gui.status 同样返回 process。Session 路由不额外调用 status；实际 RPC 连接握手绑定完整 expectedProcess，禁止端点换实例后继续操作。
+- 客户端在 RPC 绑定前持有 mcdebug/client.lock 的进程锁，直到 JVM shutdown；不替代/删除 MC 的 session.lock。被取消或被新 token 超越的延迟 bootstrap 不绑定 RPC/不覆盖发现文件，在 CLIENT_STARTED 正常退出；启动过程中新增 stop 标记也会在 CLIENT_STARTED 检查。
+- managed launch 显式关闭两平面 TCP，并将两 socket 固定在自身 gameDir。全局 mod 端口/默认配置不变；Session v1 不把远端/独立多人服务器冒充集成服，外部目标继续用不带 --session 的显式 transport。
+- start 有限等待：未指定 world 返回 client_ready；指定后必须 inWorld 且 singleplayer 才 world_ready。超时/失败打印记录并非0退出，不能把遗留 socket 当就绪。logs 是有界 UTF-8 tail，不跟随。
+- stop 只允许 owned；attached 即使 --force 也拒绝。先核对真实 PID/startTime/instanceId/token，使用同一个已验证连接调用 gui.stop；--force 只能终止身份仍匹配的 owned MC，绝不枚举/杀共享 Gradle daemon。RPC 已关闭时 force 仍须核对完整发现身份和活 PID/startTime。启动中没有真实身份时，只写本 token 的 session-stop.json、取消自己且 PID/startTime 匹配的 wrapper；保留 stopping/占位，不谎报 stopped。保存世界期间仍持有 gameDir 锁。
+- 新 RPC `gui.stop` 参数必须带 instanceId/sessionToken，切客户端线程调 Minecraft.stop；同步了 Methods.CLIENT_METHODS 与 SDK。正常操作用 session stop，raw RPC 仅有实例校验，不是 owned/attached 权限边界或鉴权。token 是进程归属关联值，不是认证凭证。
+- 验证：CLI session 目录单测注入 SessionRuntime，不启动 MC/Gradle；临时 Unix/TCP 与假 shell wrapper 可测进程边界。帮助测试只用 parse 捕获 PrintHelpMessage，**不要在 JUnit 内调用 Clikt.main（会 exitProcess 杀掉测试 worker）**。真实集成验证须用隔离 gameDir/存档副本，通过 mdb 自己 start→双平面→截图→attach 禁止停止→owned stop，最后清理所有测试进程。
 
 ## 15. 容器测试环境重建手册（Kilt + TConstruct + IC2）
 

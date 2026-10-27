@@ -55,6 +55,10 @@ loom {
 	}
 }
 
+// Unit-test pure client scheduling/geometry without starting Minecraft or a GL context.
+sourceSets.test.compileClasspath += sourceSets.client.output
+sourceSets.test.runtimeClasspath += sourceSets.client.output
+
 dependencies {
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
 	mappings loom.officialMojangMappings()
@@ -98,8 +102,8 @@ tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).all {
 
 java {
 	withSourcesJar()
-	sourceCompatibility = JavaVersion.VERSION_17
-	targetCompatibility = JavaVersion.VERSION_17
+	sourceCompatibility = JavaVersion.VERSION_21
+	targetCompatibility = JavaVersion.VERSION_21
 }
 
 jar {
@@ -124,6 +128,14 @@ tasks.register('verifyJarSelfContained') {
 			'com/mcdebug/client/McDebugClientMod.class',           // client entrypoint
 			'com/mcdebug/client/GuiOps.class',                     // gui.* handlers
 			'com/mcdebug/client/Capture.class',
+			'com/mcdebug/client/CaptureGeometry.class',
+			'com/mcdebug/client/RenderCursor.class',
+			'com/mcdebug/client/RenderControl.class',
+			'com/mcdebug/client/RenderSchedule.class',
+			'com/mcdebug/client/RenderSettings.class',
+			'com/mcdebug/client/RenderMode.class',
+			'com/mcdebug/client/mixin/MinecraftRenderMixin.class',
+			'com/mcdebug/client/mixin/GameRendererMixin.class',
 			'com/mcdebug/client/mixin/AbstractContainerScreenAccessor.class',
 			'com/mcdebug/contract/Methods.class',                  // contract used by the client self-check
 			'mcdebug.mixins.json',

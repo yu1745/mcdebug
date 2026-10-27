@@ -257,6 +257,7 @@ class RpcServer(
                 addProperty("tcpPort", tcpPort)
                 addProperty("protocolVersion", protocolVersion)
                 addProperty("modVersion", McDebugMod.MOD_VERSION)
+                add("process", RpcEnv.processInfo())
             })
 
             while (channel.isOpen) {

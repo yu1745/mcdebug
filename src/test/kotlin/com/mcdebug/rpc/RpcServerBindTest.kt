@@ -1,6 +1,8 @@
 package com.mcdebug.rpc
 
 import org.junit.jupiter.api.AfterEach
+import org.junit.jupiter.api.BeforeEach
+import com.google.gson.JsonParser
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertFalse
 import org.junit.jupiter.api.Assertions.assertNotNull
@@ -37,6 +39,11 @@ class RpcServerBindTest {
 
     @TempDir
     lateinit var tmp: Path
+
+    @BeforeEach
+    fun installEnvironment() {
+        RpcEnv.gameDir = { tmp }
+    }
 
     @AfterEach
     fun clearSystemProperties() {
@@ -83,6 +90,11 @@ class RpcServerBindTest {
                 val ready = readLine(client)
                 assertTrue(ready.contains("\"server.ready\""), "应收到 SERVER_READY: $ready")
                 assertTrue(ready.contains("\"socket\""), "SERVER_READY 应带 socket 字段: $ready")
+                val process = JsonParser.parseString(ready).asJsonObject.getAsJsonObject("params").getAsJsonObject("process")
+                assertEquals(ProcessHandle.current().pid(), process.get("pid").asLong)
+                assertEquals(RpcEnv.instanceId, process.get("instanceId").asString)
+                assertEquals(tmp.toRealPath().toString(), process.get("gameDir").asString)
+                assertEquals(RpcEnv.startTime, process.get("startTime").asString)
                 client.close()
             } finally {
                 server.stop()

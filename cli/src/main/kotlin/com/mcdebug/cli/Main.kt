@@ -11,6 +11,9 @@ import com.github.ajalt.clikt.parameters.options.multiple
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.versionOption
 import com.github.ajalt.clikt.parameters.types.int
+import com.mcdebug.cli.session.SessionManager
+import com.mcdebug.cli.session.defaultRegistryDir
+import java.nio.file.Path
 import kotlin.system.exitProcess
 
 fun main(args: Array<String>) {
@@ -54,6 +57,7 @@ fun buildCli(): McDebugCli =
             RedstoneCommands().subcommands(*redstoneSubcommands().toTypedArray()),
             ReflectCommands().subcommands(*reflectSubcommands().toTypedArray()),
             WatchCommands().subcommands(*watchSubcommands().toTypedArray()),
+            SessionCommands().subcommands(*sessionSubcommands().toTypedArray()),
             JarCmd(),
         )
 
@@ -77,6 +81,20 @@ class McDebugCli : CliktCommand(
         versionOption(McDebugCli::class.java.`package`.implementationVersion ?: "dev")
     }
 
+    val session by option("--session", metavar = "NAME", help = "route both planes through a named local session; excludes explicit transport options; e.g. --session dev gui status")
+    val sessionsDir by option(
+        "--sessions-dir", metavar = "PATH", envvar = "MCDEBUG_SESSIONS_DIR",
+        help = "session registry directory (default: XDG_STATE_HOME or ~/.local/state, then mcdebug/sessions)",
+    )
+
+    fun sessionManager(): SessionManager = SessionManager(sessionsDir?.let { Path.of(it) } ?: defaultRegistryDir())
+
+    private fun validateSessionOptions() {
+        if (session != null && listOf(socket, tcp, host, port, portFile, clientSocket, clientTcp).any { it != null }) {
+            throw UsageError("--session cannot be combined with --socket/--tcp/--host/--port/--port-file/--client-socket/--client-tcp")
+        }
+    }
+
     val socket by option("--socket", help = "unix socket path (overrides MCDEBUG_SOCKET and discovery file)")
     val tcp by option(
         "--tcp",
@@ -95,7 +113,13 @@ class McDebugCli : CliktCommand(
         metavar = "HOST[:PORT]",
         help = "connect to the client plane over TCP (default port 25581) — must be enabled on the client side",
     )
-    val timeout by option("--timeout", help = "connection timeout in ms (TCP connect)").int().default(5000)
+    val timeout by option("--timeout", help = "TCP connect / server.ready handshake timeout in ms (each; default 5000)").int().default(5000)
+    val requestTimeout by option(
+        "--request-timeout",
+        metavar = "SECONDS",
+        help = "request deadline in seconds, including writes; 0 = unlimited; default: 30, except wait.until = unlimited " +
+            "(server timeoutTicks still applies). Explicit value overrides ALL methods; expiry closes the connection, not a remote rollback",
+    ).int()
     val commandStrings by option(
         "-c", "--command",
         metavar = "CMD",
@@ -105,8 +129,12 @@ class McDebugCli : CliktCommand(
     val batchMode by option("--batch", help = "batch mode: run all -c commands, print per-command status, stop at first failure (exit code = that failure's code)").flag()
 
     fun clientOptions(): RpcClientOptions {
+        validateSessionOptions()
         try {
-            return RpcClientOptions(socket, tcp, host, port, portFile, timeout)
+            session?.let {
+                return sessionManager().resolve(it, RpcClientOptions.PLANE_SERVER, timeout, requestTimeout?.toLong()?.times(1000))
+            }
+            return RpcClientOptions(socket, tcp, host, port, portFile, timeout, requestTimeoutMs = requestTimeout?.toLong()?.times(1000))
         } catch (e: IllegalArgumentException) {
             throw UsageError(e.message ?: "invalid options")
         }
@@ -117,12 +145,17 @@ class McDebugCli : CliktCommand(
      * 平面的地址，两个平面在单机客户端里是同一进程的两条不同 socket。
      */
     fun clientPlaneOptions(): RpcClientOptions {
+        validateSessionOptions()
         try {
+            session?.let {
+                return sessionManager().resolve(it, RpcClientOptions.PLANE_CLIENT, timeout, requestTimeout?.toLong()?.times(1000))
+            }
             return RpcClientOptions(
                 socket = clientSocket,
                 tcp = clientTcp,
                 timeoutMs = timeout,
                 plane = RpcClientOptions.PLANE_CLIENT,
+                requestTimeoutMs = requestTimeout?.toLong()?.times(1000),
             )
         } catch (e: IllegalArgumentException) {
             throw UsageError(e.message ?: "invalid options")
@@ -130,6 +163,8 @@ class McDebugCli : CliktCommand(
     }
 
     override fun run() {
+        // Only validate syntax here: session management/help must not resolve or connect.
+        validateSessionOptions()
         // 子命令链中父 run 也会被调用；直接调用（无子命令）时打印帮助。
         if (currentContext.invokedSubcommand == null) {
             if (commandStrings.isNotEmpty()) {
@@ -143,6 +178,24 @@ class McDebugCli : CliktCommand(
         }
     }
 
+    /** 每条 -c 的新命令树必须继承根连接/deadline选项，而不是退回默认地址/超时。 */
+    private fun connectionArgs(): List<String> = buildList {
+        fun forward(name: String, value: Any?) {
+            if (value != null) { add(name); add(value.toString()) }
+        }
+        forward("--session", session)
+        forward("--sessions-dir", sessionsDir)
+        forward("--socket", socket)
+        forward("--tcp", tcp)
+        forward("--host", host)
+        forward("--port", port)
+        forward("--port-file", portFile)
+        forward("--client-socket", clientSocket)
+        forward("--client-tcp", clientTcp)
+        forward("--timeout", timeout)
+        forward("--request-timeout", requestTimeout)
+    }
+
     /** 批处理：连一次，顺序执行每条 -c 命令；任一失败即停，退出码 = 该失败的退出码。 */
     private fun runBatch() {
         // 连接按需建立：一批命令可能只碰其中一个平面（甚至只有服务端平面）。
@@ -153,7 +206,7 @@ class McDebugCli : CliktCommand(
                 if (tokens.isEmpty()) throw UsageError("empty command: $cmd")
                 println("[${i + 1}/${commandStrings.size}] $cmd")
                 try {
-                    buildCli().parse(tokens)
+                    buildCli().parse(connectionArgs() + tokens)
                     println("[${i + 1}/${commandStrings.size}] ✓ $cmd")
                 } catch (e: Exception) {
                     System.err.println("[${i + 1}/${commandStrings.size}] ✗ $cmd (stopping batch)")
@@ -211,7 +264,7 @@ class StatusCmd : CliktCommand(
     }
 }
 
-class RawCmd : CliktCommand(name = "raw", help = "call an arbitrary JSON-RPC method; jsonParams is JSON or @file; params follow the SERVER schema, e.g. {\"pos\":[x,y,z]} (pos is an array, there is no --x/--y/--z here) — check the equivalent subcommand's --help for the schema") {
+class RawCmd : CliktCommand(name = "raw", help = "call an arbitrary JSON-RPC method; jsonParams is JSON or @file; params follow the SERVER schema, e.g. {\"pos\":[x,y,z]} (pos is an array, there is no --x/--y/--z here) — check the equivalent subcommand's --help for the schema. gui.stop requires instanceId and sessionToken identity; prefer session stop for normal managed shutdown") {
     val method by argument("method", help = "method name, e.g. world.getBlock")
     val jsonParams by argument("jsonParams", help = "JSON params object, or @file to read from file").optional()
 
