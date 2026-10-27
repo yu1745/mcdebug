@@ -175,6 +175,8 @@ pnpm dlx @yu1745/mcdebug --session demo raw gui.stop '{"instanceId":"INSTANCE_FR
 
 Raw RPC bypasses the CLI's owned/attached policy deliberately; it is not a security boundary.
 See [Session design and safety rules](docs/plan-session-management.md).
+Measured startup, CPU/RSS and screenshot latency (9 isolated consumer trials, with raw data and caveats):
+[Client performance report](docs/client-performance.md).
 
 ## Client plane: `gui.*`
 

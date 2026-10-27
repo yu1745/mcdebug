@@ -46,6 +46,11 @@ replay_*.log
 mc_source/
 fabric-api_source/
 
+# python benchmark/test bytecode
+
+__pycache__/
+*.py[cod]
+
 # node
 
 node_modules/

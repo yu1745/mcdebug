@@ -327,6 +327,8 @@ node scripts/set-version.mjs X.Y.Z
 
 ## 14a. Session 管理（本机 Linux）
 
+性能实测见 `docs/client-performance.md` 和 `docs/plan-client-performance.md`；`scripts/client-performance.py` / `summarize-client-performance.py` 以独立空源码 consumer 测发布 jar，不能混用本仓库 dev classes。CPU 100%=一逻辑核；按实际/proc采样子窗口统计，不把RSS当堆/显存、不把软件GL收益外推硬件GPU。重跑前使用全新输出目录/离线存档副本，正常 owned stop 清理；Python 测试：`python3 -m unittest discover -s scripts -p 'test_*performance.py' -v`。
+
 设计见 `docs/plan-session-management.md`。CLI 新目录 `cli/.../session/`：`SessionRecord` 显式 JSON schema（不用 Gson 类反射，兼顾 native CLI）、`SessionRegistry` 原子写/锁/CAS、`SessionRuntime` OS/RPC 边界、`SessionManager` 生命周期。命令 `session start|attach|list|status|logs|stop`，根 `--session NAME` 自动选择两平面，`--sessions-dir`/`MCDEBUG_SESSIONS_DIR` 控制 registry；无隐式全局 current session，batch 必须继承会话/registry。与显式 transport 参数互斥。
 
 - 第一版 backend 是目标项目自己的 Gradle wrapper + runClient（qualified task 也只允许 runClient），Linux setsid、日志重定向，无新 daemon、无 Gradle 插件、无独立 MC 实现。project 默认 CWD、gameDir 默认 project/run，子模块须显式 gameDir；显式相对路径相对 CWD。world 必须是已有 saves 目录名，不自动建/删世界，拒绝路径穿越及逃逸 symlink。

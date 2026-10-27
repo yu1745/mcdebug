@@ -3,6 +3,7 @@ package com.mcdebug.client
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
+import com.mojang.blaze3d.platform.GlUtil
 import com.mcdebug.client.mixin.AbstractContainerScreenAccessor
 import com.mcdebug.contract.Methods
 import com.mcdebug.rpc.RpcEnv
@@ -72,6 +73,13 @@ object GuiOps : ClientRpcGroup {
             val gameDir = gameDir()
             JsonObject().apply {
                 addProperty("ready", true)
+                addProperty("gameLoadFinished", client.isGameLoadFinished)
+                addProperty("overlay", client.getOverlay()?.javaClass?.name ?: "")
+                add("graphics", JsonObject().apply {
+                    addProperty("vendor", GlUtil.getVendor())
+                    addProperty("renderer", GlUtil.getRenderer())
+                    addProperty("version", GlUtil.getOpenGLVersion())
+                })
                 add("process", RpcEnv.processInfo())
                 addProperty("clientTick", ClientTasks.currentTick())
                 add("render", RenderControl.statusJson())

@@ -1,0 +1,33 @@
+plugins {
+    id 'net.fabricmc.fabric-loom-remap' version '1.15-SNAPSHOT'
+    id 'org.jetbrains.kotlin.jvm' version '2.3.10'
+}
+version = '1.0'
+group = 'local.fixture'
+repositories {
+    mavenCentral()
+    maven { url = 'https://maven.fabricmc.net/' }
+}
+dependencies {
+    minecraft 'com.mojang:minecraft:1.21.1'
+    mappings loom.officialMojangMappings()
+    modImplementation 'net.fabricmc:fabric-loader:0.19.5'
+    modImplementation 'net.fabricmc.fabric-api:fabric-api:0.116.17+1.21.1'
+    modImplementation 'net.fabricmc:fabric-language-kotlin:1.13.9+kotlin.2.3.10'
+}
+java {
+    sourceCompatibility = JavaVersion.VERSION_21
+    targetCompatibility = JavaVersion.VERSION_21
+}
+loom {
+    splitEnvironmentSourceSets()
+    runs {
+        client {
+            runDir 'game'
+            vmArgs '-Xms256m', '-Xmx2G', '-Dfile.encoding=UTF-8',
+                '-Dmcdebug.tcpEnabled=false', '-Dmcdebug.clientTcpEnabled=false'
+        }
+    }
+}
+// Empty source sets: the benchmark deploys a release jar only to gameDir/mods.
+// Never add mcdebug's own source sets or a loom.mods.mcdebug declaration here.
