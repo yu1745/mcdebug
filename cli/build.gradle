@@ -45,6 +45,10 @@ tasks.shadowJar {
 		into 'META-INF/mcdebug'
 		rename { 'mod.jar' }
 	}
+	// The agent skill of the same version (`mcdebug skill` installs it).
+	from(rootProject.file('skills/mcdebug')) {
+		into 'META-INF/mcdebug/skill'
+	}
 	manifest {
 		attributes 'Main-Class': application.mainClass.get()
 		attributes 'Implementation-Version': project.version

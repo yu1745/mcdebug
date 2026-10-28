@@ -30,8 +30,10 @@ methods, verification, container manual). This README covers consumer-facing usa
 java -jar mcdebug-cli.jar --help
 ```
 
-For coding agents there is a Claude Code skill in `skills/mcdebug/` (workflow and pitfalls; the
-CLI's own `--help` stays the command reference): `ln -s "$PWD/skills/mcdebug" ~/.claude/skills/mcdebug`.
+For coding agents there is a Claude Code skill (workflow and pitfalls; the CLI's own `--help`
+stays the command reference). The CLI carries the one matching its version:
+`mcdebug skill` writes `~/.agents/skills/mcdebug/SKILL.md` (`--output DIR`, `--print`); source in
+`skills/mcdebug/`.
 
 Below, `mcdebug` stands for `java -jar mcdebug-cli.jar` or the native binary (`mdb`, see
 [Native-image distribution](#native-image-distribution)). Tagged releases attach

@@ -34,8 +34,9 @@ mcdebug --version
 ```
 
 Releases before v0.6.3 have no `mcdebug-cli.jar` asset. From a source checkout instead:
-`./gradlew :cli:copyCliJar` writes `./mcdebug-cli.jar`. The CLI carries the mod jar of its own
-version, so `mcdebug jar --output <gameDir>/mods` installs a matching mod (and removes old ones).
+`./gradlew :cli:copyCliJar` writes `./mcdebug-cli.jar`. The CLI carries the mod jar and this
+skill of its own version: `mcdebug jar --output <gameDir>/mods` installs a matching mod (and
+removes old ones), `mcdebug skill` refreshes this skill to match the CLI.
 
 Below, `mcdebug` means whichever of these you found.
 

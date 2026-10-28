@@ -59,6 +59,7 @@ fun buildCli(): McDebugCli =
             WatchCommands().subcommands(*watchSubcommands().toTypedArray()),
             SessionCommands().subcommands(*sessionSubcommands().toTypedArray()),
             JarCmd(),
+            SkillCmd(),
         )
 
 class McDebugCli : CliktCommand(
