@@ -43,7 +43,7 @@ object RedstoneOps : RpcHandlerGroup {
     private fun getPower(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
         RpcContext.onServer(server) {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
-            val pos = ServerContext.pos(p.getAsJsonArray("pos"))
+            val pos = p.requirePos("pos")
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val side = p.getDirectionOrNull("side")
             powerSnapshot(world, pos, side)
@@ -52,7 +52,7 @@ object RedstoneOps : RpcHandlerGroup {
     private fun isPowered(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
         RpcContext.onServer(server) {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
-            val pos = ServerContext.pos(p.getAsJsonArray("pos"))
+            val pos = p.requirePos("pos")
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             JsonObject().apply {
                 add("pos", ServerContext.posAsJson(pos))
@@ -65,7 +65,7 @@ object RedstoneOps : RpcHandlerGroup {
     private fun setLever(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
         RpcContext.onServer(server) {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
-            val pos = ServerContext.pos(p.getAsJsonArray("pos"))
+            val pos = p.requirePos("pos")
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val powered = p.getBoolOrFalse("powered")
             setLeverPowered(world, pos, powered)
@@ -74,7 +74,7 @@ object RedstoneOps : RpcHandlerGroup {
     private fun pulse(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
         RpcContext.onServer(server) {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
-            val pos = ServerContext.pos(p.getAsJsonArray("pos"))
+            val pos = p.requirePos("pos")
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val ticks = p.getIntOr("ticks", 2)
             if (ticks < 1) throw RpcException(RpcErrors.INVALID_PARAMS, "ticks must be >= 1")
@@ -92,7 +92,7 @@ object RedstoneOps : RpcHandlerGroup {
     private fun notifyNeighbors(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
         RpcContext.onServer(server) {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
-            val pos = ServerContext.pos(p.getAsJsonArray("pos"))
+            val pos = p.requirePos("pos")
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val state = world.getBlockState(pos)
             world.updateNeighborsAt(pos, state.block)

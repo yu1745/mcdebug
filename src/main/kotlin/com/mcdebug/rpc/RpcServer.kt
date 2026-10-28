@@ -316,13 +316,13 @@ class RpcServer(
                 errorResponse(request.id, cause)
             } else {
                 log.error("dispatch error for {}", request.method, cause)
-                errorResponse(request.id, RpcException(RpcErrors.INTERNAL_ERROR, cause?.message ?: "internal error", null, cause))
+                errorResponse(request.id, RpcErrors.internal(cause ?: e))
             }
         } catch (e: RpcException) {
             errorResponse(request.id, e)
         } catch (e: Exception) {
             log.error("dispatch error for {}", request.method, e)
-            errorResponse(request.id, RpcException(RpcErrors.INTERNAL_ERROR, e.message ?: "internal error", null, e))
+            errorResponse(request.id, RpcErrors.internal(e))
         }
     }
 

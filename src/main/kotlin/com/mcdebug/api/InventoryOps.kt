@@ -33,7 +33,7 @@ object InventoryOps : RpcHandlerGroup {
         RpcContext.onServer(server) {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
             val inv = resolveInv(server, p)
-            val slot = p.requireString("slot").toIntOrNull() ?: throw RpcException(RpcErrors.INVALID_PARAMS, "slot must be int")
+            val slot = p.requireInt("slot")
             requireSlot(inv, slot)
             val stack = inv.getItem(slot)
             val max = if (stack.isEmpty) 64 else stack.maxStackSize
@@ -47,7 +47,7 @@ object InventoryOps : RpcHandlerGroup {
         RpcContext.onServer(server) {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
             val inv = resolveInv(server, p)
-            val slot = p.requireString("slot").toIntOrNull() ?: throw RpcException(RpcErrors.INVALID_PARAMS, "slot must be int")
+            val slot = p.requireInt("slot")
             requireSlot(inv, slot)
             val itemId = p.getStringOrNull("item") ?: "minecraft:air"
             val count = p.getIntOr("count", 0)
@@ -66,10 +66,7 @@ object InventoryOps : RpcHandlerGroup {
             val count = p.getIntOr("count", 1)
             val nbtJson = p.get("nbt")
             val simulate = p.getBoolOrFalse("simulate")
-            val targetSlot = if (p.has("slot") && !p.get("slot").isJsonNull) {
-                val s = p.get("slot").asInt
-                requireSlot(inv, s); s
-            } else null
+            val targetSlot = p.getIntOrNull("slot")?.also { requireSlot(inv, it) }
 
             val stack = ServerContext.itemStackFromJson(server, itemId, count, nbtJson)
             val original = stack.count
@@ -131,10 +128,7 @@ object InventoryOps : RpcHandlerGroup {
             val itemId = p.requireString("item")
             val count = p.getIntOr("count", 1)
             val simulate = p.getBoolOrFalse("simulate")
-            val targetSlot = if (p.has("slot") && !p.get("slot").isJsonNull) {
-                val s = p.get("slot").asInt
-                requireSlot(inv, s); s
-            } else null
+            val targetSlot = p.getIntOrNull("slot")?.also { requireSlot(inv, it) }
 
             val target = ServerContext.itemStackFromJson(server, itemId, 1, null)  // exemplar item for type check
             val maxExtract = count
@@ -174,7 +168,7 @@ object InventoryOps : RpcHandlerGroup {
     // ---- helpers ----
 
     private fun resolveInv(server: MinecraftServer, p: JsonObject): Container {
-        val pos = ServerContext.pos(p.getAsJsonArray("pos"))
+        val pos = p.requirePos("pos")
         val world = ServerContext.world(server, p.getStringOrNull("dim"))
         return ServerContext.inventory(world, pos)
     }

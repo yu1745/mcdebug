@@ -693,7 +693,7 @@ object StorageOps : RpcHandlerGroup {
     private fun resolveTarget(server: MinecraftServer, target: JsonObject): TargetRef =
         when (val kind = target.requireString("kind")) {
             "block" -> {
-                val pos = ServerContext.pos(target.getAsJsonArray("pos"))
+                val pos = target.requirePos("pos")
                 val world = ServerContext.world(server, target.getStringOrNull("dim"))
                 TargetRef.Block(world, pos)
             }
@@ -714,7 +714,7 @@ object StorageOps : RpcHandlerGroup {
 
     internal fun sideFromOpts(p: JsonObject, name: String): Direction? {
         val direct = p.getStringOrNull(name)
-        val nested = p.getAsJsonObject("opts")?.getStringOrNull(name)
+        val nested = p.getObjectOrNull("opts")?.getStringOrNull(name)
         return parseSide(direct ?: nested)
     }
 
@@ -839,16 +839,6 @@ object StorageOps : RpcHandlerGroup {
     }
 }
 
-internal fun JsonObject.requireObject(name: String): JsonObject =
-    if (has(name) && !get(name).isJsonNull && get(name).isJsonObject) getAsJsonObject(name)
-    else throw RpcException(RpcErrors.INVALID_PARAMS, "missing object param: $name")
-
-internal fun boxFromParams(p: JsonObject): BoundingBox {
-    val box = p.getAsJsonObject("box") ?: throw RpcException(RpcErrors.INVALID_PARAMS, "box required")
-    val from = ServerContext.pos(box.getAsJsonArray("from"))
-    val to = ServerContext.pos(box.getAsJsonArray("to"))
-    return ServerContext.boxFrom(from, to)
-}
 
 internal fun ensureChunksLoaded(world: Level, box: BoundingBox) {
     val minCx = box.minX() shr 4

@@ -12,7 +12,7 @@ class ReflectCommands : CliktCommand(name = "reflect", help = "arbitrary runtime
     override fun run() = Unit
 }
 
-class ReflectResolveCmd : CliktCommand(name = "resolve", help = "resolve a class: runtime/yarn name, superclass, fields, methods") {
+class ReflectResolveCmd : CliktCommand(name = "resolve", help = "resolve a class: runtime/Mojang name, superclass, fields, methods") {
     private val className by option("--class").required()
     private val members by option("--members").flag()
 

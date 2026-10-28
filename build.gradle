@@ -78,6 +78,40 @@ test {
 	}
 }
 
+// reflect.* name table (util/Mappings.kt): intermediary <-> Mojang for exactly this Minecraft
+// version, taken from Loom's resolved mappings so it cannot drift from the game the jar targets.
+def reflectMappingsDir = layout.buildDirectory.dir("generated/reflect-mappings")
+def generateReflectMappings = tasks.register('generateReflectMappings') {
+	def tiny = loom.mappingConfiguration.tinyMappings.toFile()
+	def out = reflectMappingsDir.map { it.file("mappings/reflect.txt.gz") }
+	inputs.file(tiny)
+	outputs.file(out)
+	doLast {
+		def target = out.get().asFile
+		target.parentFile.mkdirs()
+		def header = tiny.withReader { it.readLine() }.split('\t')
+		def inter = header.findIndexOf { it == 'intermediary' } - 3
+		def named = header.findIndexOf { it == 'named' } - 3
+		if (header[0] != 'tiny' || header[1] != '2' || inter < 0 || named < 0) {
+			throw new GradleException("unexpected mappings header in $tiny: ${header.join(' ')}")
+		}
+		new java.util.zip.GZIPOutputStream(new FileOutputStream(target)).withWriter('UTF-8') { w ->
+			boolean keep = false
+			tiny.eachLine('UTF-8') { line ->
+				def p = line.split('\t', -1)
+				if (p[0] == 'c') {
+					keep = p[1 + inter].startsWith('net/minecraft/')
+					if (keep) w.write("c\t${p[1 + inter]}\t${p[1 + named]}\n")
+				} else if (keep && p.length >= 6 && p[0] == '' && (p[1] == 'm' || p[1] == 'f')) {
+					def i = p[3 + inter], n = p[3 + named]
+					if (i != n && !n.startsWith('<')) w.write("${p[1]}\t$i\t$n\n")
+				}
+			}
+		}
+	}
+}
+sourceSets.main.resources.srcDir(files(reflectMappingsDir).builtBy(generateReflectMappings))
+
 processResources {
 	def version = project.version
 	inputs.property "version", version
@@ -167,6 +201,7 @@ tasks.register('verifyJarSelfContained') {
 			'mcdebug.mixins.json',
 			'mcdebug.client.mixins.json',
 			'fabric.mod.json',
+			'mappings/reflect.txt.gz',                              // reflect.* names (generateReflectMappings)
 		]
 		def entries = new java.util.zip.ZipFile(jarFile).withCloseable { zip -> zip.entries().collect { it.name } as Set }
 		def missing = required.findAll { !entries.contains(it) }

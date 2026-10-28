@@ -7,7 +7,7 @@ import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.types.int
 
-class InvCommands : CliktCommand(name = "inv", help = "vanilla inventory operations on a block entity; slot indices are 0-BASED (first slot = 0)") {
+class InvCommands : CliktCommand(name = "inv", help = "slot-level access to a block entity's vanilla Container (get/set a slot); slot indices are 0-BASED. For moving items in and out, storage insert/extract also covers Fabric item storages") {
     override fun run() = Unit
 }
 
@@ -49,7 +49,7 @@ class InvSetSlotCmd : CliktCommand(name = "set-slot", help = "write one slot, 0-
     }
 }
 
-class InvInsertCmd : CliktCommand(name = "insert", help = "insert items into a machine inventory (slot is 0-based)") {
+class InvInsertCmd : CliktCommand(name = "insert", help = "insert items into a vanilla Container (slot is 0-based); prefer storage insert, which also handles Fabric item storages") {
     private val x by option("--x").int().required()
     private val y by option("--y").int().required()
     private val z by option("--z").int().required()
@@ -65,7 +65,7 @@ class InvInsertCmd : CliktCommand(name = "insert", help = "insert items into a m
     }
 }
 
-class InvExtractCmd : CliktCommand(name = "extract", help = "extract items from a machine inventory (slot is 0-based)") {
+class InvExtractCmd : CliktCommand(name = "extract", help = "extract items from a vanilla Container (slot is 0-based); prefer storage extract, which also handles Fabric item storages") {
     private val x by option("--x").int().required()
     private val y by option("--y").int().required()
     private val z by option("--z").int().required()

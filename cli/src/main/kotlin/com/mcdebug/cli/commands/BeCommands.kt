@@ -58,7 +58,7 @@ class BeSetFieldCmd : CliktCommand(name = "set-field", help = "write one NBT pat
     }
 }
 
-class BeTickCmd : CliktCommand(name = "tick", help = "tick the block entity N times (same path as natural ticks); requires server-side support: added in mcdebug mod >= 0.5.0 (0.4.x servers return method not found)") {
+class BeTickCmd : CliktCommand(name = "tick", help = "run this block entity's ticker N times (0..12000, same path as a natural tick; only this BE, world time does not advance)") {
     private val x by option("--x").int().required()
     private val y by option("--y").int().required()
     private val z by option("--z").int().required()

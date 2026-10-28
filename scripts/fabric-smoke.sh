@@ -8,16 +8,16 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-MOD_JAR=$(find build/libs -maxdepth 1 -name 'mcdebug-*.jar' ! -name '*-sources.jar' 2>/dev/null | head -1)
-[[ -n "$MOD_JAR" ]] || { echo "fabric-smoke: build first (./gradlew build)" >&2; exit 2; }
+MOD_VERSION=$(sed -n 's/^mod_version=//p' gradle.properties)
+MOD_JAR="build/libs/mcdebug-${MOD_VERSION}.jar"   # build/libs keeps older versions around
+[[ -f "$MOD_JAR" ]] || { echo "fabric-smoke: $MOD_JAR missing, build first (./gradlew build)" >&2; exit 2; }
 
 CACHE_DIR=${MCDEBUG_SMOKE_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/mcdebug-fabric-smoke}
 MC_VERSION=1.21.1
 LOADER_VERSION=0.19.5
 API_VERSION=0.116.17+1.21.1
 FKL_VERSION=1.13.9+kotlin.2.3.10
-CLI_JAR=${CLI_JAR:-../mcdebug/mcdebug-cli.jar}
-[[ -f "$CLI_JAR" ]] || CLI_JAR=mcdebug-cli.jar
+CLI_JAR=${CLI_JAR:-mcdebug-cli.jar}
 [[ -f "$CLI_JAR" ]] || { echo "fabric-smoke: mcdebug-cli.jar not found" >&2; exit 2; }
 
 fetch() {
@@ -94,6 +94,42 @@ check "wait.until"                 '"matched":true'                     raw wait
 check "place lever"                '"ok":true'                          raw world.setBlock '{"pos":[4,200,0],"block":"minecraft:lever"}'
 check "redstone setLever"          '"powered":true'                     raw redstone.setLever '{"pos":[4,200,0],"powered":true}'
 check "runCommand"                 '"success":true'                     raw server.runCommand '{"command":"/time set day"}'
+
+# ---- 参数校验：缺参/类型错必须是 -32602 并点名参数，不能是 -32603 ----
+check "missing pos -> -32602"      'error [-32602] missing param: pos'  raw inv.setSlot '{"slot":0,"item":"minecraft:stone"}'
+check "bad pos -> -32001"          'error [-32001] param pos'           raw world.getBlock '{"pos":[1,2]}'
+check "bad int -> -32602"          'error [-32602] param slot'          raw inv.getSlot '{"pos":[2,200,0],"slot":"x"}'
+check "numeric slot accepted"      '"count":5'                          raw inv.getSlot '{"pos":[2,200,0],"slot":0}'
+
+# ---- reflect：专用服是 intermediary 运行时，映射表必须对上 1.21.1 ----
+check "reflect simple name"        '"runtimeClass":"net.minecraft.class_2586"' raw reflect.resolve '{"class":"BlockEntity"}'
+check "reflect mojangClass"        '"mojangClass":"net.minecraft.world.level.block.entity.BlockEntity"' raw reflect.resolve '{"class":"net.minecraft.world.level.block.entity.BlockEntity"}'
+check "reflect static field"       '"resolvedTo":"field_'               raw reflect.get '{"class":"net.minecraft.world.level.block.Blocks","field":"STONE"}'
+
+# ---- storage / transfer ----
+check "second chest"               '"ok":true'                          raw world.setBlock '{"pos":[6,200,0],"block":"minecraft:chest"}'
+check "storage insert"             '"inserted":3'                          raw storage.insert '{"target":{"kind":"block","pos":[6,200,0]},"handle":"fabric:item","resource":{"kind":"item","item":"minecraft:iron_ingot"},"amount":3}'
+check "storage transfer"           '"transferred":2'                          raw storage.transfer '{"from":{"kind":"block","pos":[6,200,0]},"to":{"kind":"block","pos":[2,200,0]},"resource":{"kind":"item","item":"minecraft:iron_ingot"},"amount":2}'
+check "transfer arrived"           '"matched":true'                          raw wait.until '{"predicate":"sum(inv[2,200,0].*.count) == 8","timeoutTicks":5}'
+
+# ---- be.tick：有上限 ----
+check "furnace"                    '"ok":true'                          raw world.setBlock '{"pos":[8,200,0],"block":"minecraft:furnace"}'
+check "be.tick ok"                 '"ticked":3'                         raw be.tick '{"pos":[8,200,0],"ticks":3}'
+check "be.tick bounded"            'error [-32602] ticks must be'       raw be.tick '{"pos":[8,200,0],"ticks":20000}'
+
+# ---- craft ----
+check "craft planks"               'minecraft:oak_planks'               raw craft.craft '{"grid":[{"item":"minecraft:oak_log","count":1},null,null,null,null,null,null,null,null]}'
+
+# ---- scan.findEntities：整块包含，不再四周扩 1 格 ----
+# (0,0) 不一定在出生点常驻区块里：不 forceload 的话区块随时卸载，猪跟着存盘消失
+check "forceload chunk 0,0"        '"forced":true'                      raw world.forceloadChunk '{"chunk":[0,0]}'
+check "spawn pig"                  '"spawned":true'                     raw entity.spawn '{"type":"minecraft:pig","pos":[10.5,201,0.5],"nbt":{"NoAI":true,"NoGravity":true}}'
+check "pig in its block"           '"count":1'                          raw scan.findEntities '{"box":{"from":[10,201,0],"to":[10,201,0]},"type":"minecraft:pig"}'
+check "pig not in neighbour"       '"count":0'                          raw scan.findEntities '{"box":{"from":[12,201,0],"to":[12,201,0]},"type":"minecraft:pig"}'
+
+# ---- snapshot.diff 默认忽略 /tick /time ----
+check "diff ignores meta"          '"equal":true'                       raw snapshot.diff '{"before":{"tick":1,"time":5,"blocks":[]},"after":{"tick":9,"time":7,"blocks":[]}}'
+check "diff includes meta on ask"  '"equal":false'                      raw snapshot.diff '{"before":{"tick":1},"after":{"tick":9},"ignoreMeta":false}'
 
 # 契约一致性 + 平面隔离：见 scripts/contract-parity.py（按 id 匹配响应，排除客户端平面 gui.*）
 python3 scripts/contract-parity.py "$SOCK" contract/src/main/kotlin/com/mcdebug/contract/Methods.kt \

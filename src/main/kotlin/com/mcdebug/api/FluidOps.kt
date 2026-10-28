@@ -12,7 +12,6 @@ import com.mcdebug.util.ServerContext
 import net.fabricmc.fabric.api.transfer.v1.fluid.FluidStorage
 import net.fabricmc.fabric.api.transfer.v1.fluid.FluidVariant
 import net.fabricmc.fabric.api.transfer.v1.storage.Storage
-import net.fabricmc.fabric.api.transfer.v1.storage.StorageView
 import net.fabricmc.fabric.api.transfer.v1.storage.base.CombinedStorage
 import net.fabricmc.fabric.api.transfer.v1.storage.base.SingleVariantStorage
 import net.fabricmc.fabric.api.transfer.v1.transaction.Transaction
@@ -154,7 +153,7 @@ object FluidOps : RpcHandlerGroup {
 
     private fun resolve(server: MinecraftServer, params: JsonObject?): Triple<net.minecraft.server.level.ServerLevel, BlockPos, Direction?> {
         val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
-        val pos = ServerContext.pos(p.getAsJsonArray("pos"))
+        val pos = p.requirePos("pos")
         val world = ServerContext.world(server, p.getStringOrNull("dim"))
         val side = p.getStringOrNull("side")?.let { parseDirection(it) }
         return Triple(world, pos, side)
@@ -302,11 +301,4 @@ object FluidOps : RpcHandlerGroup {
         }
         return fluid
     }
-}
-
-// ---- shared with other files in this package ----
-
-internal fun JsonObject.requireLong(name: String): Long {
-    val v = if (has(name) && !get(name).isJsonNull) get(name).asLong else null
-    return v ?: throw RpcException(RpcErrors.INVALID_PARAMS, "missing long param: $name")
 }

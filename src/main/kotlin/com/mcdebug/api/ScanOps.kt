@@ -15,8 +15,6 @@ import net.minecraft.world.entity.LivingEntity
 import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.server.MinecraftServer
 import net.minecraft.core.BlockPos
-import net.minecraft.world.phys.AABB
-import net.minecraft.world.phys.Vec3
 import java.util.concurrent.CompletableFuture
 
 object ScanOps : RpcHandlerGroup {
@@ -29,10 +27,7 @@ object ScanOps : RpcHandlerGroup {
     private fun findBlocks(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
         RpcContext.onServer(server) {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
-            val boxObj = p.getAsJsonObject("box") ?: throw RpcException(RpcErrors.INVALID_PARAMS, "box required")
-            val from = ServerContext.pos(boxObj.getAsJsonArray("from"))
-            val to = ServerContext.pos(boxObj.getAsJsonArray("to"))
-            val box = ServerContext.boxFrom(from, to)
+            val box = p.requireBox()
             val blockId = p.requireString("block")
             val count = p.getBoolOrFalse("count")
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
@@ -54,10 +49,7 @@ object ScanOps : RpcHandlerGroup {
     private fun countByBlock(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
         RpcContext.onServer(server) {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
-            val boxObj = p.getAsJsonObject("box") ?: throw RpcException(RpcErrors.INVALID_PARAMS, "box required")
-            val from = ServerContext.pos(boxObj.getAsJsonArray("from"))
-            val to = ServerContext.pos(boxObj.getAsJsonArray("to"))
-            val box = ServerContext.boxFrom(from, to)
+            val box = p.requireBox()
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val counts = HashMap<String, Int>()
             BlockPos.betweenClosed(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ()).forEach { pos ->
@@ -81,17 +73,10 @@ object ScanOps : RpcHandlerGroup {
     private fun findEntities(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
         RpcContext.onServer(server) {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
-            val boxObj = p.getAsJsonObject("box") ?: throw RpcException(RpcErrors.INVALID_PARAMS, "box required")
-            val from = ServerContext.pos(boxObj.getAsJsonArray("from"))
-            val to = ServerContext.pos(boxObj.getAsJsonArray("to"))
+            // Whole blocks from..to inclusive, like every other box param (entity.* included).
+            val entityBox = p.requireEntityBox()
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val includeNbt = p.getBoolOrFalse("includeNbt")
-
-            // Use double-precision box for entity iteration (entities use Vec3, not BlockPos)
-            val entityBox = AABB(
-                from.x.toDouble(), from.y.toDouble(), from.z.toDouble(),
-                to.x.toDouble(), to.y.toDouble(), to.z.toDouble()
-            ).inflate(1.0) // +1 block margin to catch entities on the edge
 
             val typeId = p.getStringOrNull("type")
             lateinit var entityTypeFilter: (Entity) -> Boolean

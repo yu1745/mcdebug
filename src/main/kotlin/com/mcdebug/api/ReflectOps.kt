@@ -25,14 +25,15 @@ import com.mcdebug.util.ServerContext
  * are read, methods are invoked (their side effects are the caller's business),
  * and an object-reference table lets you walk into nested objects across calls.
  *
- * Name resolution: because the runtime uses intermediary names (class_1309,
- * method_6076, field_6222), the bundled yarn mapping is used to accept yarn
- * names too ("LivingEntity", "tickActiveItemStack", "itemUseTimeLeft").
+ * Name resolution: a production game runs on intermediary names (class_1309,
+ * method_6076, field_6222), a Loom dev game on Mojang names. The bundled table
+ * (generated from this Minecraft version's mappings, see util/Mappings) accepts
+ * either form in both ("LivingEntity", "updatingUsingItem", "useItemRemaining").
  * Mod classes keep their own names (ic2_120.content.item.MiningLaserItem).
  *
  * Methods:
  *   reflect.resolve  { "class": "LivingEntity" | "net.minecraft.class_1309" | "ic2_120...", "members": true? }
- *                    -> runtime class name, yarn name, superclass, fields, methods
+ *                    -> runtime class name, Mojang name, superclass, fields, methods
  *   reflect.get      { "class": "...", "field": "..." } | { "ref": 1, "field": "..." }
  *                    -> field value (objects become refs, see refs)
  *   reflect.call     { "class": "...", "method": "...", "args": [...] }
@@ -89,8 +90,7 @@ object ReflectOps : RpcHandlerGroup {
             val out = JsonObject().apply {
                 addProperty("requested", className)
                 addProperty("runtimeClass", clazz.name)
-                Mappings.yarnClassName(clazz.name.replace('.', '/'))?.let { addProperty("yarnClass", it) }
-                Mappings.mojangClassName(clazz.name.replace('.', '/'))?.let { addProperty("mojangClass", it) }
+                Mappings.mojangClassName(clazz)?.takeIf { it != clazz.name }?.let { addProperty("mojangClass", it) }
                 addProperty("isInterface", clazz.isInterface)
                 addProperty("isEnum", clazz.isEnum)
                 clazz.superclass?.let { addProperty("superclass", it.name) }
@@ -107,14 +107,12 @@ object ReflectOps : RpcHandlerGroup {
         val seen = HashSet<String>()
         var c: Class<*>? = clazz
         while (c != null && c != Any::class.java) {
-            val clsSlash = c.name.replace('.', '/')
             for (f in c.declaredFields) {
                 if (!seen.add(f.name)) continue
                 val obj = JsonObject().apply {
                     addProperty("name", f.name)
-                    // map intermediary back to yarn for readability
-                    val yarn = Mappings.yarnMemberName(clsSlash, f.name, isMethod = false)
-                    if (yarn != null && yarn != f.name) addProperty("yarnName", yarn)
+                    // production: map intermediary back to Mojang for readability
+                    Mappings.mojangMemberName(c, f.name, isMethod = false)?.let { addProperty("mojangName", it) }
                     addProperty("type", f.type.name)
                     addProperty("static", Modifier.isStatic(f.modifiers))
                     addProperty("final", Modifier.isFinal(f.modifiers))
@@ -132,13 +130,11 @@ object ReflectOps : RpcHandlerGroup {
         val seen = HashSet<String>()
         var c: Class<*>? = clazz
         while (c != null && c != Any::class.java) {
-            val clsSlash = c.name.replace('.', '/')
             for (m in c.declaredMethods) {
                 if (!seen.add(m.name)) continue
                 val obj = JsonObject().apply {
                     addProperty("name", m.name)
-                    val yarn = Mappings.yarnMemberName(clsSlash, m.name, isMethod = true)
-                    if (yarn != null && yarn != m.name) addProperty("yarnName", yarn)
+                    Mappings.mojangMemberName(c, m.name, isMethod = true)?.let { addProperty("mojangName", it) }
                     addProperty("returnType", m.returnType.name)
                     addProperty("static", Modifier.isStatic(m.modifiers))
                     addProperty("declaringClass", m.declaringClass.name)
@@ -163,9 +159,9 @@ object ReflectOps : RpcHandlerGroup {
             val clazz = target.first
             val instance = target.second
 
-            val runtimeField = Mappings.resolveMemberName(clazz.name.replace('.', '/'), fieldName, isMethod = false)
-            val resolvedField = findField(clazz, runtimeField)
-                ?: throw RpcException(RpcErrors.INVALID_PARAMS, "field not found: $fieldName (runtime: $runtimeField) in ${clazz.name}")
+            val candidates = Mappings.runtimeMemberNames(clazz, fieldName, isMethod = false)
+            val resolvedField = candidates.firstNotNullOfOrNull { findField(clazz, it) }
+                ?: throw RpcException(RpcErrors.INVALID_PARAMS, "field not found: $fieldName (tried ${candidates.joinToString()}) in ${clazz.name}")
             resolvedField.isAccessible = true
             val value = if (Modifier.isStatic(resolvedField.modifiers)) resolvedField.get(null) else {
                 val inst = instance ?: throw RpcException(RpcErrors.INVALID_PARAMS, "field $fieldName is not static; pass a ref")
@@ -204,9 +200,9 @@ object ReflectOps : RpcHandlerGroup {
             val clazz = target.first
             val instance = target.second
 
-            val runtimeMethod = Mappings.resolveMemberName(clazz.name.replace('.', '/'), methodName, isMethod = true)
-            val method = findMethod(clazz, runtimeMethod, args.map { it.first })
-                ?: throw RpcException(RpcErrors.INVALID_PARAMS, "method not found: $methodName (runtime: $runtimeMethod) in ${clazz.name}")
+            val candidates = Mappings.runtimeMemberNames(clazz, methodName, isMethod = true)
+            val method = candidates.firstNotNullOfOrNull { findMethod(clazz, it, args.map { a -> a.first }) }
+                ?: throw RpcException(RpcErrors.INVALID_PARAMS, "method not found: $methodName (tried ${candidates.joinToString()}) in ${clazz.name}")
             method.isAccessible = true
             val value = if (Modifier.isStatic(method.modifiers)) {
                 method.invoke(null, *args.map { it.second }.toTypedArray())

@@ -49,9 +49,9 @@ object SnapshotOps : RpcHandlerGroup {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
             val before = p.get("before") ?: throw RpcException(RpcErrors.INVALID_PARAMS, "before required")
             val after = p.get("after") ?: throw RpcException(RpcErrors.INVALID_PARAMS, "after required")
-            // ignoreMeta=true：过滤顶层 /tick、/time 等元数据字段后再 diff（快照必然随时间变化，
-            // 不忽略的话 equal 永远为 false）。
-            val ignoreMeta = p.getBoolOrFalse("ignoreMeta")
+            // 默认过滤顶层 /tick、/time 元数据再 diff（两次快照之间它们必然变化，不过滤的话
+            // equal 永远为 false）；显式 ignoreMeta=false 才比较它们。
+            val ignoreMeta = !p.has("ignoreMeta") || p.get("ignoreMeta").isJsonNull || p.getBoolOrFalse("ignoreMeta")
             diffJson(
                 if (ignoreMeta) stripMeta(before) else before,
                 if (ignoreMeta) stripMeta(after) else after,
@@ -93,7 +93,7 @@ object SnapshotOps : RpcHandlerGroup {
 
     internal fun includeKinds(p: JsonObject?): Set<SnapshotKind> {
         if (p == null || !p.has("include") || p.get("include").isJsonNull) return DEFAULT_KINDS
-        val arr = p.getAsJsonArray("include")
+        val arr = p.requireArray("include")
         val out = linkedSetOf<SnapshotKind>()
         arr.forEach { el ->
             val kind = SnapshotKind.fromWire(el.asString)

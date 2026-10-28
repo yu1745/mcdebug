@@ -1,6 +1,7 @@
 package com.mcdebug.cli
 
 import com.github.ajalt.clikt.core.CliktCommand
+import com.github.ajalt.clikt.core.UsageError
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.arguments.multiple
 import com.github.ajalt.clikt.parameters.options.default
@@ -15,22 +16,37 @@ class CraftCommands : CliktCommand(name = "craft", help = "simulate crafting thr
     override fun run() = Unit
 }
 
-/** "slot=item@count" 或 "item@count" 或 "null" → grid 项。 */
-private fun parseGridSpec(specs: List<String>): List<Any?> = specs.map { s ->
-    when {
-        s == "null" || s == "-" -> null
-        else -> {
-            val slotIdx = s.indexOf('=')
-            val body = if (slotIdx >= 0) s.substring(slotIdx + 1) else s
+/**
+ * Grid args → the 9 grid entries (row-major, slot 0 = top-left). `item@count` / `null` / `-`
+ * fill the next slot; `N=item@count` puts it in slot N (0..8) and continues after it.
+ */
+internal fun parseGridSpec(specs: List<String>): List<Any?> {
+    val grid = arrayOfNulls<Any?>(9).toMutableList()
+    val used = BooleanArray(9)
+    var next = 0
+    for (s in specs) {
+        val eq = s.indexOf('=')
+        val slot = if (eq >= 0) {
+            s.substring(0, eq).toIntOrNull()?.takeIf { it in 0..8 }
+                ?: throw UsageError("grid arg '$s': slot before '=' must be 0..8")
+        } else next
+        if (slot > 8) throw UsageError("more than 9 grid args")
+        if (used[slot]) throw UsageError("grid slot $slot given twice")
+        used[slot] = true
+        next = slot + 1
+        val body = if (eq >= 0) s.substring(eq + 1) else s
+        grid[slot] = if (body == "null" || body == "-") null else {
             val at = body.lastIndexOf('@')
             val item = if (at >= 0) body.substring(0, at) else body
-            val count = if (at >= 0) body.substring(at + 1).toIntOrNull() ?: 1 else 1
+            val count = if (at >= 0) body.substring(at + 1).toIntOrNull()
+                ?: throw UsageError("grid arg '$s': count after '@' must be an integer") else 1
             mapOf("item" to item, "count" to count)
         }
     }
+    return grid
 }
 
-class CraftDoCmd : CliktCommand(name = "do", help = "craft a 3x3 grid (up to 9 args); each arg = item@count or null, parsed BY POSITION (left-to-right, top-to-bottom) — a 'slot=' prefix is stripped and IGNORED, not interpreted as a slot; --recipe-id bypasses grid matching and forces a specific recipe") {
+class CraftDoCmd : CliktCommand(name = "do", help = "craft a 3x3 grid; args fill slots left-to-right, top-to-bottom (item@count, or null/- for empty); N=item@count puts it in slot N (0..8); --recipe-id bypasses grid matching and forces a specific recipe") {
     private val grid by argument("grid", help = "grid slots left-to-right, top-to-bottom; use 'null' for empty").multiple()
     private val recipeId by option("--recipe-id")
     private val dim by option("--dim")
@@ -51,15 +67,15 @@ class CraftFindCmd : CliktCommand(name = "find", help = "list recipes matching a
 
 // ---- scan group ----
 
-class ScanCommands : CliktCommand(name = "scan", help = "box scanning; return shapes differ: find-blocks = flat array of [x,y,z]; count-by-block = {\"id\":count} map; find-entities = array of entity objects (searched box expanded by +1 margin on each side)") {
+class ScanCommands : CliktCommand(name = "scan", help = "box scanning; --from/--to are block corners, both inclusive. Results: find-blocks {positions:[[x,y,z]...], count?}; count-by-block {counts:{id:n}}; find-entities {entities:[...], count}") {
     override fun run() = Unit
 }
 
-class ScanFindBlocksCmd : CliktCommand(name = "find-blocks", help = "find all positions of a block id in a box; returns a FLAT array of [x,y,z] positions (no per-block objects)") {
+class ScanFindBlocksCmd : CliktCommand(name = "find-blocks", help = "find all positions of a block id in a box; returns {positions:[[x,y,z]...]}, plus count with --count") {
     private val from by option("--from").required()
     private val to by option("--to").required()
     private val block by option("--block").required()
-    private val count by option("--count", help = "return the total count instead of the position list").flag()
+    private val count by option("--count", help = "also return the number of matches").flag()
     private val dim by option("--dim")
 
     override fun run() = withApi { api ->
@@ -67,7 +83,7 @@ class ScanFindBlocksCmd : CliktCommand(name = "find-blocks", help = "find all po
     }
 }
 
-class ScanCountByBlockCmd : CliktCommand(name = "count-by-block", help = "count blocks by id in a box; returns a {\"blockId\": count} map (not a list)") {
+class ScanCountByBlockCmd : CliktCommand(name = "count-by-block", help = "count blocks by id in a box; returns {counts:{blockId: n}}") {
     private val from by option("--from").required()
     private val to by option("--to").required()
     private val dim by option("--dim")
@@ -77,7 +93,7 @@ class ScanCountByBlockCmd : CliktCommand(name = "count-by-block", help = "count 
     }
 }
 
-class ScanFindEntitiesCmd : CliktCommand(name = "find-entities", help = "find entities in a box; the searched box is the given box EXPANDED by 1 block on each side; returns an array of entity objects") {
+class ScanFindEntitiesCmd : CliktCommand(name = "find-entities", help = "find entities touching the blocks of a box (same box semantics as entity list); returns {entities:[...], count}") {
     private val from by option("--from").required()
     private val to by option("--to").required()
     private val type by option("--type")
@@ -111,13 +127,15 @@ class SnapshotCaptureCmd : CliktCommand(name = "capture", help = "capture a snap
     }
 }
 
-class SnapshotDiffCmd : CliktCommand(name = "diff", help = "structural diff between two snapshots; by default /tick and /time ALWAYS change between captures, so equal:false is reported even when no real content changed — pass --ignore-meta to filter those metadata fields out") {
+class SnapshotDiffCmd : CliktCommand(name = "diff", help = "structural diff between two snapshots; the /tick and /time metadata (different in every capture) are left out unless --include-meta") {
     private val before by option("--before", help = "snapshot JSON or @file").required()
     private val after by option("--after", help = "snapshot JSON or @file").required()
-    private val ignoreMeta by option("--ignore-meta", help = "filter /tick, /time metadata changes from the diff (server >= 0.6.0)").flag()
+    private val includeMeta by option("--include-meta", help = "also diff /tick and /time").flag()
+    private val ignoreMeta by option("--ignore-meta", hidden = true, help = "default since 0.6.3; kept for old scripts").flag()
 
     override fun run() = withApi { api ->
-        printJson(api.snapshot.diff(parseJsonArg(before), parseJsonArg(after), ignoreMeta))
+        // Always explicit: servers before 0.6.3 compared metadata unless told otherwise.
+        printJson(api.snapshot.diff(parseJsonArg(before), parseJsonArg(after), ignoreMeta || !includeMeta))
     }
 }
 

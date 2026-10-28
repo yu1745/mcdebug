@@ -6,7 +6,7 @@ import java.util.UUID
 
 /**
  * Loader-specific environment hook for the loader-independent RPC transport.
- * Fabric sets it from FabricLoader, Forge from FMLPaths; RpcServer only reads it.
+ * The entrypoint sets it from FabricLoader; RpcServer only reads it.
  */
 object RpcEnv {
     /** Returns the game (run) directory. Must be assigned by the loader entrypoint before RpcServer.start. */

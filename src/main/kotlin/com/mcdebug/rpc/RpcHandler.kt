@@ -117,7 +117,7 @@ object RpcContext {
                     f.completeExceptionally(e)
                 } catch (e: Exception) {
                     McDebugMod.LOGGER.error("handler error", e)
-                    f.completeExceptionally(RpcException(RpcErrors.INTERNAL_ERROR, e.message ?: "internal error"))
+                    f.completeExceptionally(RpcErrors.internal(e))
                 }
             }
         } catch (e: Exception) {

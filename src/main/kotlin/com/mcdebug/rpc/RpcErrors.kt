@@ -1,5 +1,8 @@
 package com.mcdebug.rpc
 
+import com.google.gson.JsonArray
+import com.google.gson.JsonObject
+
 /**
  * JSON-RPC 2.0 standard error codes + mcdebug custom codes.
  * Custom codes live in the -32099 to -32000 range (reserved by spec for implementation-defined server-errors).
@@ -38,4 +41,18 @@ object RpcErrors {
     const val CLIENT_NOT_READY = -32020
     /** A GUI element (widget, text, slot) matching the request was not found. */
     const val GUI_ELEMENT_NOT_FOUND = -32021
+
+    /**
+     * An unexpected handler exception as INTERNAL_ERROR. The message alone is often
+     * useless ("null", a Kotlin null-check text), so it keeps the exception type and
+     * the top stack frames in `data`.
+     */
+    fun internal(t: Throwable): RpcException {
+        val data = JsonObject().apply {
+            addProperty("exception", t.javaClass.name)
+            add("at", JsonArray().apply { t.stackTrace.take(6).forEach { add(it.toString()) } })
+            t.cause?.let { addProperty("cause", it.toString()) }
+        }
+        return RpcException(INTERNAL_ERROR, "${t.javaClass.simpleName}: ${t.message ?: "(no message)"}", data, t)
+    }
 }

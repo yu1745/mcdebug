@@ -148,7 +148,7 @@ class StorageTransferCmd : CliktCommand(name = "transfer", help = "move resource
 
 // ---- fluid group ----
 
-class FluidCommands : CliktCommand(name = "fluid", help = "fluid tank operations") {
+class FluidCommands : CliktCommand(name = "fluid", help = "per-tank fluid operations (tank index); storage get/insert/extract with --handle fabric:fluid is the generic form") {
     override fun run() = Unit
 }
 

@@ -29,7 +29,7 @@ object BlockEntityOps : RpcHandlerGroup {
     private fun getNbt(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
         RpcContext.onServer(server) {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
-            val pos = ServerContext.pos(p.getAsJsonArray("pos"))
+            val pos = p.requirePos("pos")
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val be = ServerContext.blockEntity(world, pos)
             val nbt = be.saveWithoutMetadata(world.registryAccess())
@@ -39,7 +39,7 @@ object BlockEntityOps : RpcHandlerGroup {
     private fun setNbt(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
         RpcContext.onServer(server) {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
-            val pos = ServerContext.pos(p.getAsJsonArray("pos"))
+            val pos = p.requirePos("pos")
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val be = ServerContext.blockEntity(world, pos)
             val nbtJson = p.get("nbt") ?: throw RpcException(RpcErrors.INVALID_PARAMS, "nbt required")
@@ -52,7 +52,7 @@ object BlockEntityOps : RpcHandlerGroup {
     private fun getField(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
         RpcContext.onServer(server) {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
-            val pos = ServerContext.pos(p.getAsJsonArray("pos"))
+            val pos = p.requirePos("pos")
             val path = p.requireString("path")
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val be = ServerContext.blockEntity(world, pos)
@@ -64,7 +64,7 @@ object BlockEntityOps : RpcHandlerGroup {
     private fun setField(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
         RpcContext.onServer(server) {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
-            val pos = ServerContext.pos(p.getAsJsonArray("pos"))
+            val pos = p.requirePos("pos")
             val path = p.requireString("path")
             val valueJson = p.get("value") ?: throw RpcException(RpcErrors.INVALID_PARAMS, "value required")
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
@@ -106,6 +106,9 @@ object BlockEntityOps : RpcHandlerGroup {
 
 // ---- tick ----
 
+/** Upper bound for one `be.tick` call (about 10 minutes of game time). */
+private const val MAX_BE_TICKS = 12000
+
 /**
  * 主动 tick 指定位置的方块实体 N 次（默认 1 次）。
  *
@@ -125,9 +128,13 @@ object BlockEntityOps : RpcHandlerGroup {
 private fun tick(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
     RpcContext.onServer(server) {
         val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
-        val pos = ServerContext.pos(p.getAsJsonArray("pos"))
+        val pos = p.requirePos("pos")
         val world = ServerContext.world(server, p.getStringOrNull("dim"))
-        val count = p.getIntOr("ticks", 1).coerceAtLeast(0)
+        val count = p.getIntOr("ticks", 1)
+        // Runs synchronously on the server thread: an unbounded count would stall the server.
+        if (count !in 0..MAX_BE_TICKS) {
+            throw RpcException(RpcErrors.INVALID_PARAMS, "ticks must be 0..$MAX_BE_TICKS (one call blocks the server thread), got $count")
+        }
         val be = ServerContext.blockEntity(world, pos)
         val state = world.getBlockState(pos)
         // 走 BlockState.getBlockEntityTicker —— 与自然 tick 完全相同的调用路径（BlockEntityTicker）。

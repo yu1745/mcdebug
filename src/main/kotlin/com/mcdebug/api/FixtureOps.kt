@@ -13,8 +13,6 @@ import com.mcdebug.util.ServerContext
 import net.minecraft.world.level.block.Block
 import net.minecraft.nbt.CompoundTag
 import net.minecraft.server.MinecraftServer
-import net.minecraft.server.level.ServerLevel
-import net.minecraft.world.level.levelgen.structure.BoundingBox
 import net.minecraft.core.BlockPos
 import java.util.concurrent.CompletableFuture
 
@@ -61,11 +59,11 @@ object FixtureOps : RpcHandlerGroup {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
             val fixture = p.requireObject("fixture")
             val world = ServerContext.world(server, p.getStringOrNull("dim") ?: fixture.getStringOrNull("dim"))
-            val origin = p.getAsJsonArray("origin")?.let(ServerContext::pos)
-                ?: fixture.getAsJsonArray("origin")?.let(ServerContext::pos)
+            val origin = p.posOrNull("origin")
+                ?: fixture.posOrNull("origin")
                 ?: throw RpcException(RpcErrors.INVALID_PARAMS, "origin required")
             val flags = p.getIntOr("flags", DEFAULT_FLAGS)
-            val blocks = fixture.getAsJsonArray("blocks") ?: throw RpcException(RpcErrors.INVALID_PARAMS, "fixture.blocks required")
+            val blocks = fixture.getArrayOrNull("blocks") ?: throw RpcException(RpcErrors.INVALID_PARAMS, "fixture.blocks required")
             var placed = 0
             blocks.forEach { el ->
                 val entry = el.asJsonObject
@@ -99,16 +97,10 @@ object FixtureOps : RpcHandlerGroup {
         }
 
     private fun targetPos(origin: BlockPos, entry: JsonObject): BlockPos {
-        val rel = entry.getAsJsonArray("rel")?.let(ServerContext::pos)
-            ?: entry.getAsJsonArray("pos")?.let(ServerContext::pos)
+        val rel = entry.posOrNull("rel")
+            ?: entry.posOrNull("pos")
             ?: throw RpcException(RpcErrors.INVALID_PARAMS, "fixture block requires rel or pos")
         return origin.offset(rel.x, rel.y, rel.z)
     }
 
-    private fun boxFromParams(p: JsonObject): BoundingBox {
-        val box = p.getAsJsonObject("box") ?: throw RpcException(RpcErrors.INVALID_PARAMS, "box required")
-        val from = ServerContext.pos(box.getAsJsonArray("from"))
-        val to = ServerContext.pos(box.getAsJsonArray("to"))
-        return ServerContext.boxFrom(from, to)
-    }
 }

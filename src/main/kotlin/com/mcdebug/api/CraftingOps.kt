@@ -191,7 +191,7 @@ object CraftingOps : RpcHandlerGroup {
     }
 
     private fun parseGridWith(server: MinecraftServer, p: JsonObject): NonNullList<ItemStack> {
-        val arr = p.getAsJsonArray("grid")
+        val arr = p.getArrayOrNull("grid")
             ?: throw RpcException(RpcErrors.INVALID_PARAMS, "grid (array of 9) required")
         if (arr.size() != 9) {
             throw RpcException(

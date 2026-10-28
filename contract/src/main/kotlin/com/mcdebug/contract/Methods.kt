@@ -40,7 +40,6 @@ object Methods {
     )
     val server = setOf(
         "server.status", "server.health", "server.listDimensions", "server.runCommand",
-        "server.forgeFluidCapability", "server.mantleInteract",
     )
     val wait = setOf("wait.until")
     val fluid = setOf(

@@ -10,6 +10,7 @@ import com.mcdebug.rpc.RpcHandler
 import com.mcdebug.rpc.RpcHandlerGroup
 import com.mcdebug.util.NbtJson
 import com.mcdebug.util.ServerContext
+import net.minecraft.world.phys.Vec3
 import net.minecraft.world.entity.Entity
 import net.minecraft.world.entity.EntityType
 import net.minecraft.world.entity.item.ItemEntity
@@ -25,7 +26,6 @@ import net.minecraft.core.registries.Registries
 import net.minecraft.server.MinecraftServer
 import net.minecraft.server.level.ServerLevel
 import net.minecraft.resources.ResourceLocation
-import net.minecraft.core.BlockPos
 import net.minecraft.world.phys.AABB
 import java.util.Collections
 import java.util.UUID
@@ -50,7 +50,7 @@ object EntityOps : RpcHandlerGroup {
             val entityType = resolveEntityType(server, typeId)
             val entity = entityType.create(world)
                 ?: throw RpcException(RpcErrors.INVALID_PARAMS, "entity type cannot be created or is disabled: $typeId")
-            val pos = p.getVec3("pos")
+            val pos = p.requireVec3("pos")
             val yaw = p.getFloatOr("yaw", 0f)
             val pitch = p.getFloatOr("pitch", 0f)
             entity.moveTo(pos.x, pos.y, pos.z, yaw, pitch)
@@ -99,7 +99,7 @@ object EntityOps : RpcHandlerGroup {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
             val (currentWorld, entity) = resolveEntity(server, p)
             val targetWorld = ServerContext.world(server, p.getStringOrNull("toDim") ?: p.getStringOrNull("targetDim") ?: currentWorld.dimension().location().toString())
-            val pos = p.getVec3("pos")
+            val pos = p.requireVec3("pos")
             val yaw = p.getFloatOr("yaw", entity.yRot)
             val pitch = p.getFloatOr("pitch", entity.xRot)
             val ok = entity.teleportTo(targetWorld, pos.x, pos.y, pos.z, Collections.emptySet<RelativeMovement>(), yaw, pitch)
@@ -125,7 +125,7 @@ object EntityOps : RpcHandlerGroup {
         RpcContext.onServer(server) {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
-            val box = entityBoxFromParams(p)
+            val box = p.requireEntityBox()
             val item = p.getStringOrNull("item")
             val items = itemEntities(world, box, item)
             JsonObject().apply {
@@ -138,7 +138,7 @@ object EntityOps : RpcHandlerGroup {
         RpcContext.onServer(server) {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
-            val box = entityBoxFromParams(p)
+            val box = p.requireEntityBox()
             val item = p.getStringOrNull("item")
             val remove = !p.has("remove") || p.get("remove").asBoolean
             val items = itemEntities(world, box, item)
@@ -229,26 +229,6 @@ object EntityOps : RpcHandlerGroup {
             item == null || BuiltInRegistries.ITEM.getKey(entity.item.item).toString() == item
         }.filterIsInstance<ItemEntity>()
 
-    private fun entityBoxFromParams(p: JsonObject): AABB {
-        val boxObj = p.getAsJsonObject("box") ?: throw RpcException(RpcErrors.INVALID_PARAMS, "box required")
-        val from = ServerContext.pos(boxObj.getAsJsonArray("from"))
-        val to = ServerContext.pos(boxObj.getAsJsonArray("to"))
-        return AABB(
-            minOf(from.x, to.x).toDouble(),
-            minOf(from.y, to.y).toDouble(),
-            minOf(from.z, to.z).toDouble(),
-            maxOf(from.x, to.x).toDouble() + 1.0,
-            maxOf(from.y, to.y).toDouble() + 1.0,
-            maxOf(from.z, to.z).toDouble() + 1.0,
-        )
-    }
-
-    private fun JsonObject.getVec3(name: String): Vec3 {
-        val arr = getAsJsonArray(name) ?: throw RpcException(RpcErrors.INVALID_PARAMS, "$name [x,y,z] required")
-        if (arr.size() != 3) throw RpcException(RpcErrors.INVALID_PARAMS, "$name must have 3 elements")
-        return Vec3(arr[0].asDouble, arr[1].asDouble, arr[2].asDouble)
-    }
-
     private fun JsonObject.getFloatOr(name: String, default: Float): Float =
         if (has(name) && !get(name).isJsonNull) get(name).asFloat else default
 
@@ -277,5 +257,4 @@ object EntityOps : RpcHandlerGroup {
         throw RpcException(RpcErrors.ENTITY_NOT_FOUND, "entity not found: $uuid", data)
     }
 
-    private data class Vec3(val x: Double, val y: Double, val z: Double)
 }

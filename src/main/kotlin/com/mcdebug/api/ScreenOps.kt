@@ -43,9 +43,9 @@ object ScreenOps : RpcHandlerGroup {
     private fun openBlock(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
         RpcContext.onServer(server) {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
-            val pos = ServerContext.pos(p.getAsJsonArray("pos"))
+            val pos = p.requirePos("pos")
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
-            val side = StorageOps.parseSide(p.getAsJsonObject("opts")?.getStringOrNull("side") ?: p.getStringOrNull("side"))
+            val side = StorageOps.parseSide(p.getObjectOrNull("opts")?.getStringOrNull("side") ?: p.getStringOrNull("side"))
             val state = world.getBlockState(pos)
             val factory = state.getMenuProvider(world, pos)
                 ?: throwScreenNotFound("no screen handler factory at $pos", null)
