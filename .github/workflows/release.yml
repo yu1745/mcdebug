@@ -18,7 +18,10 @@ jobs:
       - name: setup jdk
         uses: actions/setup-java@v4
         with:
-          java-version: '21'
+          # 17 for the nested Forge build (Gradle 8.1.1), 21 (last = default) for the root build.
+          java-version: |
+            17
+            21
           distribution: 'microsoft'
 
       - name: make gradle wrapper executable

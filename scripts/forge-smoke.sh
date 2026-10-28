@@ -26,7 +26,9 @@ contract_parity() {
 }
 
 
-(cd forge && ./gradlew runGameTestServer -PdevFlag="$FLAG" --console=plain >"$LOG" 2>&1) &
+# Gradle 8.1.1 in forge/ must run on JDK 17 (no machine path is pinned in forge/gradle.properties).
+FORGE_JAVA_HOME="${JAVA17_HOME:-${JAVA_HOME_17_X64:-/usr/lib/jvm/java-17-openjdk-amd64}}"
+(cd forge && JAVA_HOME="$FORGE_JAVA_HOME" ./gradlew runGameTestServer -PdevFlag="$FLAG" --console=plain >"$LOG" 2>&1) &
 SERVER_PID=$!
 
 fail=0
