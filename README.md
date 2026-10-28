@@ -24,12 +24,19 @@ methods, verification, container manual). This README covers consumer-facing usa
 ## Setup
 
 ```bash
-./gradlew build              # mod + contract + Forge + self-contained jar check
-./gradlew :cli:copyCliJar    # CLI fat jar -> ./mcdebug-cli.jar (repo root)
+./gradlew build              # mod + contract + self-contained jar check
+./gradlew :cli:copyCliJar    # CLI fat jar -> ./mcdebug-cli.jar (repo root, not in git)
 
-node bin/mcdebug.js --help          # via the npm shell (needs java on PATH/JAVA_HOME)
-java -jar mcdebug-cli.jar --help    # directly
+java -jar mcdebug-cli.jar --help
 ```
+
+For coding agents there is a Claude Code skill in `skills/mcdebug/` (workflow and pitfalls; the
+CLI's own `--help` stays the command reference): `ln -s "$PWD/skills/mcdebug" ~/.claude/skills/mcdebug`.
+
+Below, `mcdebug` stands for `java -jar mcdebug-cli.jar` or the native binary (`mdb`, see
+[Native-image distribution](#native-image-distribution)). Tagged releases attach
+`mcdebug-cli.jar` and the mod jar to the GitHub Release; the CLI also carries the mod jar of its
+own build (`mcdebug jar`).
 
 Fabric project setup itself: <https://docs.fabricmc.net/develop/getting-started/creating-a-project#setting-up>.
 
@@ -38,7 +45,12 @@ Fabric project setup itself: <https://docs.fabricmc.net/develop/getting-started/
 The build product is a **normal mod jar** — copy it into the target environment's `mods/`
 and restart. Server and client use the *same* jar (`environment: "*"`, both entrypoints);
 the consumer project needs **zero changes** (no dependency, no plugin, no extra script).
-Remove the old jar first — two mcdebug jars in one `mods/` fail to load.
+Remove the old jar first — two mcdebug jars in one `mods/` fail to load. The CLI carries the
+mod jar of its own build, so this does both (same version as the CLI, no download):
+
+```bash
+mcdebug jar --output path/to/consumer/run/mods   # writes mcdebug-<version>.jar, removes older mcdebug-*.jar
+```
 
 A single-player client runs both planes in one process, so `world.*`/`be.*`/`inv.*` and
 `gui.*` are both available against the same integrated server.
@@ -68,13 +80,11 @@ every other method uses the server plane.
 ## CLI usage
 
 ```bash
-node bin/mcdebug.js status                                   # server.status (unix socket)
-node bin/mcdebug.js raw world.getBlock '{"pos":[0,64,0]}'
-node bin/mcdebug.js --tcp 192.168.5.102:25580 status          # cross-machine
-node bin/mcdebug.js -c 'status' -c 'world get-block --x 0 --y 64 --z 0' --batch   # one connection, fail fast
-
-pnpm dlx @yu1745/mcdebug status                               # published package
-pnpm dlx 'github:yu1745/mcdebug#v0.5.0' snapshot capture --from 0,64,0 --to 2,66,2 --include block,inventory
+mcdebug status                                   # server.status (unix socket)
+mcdebug raw world.getBlock '{"pos":[0,64,0]}'
+mcdebug --tcp 192.168.5.102:25580 status          # cross-machine
+mcdebug -c 'status' -c 'world get-block --x 0 --y 64 --z 0' --batch   # one connection, fail fast
+mcdebug snapshot capture --from 0,64,0 --to 2,66,2 --include block,inventory
 ```
 
 Exit codes: `0` success (including business-level `ok:false` / `equal:false` — check the JSON),
@@ -89,16 +99,16 @@ Use `mcdebug raw <namespace.method> <json>` for anything without a dedicated com
 | namespace | purpose |
 |---|---|
 | `world.*` | blocks, regions, use/attack/interact, forceload |
-| `be.*` | block-entity NBT and fields; `be.tick` drives a BE ticker N times |
-| `inv.*` | item slots of a block entity |
+| `be.*` | block-entity NBT and fields; `be.tick` drives one BE ticker N times (0..12000 per call) |
+| `inv.*` | slot-level access to a vanilla `Container` (`getSlot`/`setSlot`); for moving items prefer `storage.*` |
 | `storage.*` | unified item/fluid/energy access for blocks, entities, item stacks |
-| `fluid.*` / `craft.*` / `scan.*` / `entity.*` / `fixture.*` | fluids, recipes, searches, entities, region fixtures |
+| `fluid.*` / `craft.*` / `scan.*` / `entity.*` / `fixture.*` | per-tank fluids (generic form: `storage.*` with `fabric:fluid`), recipes, searches, entities, region fixtures |
 | `snapshot.*` / `trace.*` | capture + diff state; record frames on natural ticks |
-| `screen.*` | open/drive server-side `ScreenHandler`s with a fake player (**slot JSON, no pixels**) |
+| `screen.*` | open/drive server-side menus (`AbstractContainerMenu`) with a fake player (**slot JSON, no pixels**) |
 | `gui.*` | **client plane**: real GUI screenshots + Screen clicks (see below) |
 | `redstone.*` | read power, set/pulse levers, neighbor updates |
 | `wait.until` | wait for a predicate on natural server ticks (never drives ticks) |
-| `reflect.*` | resolve/call/new/release any class at runtime |
+| `reflect.*` | resolve/get/call/new any class at runtime; Mojang or intermediary names work in dev and production (table generated for this Minecraft version) |
 
 `storage.*` resolves handles in order: vanilla `Inventory` → Fabric `ItemStorage` → Fabric
 `FluidStorage` → Team Reborn `EnergyStorage`; targets are `{kind:"block"|"entity"|"item", ...}`
@@ -107,7 +117,18 @@ and results carry ids like `vanilla:inventory`, `fabric:item`, `fabric:fluid`,
 mod-specific NBT pokes.
 
 The server never exposes `tick.run`/`tick.runUntil`: `trace.*` and `wait.until` observe natural
-ticks only. The predicate DSL (`be[x,y,z].<path> <op> <value>`, `AND/OR/NOT`, `sum(...)`,
+ticks only (`be.tick` is the one bounded exception: it runs a single block entity's ticker).
+
+Params: a box is `{"from":[x,y,z],"to":[x,y,z]}` (corners in any order, both inclusive; for entity
+queries the whole blocks). A missing or mistyped param is `-32602` naming the param; an unexpected
+server exception is `-32603` with `data.exception` and `data.at` (top stack frames).
+`snapshot.diff` leaves out the always-changing `/tick` and `/time` unless `"ignoreMeta":false`:
+
+```bash
+mcdebug raw snapshot.diff '{"before":{"tick":1,"blocks":[]},"after":{"tick":9,"blocks":[]}}'   # equal:true
+mcdebug raw scan.findEntities '{"box":{"from":[0,64,0],"to":[0,64,0]}}'   # entities in that one block
+mcdebug raw reflect.resolve '{"class":"BlockEntity"}'   # runtimeClass + mojangClass
+``` The predicate DSL (`be[x,y,z].<path> <op> <value>`, `AND/OR/NOT`, `sum(...)`,
 comparisons) is documented in `mcdebug --help` under `wait-until` and in AGENTS.md §7.
 
 ## Managed sessions (Linux, local clients)
@@ -170,7 +191,7 @@ RPC authentication**.
 should go through `session stop`. After deploying/publishing this build, raw access is also available:
 
 ```bash
-pnpm dlx @yu1745/mcdebug --session demo raw gui.stop '{"instanceId":"INSTANCE_FROM_GUI_STATUS_PROCESS","sessionToken":"TOKEN_FROM_GUI_STATUS_PROCESS"}'
+mcdebug --session demo raw gui.stop '{"instanceId":"INSTANCE_FROM_GUI_STATUS_PROCESS","sessionToken":"TOKEN_FROM_GUI_STATUS_PROCESS"}'
 ```
 
 Raw RPC bypasses the CLI's owned/attached policy deliberately; it is not a security boundary.
@@ -214,7 +235,7 @@ launch then logs `Failed to read level ... already locked` and falls back to the
 ```bash
 # The agent loop: set the machine up on the server plane, look at it on the client plane.
 mcdebug raw world.setBlock '{"pos":[100,64,100],"block":"minecraft:chest"}'
-mcdebug raw inv.setSlot   '{"pos":[100,64,100],"slot":"0","item":"minecraft:diamond","count":5}'
+mcdebug raw inv.setSlot   '{"pos":[100,64,100],"slot":0,"item":"minecraft:diamond","count":5}'
 mcdebug gui open-block --x 100 --y 64 --z 100
 mcdebug gui screenshot --mode gui --annotate         # only the machine GUI, plus *.annotated.png with numbered slots/widgets
 mcdebug gui click --slot 0 --shot gui                # server-authoritative slot click, settle, new screenshot: one round trip
@@ -312,18 +333,18 @@ The pieces an agent needs to change GUI code and see the result without a human,
   incoming RPC, so a hop no longer waits out the rest of a 1/loopFps sleep.
 
 ```bash
-pnpm dlx @yu1745/mcdebug --session demo raw gui.act '{"action":"click","params":{"slot":0},"screen":true,"screenshot":{"mode":"gui","annotate":true}}'
-pnpm dlx @yu1745/mcdebug --session demo raw gui.settle '{"maxTicks":40,"quietTicks":2}'
-pnpm dlx @yu1745/mcdebug --session demo raw gui.screenshot '{"mode":"gui","drawLog":true,"format":"none"}'
-pnpm dlx @yu1745/mcdebug --session demo raw gui.click '{"widget":2}'
-pnpm dlx @yu1745/mcdebug --session demo raw gui.problems '{"since":1,"level":"error","limit":50}'
-pnpm dlx @yu1745/mcdebug --session demo raw gui.reinit '{}'
-pnpm dlx @yu1745/mcdebug --session demo gui hotswap --classes build/classes/kotlin/client   # raw gui.hotswap needs the agent attached first
-pnpm dlx @yu1745/mcdebug --session demo raw gui.reloadScreen '{"dirs":["build/classes/kotlin/client"]}'
-pnpm dlx @yu1745/mcdebug --session demo raw gui.hover '{"slot":0}'
-pnpm dlx @yu1745/mcdebug --session demo raw gui.scroll '{"gui":[100,80],"dy":-3}'
-pnpm dlx @yu1745/mcdebug --session demo raw gui.openScreen '{"screen":"com.example.dev.Fixtures#machineScreen"}'
-pnpm dlx @yu1745/mcdebug --session demo raw gui.screenshot '{"mode":"gui","cursor":"hide"}'
+mcdebug --session demo raw gui.act '{"action":"click","params":{"slot":0},"screen":true,"screenshot":{"mode":"gui","annotate":true}}'
+mcdebug --session demo raw gui.settle '{"maxTicks":40,"quietTicks":2}'
+mcdebug --session demo raw gui.screenshot '{"mode":"gui","drawLog":true,"format":"none"}'
+mcdebug --session demo raw gui.click '{"widget":2}'
+mcdebug --session demo raw gui.problems '{"since":1,"level":"error","limit":50}'
+mcdebug --session demo raw gui.reinit '{}'
+mcdebug --session demo gui hotswap --classes build/classes/kotlin/client   # raw gui.hotswap needs the agent attached first
+mcdebug --session demo raw gui.reloadScreen '{"dirs":["build/classes/kotlin/client"]}'
+mcdebug --session demo raw gui.hover '{"slot":0}'
+mcdebug --session demo raw gui.scroll '{"gui":[100,80],"dy":-3}'
+mcdebug --session demo raw gui.openScreen '{"screen":"com.example.dev.Fixtures#machineScreen"}'
+mcdebug --session demo raw gui.screenshot '{"mode":"gui","cursor":"hide"}'
 ```
 
 Measured on one machine (llvmpipe software GL, 854×480, `demand` mode, same world; RPC over the Unix
@@ -352,10 +373,10 @@ mcdebug --session demo gui type --text '机器 GUI 😀' --clear
 mcdebug --session demo gui key --key ENTER
 mcdebug --session demo gui drag --from 100,80 --to 220,80 --steps 8 --step-ticks 1
 mcdebug --session demo gui disconnect --wait-ticks 200
-pnpm dlx @yu1745/mcdebug --session demo raw gui.key '{"key":"A","modifiers":2}'
-pnpm dlx @yu1745/mcdebug --session demo raw gui.type '{"text":"机器 GUI","clear":true}'
-pnpm dlx @yu1745/mcdebug --session demo raw gui.drag '{"from":[100,80],"to":[220,80],"steps":8,"stepTicks":1}'
-pnpm dlx @yu1745/mcdebug --session demo raw gui.disconnect '{"waitTicks":200}'
+mcdebug --session demo raw gui.key '{"key":"A","modifiers":2}'
+mcdebug --session demo raw gui.type '{"text":"机器 GUI","clear":true}'
+mcdebug --session demo raw gui.drag '{"from":[100,80],"to":[220,80],"steps":8,"stepTicks":1}'
+mcdebug --session demo raw gui.disconnect '{"waitTicks":200}'
 ```
 
 Only one input operation is active at once. Drag has a 30-second total cap, 1..128 segments,
@@ -427,8 +448,8 @@ For example (use the consumer project's own task/save):
 ```bash
 MCDEBUG_CLIENT_RENDER_MODE=demand MCDEBUG_CLIENT_IDLE_FPS=0 DISPLAY=:0 \
   ./gradlew runClient --args='--width 854 --height 480 --quickPlaySingleplayer "New World"'
-pnpm dlx @yu1745/mcdebug raw gui.status '{}'
-pnpm dlx @yu1745/mcdebug raw gui.screenshot '{"mode":"gui","delayTicks":0}'
+mcdebug raw gui.status '{}'
+mcdebug raw gui.screenshot '{"mode":"gui","delayTicks":0}'
 ```
 
 `gui.status.render` reports policy, rendered/skipped counts and pending captures. This reduces
@@ -478,24 +499,6 @@ api.redstone.pulse(listOf(0, 65, 0), 4)
 There is deliberately no `gui.*` binding in the runner: pixels need a real client, so GUI checks
 belong in an agent/CLI loop, not in the headless JUnit grid.
 
-## Forge 1.20.1 port
-
-`forge/` is a native Forge port of the same server plane (same methods, parameters, result shapes
-and error codes; the CLI works unchanged). Independent Gradle 8.1.1 + ForgeGradle 6 build, wired
-into the root build as `:forge`:
-
-```bash
-./gradlew :forge:build        # -> forge/build/libs/mcdebug-forge-<version>.jar
-./build.sh                    # dist/ gets the Fabric jars AND the Forge jar
-scripts/forge-smoke.sh        # dev GameTest server + CLI assertions + contract parity (no EULA)
-```
-
-Differences: storage handles map to Forge capabilities (`fabric:item`=`ITEM_HANDLER`,
-`fabric:fluid`=`FLUID_HANDLER`, `teamreborn:energy`=`ENERGY`/FE — ids kept for CLI compatibility),
-**fluid amounts are mB** (1000/bucket) instead of Fabric droplets, the fake player is Forge's
-`FakePlayer`, `reflect.*` uses Mojang class names, and there is **no `gui.*` client plane** (Forge
-client agent not implemented). See AGENTS.md §13.
-
 ## Native-image distribution
 
 JVM cold start is ~790 ms; the GraalVM native binary starts in **~11 ms** with no runtime
@@ -508,9 +511,7 @@ GRAALVM_HOME=/path/to/graalvm ./scripts/build-native.sh    # -> dist/mdb (~42 MB
 ./dist/mdb --tcp <host[:port]> status                      # cross-machine TCP
 ```
 
-Server distribution is described in the server repo's `registry/scripts.yaml`. The npm shell
-(`bin/mcdebug.js` / `pnpm dlx`) still works for local use but is deprecated for distribution — the
-native binary is too large for npm, and servers do not need pnpm.
+Server distribution is described in the server repo's `registry/scripts.yaml`.
 
 ## License
 

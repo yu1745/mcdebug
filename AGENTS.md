@@ -1,8 +1,8 @@
-# mcdebug — AGENTS.md（贡献者指南 + 容器手册）
+# mcdebug — AGENTS.md（贡献者指南）
 
-本文件是 mcdebug 的唯一开发指南：§1–§14 是仓库/协议/验证规则，§15 是本地隔离测试容器的重建手册。
+本文件是 mcdebug 的唯一开发指南（仓库/协议/验证规则）。1.20.1 线（`main` 分支，yarn 映射，Kilt 容器测试环境）已归档，不再回移。
 
-Fabric 1.20.1 + Kotlin Mod，提供 JSON-RPC 服务，让 Kotlin CLI / JUnit runner 远程读写世界/方块实体/物品栏/资源存储/快照/GUI，**用于 Mod 开发者自动化测试自己的机器方块**（Kotlin JUnit 5，见 ic2-fabric 的 `core/src/mcdebugTest/`）。
+Fabric 1.21.1（Mojang 官方映射）+ Kotlin Mod，提供 JSON-RPC 服务，让 Kotlin CLI / JUnit runner 远程读写世界/方块实体/物品栏/资源存储/快照/GUI，**用于 Mod 开发者自动化测试自己的机器方块**（Kotlin JUnit 5，见 ic2-fabric 的 `core/src/mcdebugTest/`）。
 
 ```
 ┌─────────────────┐  JSON-RPC 2.0   ┌──────────────────┐
@@ -24,34 +24,34 @@ Fabric 1.20.1 + Kotlin Mod，提供 JSON-RPC 服务，让 Kotlin CLI / JUnit run
 - **绝对不要**把 `build/libs/*.jar` 复制到 **mcdebug 自己的** `run/mods/`。Loom dev-launch-injector 会自动从 `build/classes/kotlin/main`（客户端平面是 `build/classes/kotlin/{main,client}`）注入 classpath，副本会和注入版本冲突，源码改了也不生效。
 - 反过来，**别的项目（消费者项目 A）的 `run/mods/` 就是发布 jar 的正常部署位置**：把 `build/libs/mcdebug-<version>.jar` 拷进去当普通 mod 用，一个 jar 同时提供服务端平面和客户端平面。放新 jar 前先删掉旧版本（`mods/` 里两份同 modid 会加载失败/加载到旧的）。
 - **绝对不要**暴露 `tick.run` / `tick.runUntil` 之类主动推进 server tick 的 RPC。tick 由游戏引擎驱动，mod 只观察不控制。断言统一走 `wait.until`（注册 `ServerTickEvents.END_SERVER_TICK` 回调检查条件）。
+  - 唯一例外 `be.tick`：在 server 线程把**单个** BE 的 ticker 同步跑 N 次（0..12000，上限防止卡死 server 线程），不推进世界时间、不 tick 邻居。ic2 机器测试靠它把十几秒的自然等待压到毫秒级。不要以它为先例增加别的驱动型 RPC。
 - 服务端默认监听 `0.0.0.0`，容器部署时通过端口发布规则或防火墙限制访问范围。
 - 不要在 `src/main/resources/assets/mcdebug/` 之外加资源（避免污染上游资源命名空间）。
 
 ## 2. 目录结构
 
-Gradle 根项目 + `contract`/`cli` 子项目 + `forge`（委托项目，见 §13）。Gradle 插件、Kotlin test DSL、反编译源码参考均已不在仓库中（见 §12）。
+Gradle 根项目 + `contract`/`cli` 子项目。Gradle 插件、Kotlin test DSL、反编译源码参考均已不在仓库中（见 §12）。
 
 ```
 mcdebug/
-├── build.gradle              # Fabric 1.20.1 + Kotlin 2.3.10 + fabric-language-kotlin 1.13.9
+├── build.gradle              # Fabric 1.21.1（Mojang 映射）+ Kotlin；generateReflectMappings 生成 reflect 映射表
 ├── gradle.properties         # 锁版本（参考 ic2-fabric 工作配置）
 ├── settings.gradle
 ├── AGENTS.md
 ├── contract/                 # 共享契约（方法名清单 + DTO 样板，零依赖）
-├── forge/                     # Forge 1.20.1 原生移植（独立 Gradle 8.1.1 + ForgeGradle 6 构建，见 §13）
 ├── cli/                       # Kotlin CLI（clikt）+ SDK + JUnit runner
 │   └── src/main/kotlin/com/mcdebug/{cli,runner}/
-├── mcdebug-cli.jar            # CLI fat jar（固定名，进 git，随 tag 分发）
-├── package.json               # npm 壳包：bin/mcdebug.js 一行透传 java -jar
-└── bin/mcdebug.js             # 壳脚本（pnpm dlx 拉包后 jar 在包内）
+├── mcdebug-cli.jar            # :cli:copyCliJar 产物（不进 git；发版由 release.yml 作为 Release 附件上传，内含 mod jar）
 ├── src/main/
 │   ├── kotlin/com/mcdebug/
 │   │   ├── McDebugMod.kt         # server entrypoint，注册 server lifecycle 钩子（+ ServerPlane）
 │   │   ├── rpc/                  # 传输 + 协议层（JsonRpc/RpcServer/RpcDispatcher/RpcErrors/RpcHandler/TransportConfig）
-│   │   ├── api/                  # WorldOps / BlockEntityOps / InventoryOps / CraftingOps / FluidOps
-│   │   │                         #   ScanOps / ServerOps / StorageOps / SnapshotOps / TraceOps / ScreenOps / FakePlayer
+│   │   ├── api/                  # WorldOps（方块/区域）+ WorldPlayerActions（假玩家放置/使用/攻击/交互）
+│   │   │                         #   BlockEntityOps / InventoryOps / CraftingOps / FluidOps / ScanOps / ServerOps / StorageOps
+│   │   │                         #   SnapshotOps / TraceOps / ScreenOps / EntityOps / FixtureOps / RedstoneOps / ReflectOps / FakePlayer
+│   │   │                         #   Params.kt：所有 handler 共用的参数读取（requirePos/requireBox/requireInt…，缺参/类型错 → -32602）
 │   │   ├── wait/WaitOps.kt       # wait.until — 被动观察
-│   │   └── util/{NbtJson,ServerContext}.kt
+│   │   └── util/{NbtJson,ServerContext,Mappings}.kt   # Mappings：reflect.* 的 intermediary↔Mojang 名字翻译
 │   └── resources/
 │       ├── fabric.mod.json       # environment "*" + server/client 两个 entrypoint（Kotlin 需 "adapter": "kotlin"）
 │       ├── mcdebug.mixins.json   # 服务端 mixin 配置（当前为空占位）
@@ -77,7 +77,7 @@ mcdebug/
   - `StorageOps` ↔ `storage.*`
   - `SnapshotOps` ↔ `snapshot.*`
   - `TraceOps` ↔ `trace.*`
-  - `ScreenOps` ↔ `screen.*`（服务端假玩家菜单，只有槽位 JSON，**没有像素**）
+  - `ScreenOps` ↔ `screen.*`（服务端假玩家菜单 `AbstractContainerMenu`，只有槽位 JSON，**没有像素**；名字沿用旧称，不是 Mojang 的 `Screen`）
   - `GuiOps` ↔ `gui.*`（`src/client`，真实客户端渲染/截图/Screen 事件，**像素只能由这里产生**）
 - 错误码：JSON-RPC 标准 `-32700..-32603` + 自定义 `-32001..-32021`（在 `RpcErrors` 中）。客户端平面新增 `-32020 CLIENT_NOT_READY`（客户端没起来/没进世界）、`-32021 GUI_ELEMENT_NOT_FOUND`（`gui.click --text` 找不到控件，data 里带可选控件列表）
 - **平面（plane）**：`world.*`…=服务端平面（`src/main`，`server` entrypoint）；`gui.*`=客户端平面（`src/client`，`client` entrypoint）。两边在同一份 jar 里，方法名清单由 `contract/Methods.kt` 的 `SERVER_METHODS` / `CLIENT_METHODS` 声明（`RpcContractTest` 双向校验服务端侧 + 两平面不相交；客户端侧的注册表在客户端启动时自检，见 §14）
@@ -127,13 +127,10 @@ java -jar mcdebug-cli.jar gui screenshot --out /tmp/shot.png
 
 # CLI 端（Kotlin fat jar）
 ./gradlew :cli:copyCliJar     # 产出根目录 mcdebug-cli.jar
-node bin/mcdebug.js --help    # 查看所有 CLI 命令
-node bin/mcdebug.js status    # 调用 server.status RPC（unix socket，本机）
-node bin/mcdebug.js --tcp 192.168.5.102:25582 status   # 跨机访问（TCP）
-
-# pnpm dlx（发布包或 GitHub 根目录直装）
-pnpm dlx @yu1745/mcdebug status
-pnpm dlx 'github:yu1745/mcdebug#v0.5.0' raw storage.list '{"target":{"kind":"block","pos":[0,64,0]}}'
+java -jar mcdebug-cli.jar --help    # 查看所有 CLI 命令
+java -jar mcdebug-cli.jar status    # 调用 server.status RPC（unix socket，本机）
+java -jar mcdebug-cli.jar --tcp 192.168.5.102:25582 status   # 跨机访问（TCP）
+java -jar mcdebug-cli.jar jar --output ../consumer/run/mods  # 写出内嵌的同版本 mod jar 并删旧版
 ```
 
 > 反编译 MC / Fabric API 源码（参考用，不参与编译、不进仓库）：`./gradlew genSources`，
@@ -147,7 +144,7 @@ pnpm dlx 'github:yu1745/mcdebug#v0.5.0' raw storage.list '{"target":{"kind":"blo
 3. 类型在 `RpcHandlerGroup.methods(): Map<String, RpcHandler>` 注册
 4. **同步 `contract/src/main/kotlin/com/mcdebug/contract/Methods.kt`**：在对应组 setOf 中加方法名（`RpcContractTest` 会双向校验，漏加或写错直接构建失败）；有需要时同时补充 DTO 到 `contract/.../<Group>Dtos.kt`（字段名 = JSON 字段名，服务端 Gson 与未来 Kotlin 客户端共用）
 5. 对应在 `cli/src/main/kotlin/com/mcdebug/cli/DebugApi.kt` 加方法，参数与返回对齐
-6. CLI 命令在 `cli/src/main/kotlin/com/mcdebug/cli/commands/<Group>Commands.kt` 注册；没有专用 CLI 子命令时，至少更新 `raw`/REPL help 和 README 的 `pnpm dlx` 示例
+6. CLI 命令在 `cli/src/main/kotlin/com/mcdebug/cli/commands/<Group>Commands.kt` 注册；没有专用 CLI 子命令时，至少更新 `raw`/REPL help 和 README 的 `mcdebug raw` 示例
 7. 重新 `./gradlew :cli:copyCliJar`（CLI fat jar）和 `./gradlew build`（契约测试 + 服务端）
 
 ## 7. Tick 设计原则
@@ -167,14 +164,16 @@ pnpm dlx 'github:yu1745/mcdebug#v0.5.0' raw storage.list '{"target":{"kind":"blo
 ## 8. 提交前验证
 
 - 改 Kotlin：`./gradlew build` 通过（0 warning, 0 error）
-- 改 Kotlin 逻辑（解析器/NBT/谓词）：`./gradlew test` 通过（JUnit5，`src/test/kotlin/`）。现有测试：`PredicateExprTest`（谓词 DSL 解析+求值，~48 例）、`NbtJsonTest`（`#nbt` 标注+往返，~29 例）
+- 改 Kotlin 逻辑（解析器/NBT/谓词/参数）：`./gradlew test` 通过（JUnit5，`src/test/kotlin/`）。服务端平面现有测试：`PredicateExprTest`（谓词 DSL）、`NbtJsonTest`（`#nbt` 标注+往返）、`ParamsTest`（参数校验与错误码）、`MappingsTest`（生成的映射表对应本 MC 版本）、`SnapshotOpsTest`、`RpcContractTest`、`RpcServerBindTest`
+- 新 handler 读参数一律用 `api/Params.kt`（`requirePos`/`requireBox`/`requireInt`/`requireObject`…），不要直接 `getAsJsonArray(...)`/`get(...).asInt`：缺参会变成 `-32603` 的 Kotlin 空检查文本。意外异常由 `RpcErrors.internal` 包成 `-32603`，`data` 里带异常类和栈顶几帧
 - 改 CLI/SDK：`./gradlew :cli:copyCliJar` 通过
 - 改 entrypoint/资源：手动 `./gradlew runServer` 启动一次确认 mod 加载 + RPC 监听
-- 改冒烟脚本：`scripts/fabric-smoke.sh`（专用服）与 `scripts/forge-smoke.sh`（Forge GameTest 服）**共用** `scripts/contract-parity.py` 做契约+平面隔离校验——两个脚本各自内联解析 `Methods.kt` 会漂移（曾漏掉"排除客户端平面 `gui.*`"和"按 id 匹配响应"，报出假的 `inv.extract` 缺失）。改一处即可，别复制粘贴回去
+- 改冒烟脚本：`scripts/fabric-smoke.sh`（专用服）用 `scripts/contract-parity.py` 做契约+平面隔离校验（必须按 id 匹配响应、排除客户端平面 `gui.*`，曾因此报出假的 `inv.extract` 缺失），别再把解析内联回 shell
 - 改 `src/client/**`（客户端平面）：`./gradlew compileClientKotlin` + `./gradlew build`（后者含 `verifyJarSelfContained`，见 §14）；真机验证要起 `runClient` 并用 CLI 打 `gui.*`（Java/Kotlin 改动必须重启客户端，只有贴图/语言/模型改动可以 `gui reload-resources`）
 - **发布 jar 必须自包含**：`verifyJarSelfContained` 已挂在 `check` 上，缺失入口点运行时用到的类/资源会直接构建失败。历史上 `implementation project(':contract')` 就是这么炸的（dev classpath 有、jar 里没有 → 别的项目里 `NoClassDefFoundError`）
 - 改了 API/CLI 协议：两端一起改，Kotlin 端 `DebugApi` 强类型签名是契约（`RpcContractTest` 双向校验方法名）
-- 改了用户可见 RPC：更新 `README.md`，尤其要给 `pnpm dlx ... raw namespace.method` 示例
+- 改了 agent 工作流相关的 CLI 行为（命令名、默认值、推荐用法）：同步 `skills/mcdebug/SKILL.md`（给消费者项目里的 agent 用；命令细节留在 `--help`，skill 只写流程和坑）
+- 改了用户可见 RPC：更新 `README.md`，尤其要给 `mcdebug raw namespace.method '{...}'` 示例
 - 测试编排统一在消费者项目（Kotlin JUnit，`@McDebugTest` runner）；mod 端不做任何 test DSL / 注解扫描
 - 改 mcdebug 默认端口 / 协议层：先在 plan 文件里讨论再动
 
@@ -183,57 +182,55 @@ pnpm dlx 'github:yu1745/mcdebug#v0.5.0' raw storage.list '{"target":{"kind":"blo
 - 看 RPC socket：`cat run/mcdebug/port`（内容为 socket 路径）；TCP 端口：`cat run/mcdebug/tcpPort`
 - 实时看 server 日志：`run/logs/latest.log`（loom 写文件 + stdout）
 - Loom 缓存了旧 remap jar：清 `run/.fabric/processedMods/`，再 `./gradlew build`
-- CLI 快速调试：`node bin/mcdebug.js raw world.getBlock '{"pos":[0,64,0]}'`（本机 socket）；跨机：`node bin/mcdebug.js --tcp host:port ...`
-- pnpm 快速调试：`pnpm dlx 'github:yu1745/mcdebug#v0.5.0' raw storage.list '{"target":{"kind":"block","pos":[0,64,0]}}'`
+- CLI 快速调试：`java -jar mcdebug-cli.jar raw world.getBlock '{"pos":[0,64,0]}'`（本机 socket，或用 native 版 `mdb`）；跨机：`--tcp host:port ...`
 
 ## 10. 版本更新规则
 
-版本源是 `gradle.properties` 的 `mod_version`。不要手工逐个改版本号；使用脚本一次性同步 Gradle、npm 包声明、CLI version source 和 dist 输出。
+版本唯一来源是 `gradle.properties` 的 `mod_version`（mod jar 名、`fabric.mod.json`、CLI manifest `Implementation-Version`、Release 都由它派生）。
 
 ```bash
 node scripts/set-version.mjs X.Y.Z
 ```
 
-脚本会更新：
-
-| # | 文件 | 字段 | 用途 |
-|---|------|------|------|
-| 1 | `gradle.properties` | `mod_version=X.Y.Z` | Fabric mod 版本（Gradle → fabric.mod.json `${version}`） |
-| 2 | `package.json` | `"version": "X.Y.Z"` | npm 壳包版本（与 tag 一致） |
 
 ### 发版检查清单
 
 ```
 □ node scripts/set-version.mjs X.Y.Z
-□ ./gradlew :cli:copyCliJar            ← fat jar 重新打包（含 Implementation-Version）
-□ ./gradlew build                      ← 契约测试 + 单测
-□ node bin/mcdebug.js --version        ← 必须输出 X.Y.Z
-□ git add -A && git commit -m "vX.Y.Z: ..."
+□ ./gradlew build :cli:copyCliJar      ← 契约测试 + 单测 + fat jar（内嵌同版本 mod jar）
+□ java -jar mcdebug-cli.jar --version  ← 必须输出 X.Y.Z
+□ git commit -m "vX.Y.Z: ..."
 □ git tag -a vX.Y.Z -m "..."
-□ git push origin main && git push origin vX.Y.Z
-□ pnpm dlx 'github:yu1745/mcdebug#vX.Y.Z' --version ← 确认 X.Y.Z（jar 在包内）
+□ git push origin 1.21.1 && git push origin vX.Y.Z   ← 1.21.1 是活跃分支（main = 归档的 1.20.1 线）
+□ Release 页有 mcdebug-X.Y.Z.jar / mcdebug-cli.jar 及 .sha256（release.yml 生成；tag 与 mod_version 不符会失败）
 ```
 
 ### 踩过的坑
 
 - **artifactId 用了项目名**：`cli` 子项目发布到 mavenLocal 时 artifactId 默认是 `cli`；已显式设为 `mcdebug-cli`。
-- **旧 TS 壳（0.4.x）**：mcdebug-client 子包已退役（0.5.0 起根目录 npm 壳 + Kotlin jar）。不要在根目录之外重新创建 TS 包。
+- **npm/pnpm 分发已全部移除**：0.4.x 的 TS 客户端（`mcdebug-client/`）0.5.0 退役；0.5.0–0.6.2 的根目录 npm 壳（`package.json` + `bin/mcdebug.js`，`pnpm dlx github:yu1745/mcdebug#vX`）0.6.3 删除，它是 CLI jar 必须进 git 的唯一原因。不要再加回 npm 包。
 
 ## 11. 已知小问题
 
 - `be.setNbt` 用 `readNbt` 重置整个 NBT；某些 BlockEntity 子类可能不会完全重新初始化（红石信号、缓存等）
-- `wait.until` 在断连时不会主动取消服务端回调，依赖 tick listener 的 `future.isDone` 自检
 - `ScanOps.countByBlock` 在 box 很大时是 O(N)，加 chunk 进度回调再说
 - `world.getRegion` / `world.selectBlocks` 的 `ensureChunkLoaded` 只检查不加载，遇到未加载 chunk 直接抛 `CHUNK_NOT_LOADED`；而 `setBlock(s)` / `getBlock` 不做该检查，chunk 状态行为在 `world.*` 各方法间不完全一致
 - `FakePlayerPool` 是 per-(server,world) 单例且每次调用 mutate 其 position/yaw/手部状态：同一 ServerWorld 上并发 RPC（例如两个 CLI 连接同时 useOnBlock）会互相踩；test-runner 用网格隔离缓解了，但单连接内混用需注意
 - `NbtJson.fromJson` 有损：JSON 数字统一成 `NbtInt`，无法区分 byte/short/int/long；某些 BE 字段（byte 标志位、long 坐标）需要精确类型时可能出错
 - MCP adapter 没做（对话中"Layer 4"）
-- 专用 CLI 子命令暂未覆盖 `storage.*` / `snapshot.*` / `trace.*` / `screen.*`，目前通过 `raw`、REPL 和 TS `DebugApi` 调用
 - 自定义 storage adapter SPI 没做；特殊资源类型后续扩展
 - `modid.mixins.json` 是 Fabric 模板遗留；`mcdebug.mixins.json` 仍是空占位，真正在用的 mixin 位于客户端侧的 `mcdebug.client.mixins.json`（GUI 矩形访问器、渲染调度/新帧屏障、失焦策略/虚拟光标，见 §14）。三个配置文件都不要当成"没用的模板"删掉
+- `inv.*` 与 `storage.*` 有重叠：`inv.getSlot/setSlot` 是槽位级访问（storage 没有对应），保留；`inv.insert/extract` 和 `fluid.*` 是 `storage.*` 的特例，帮助文本已指向 storage，ic2 测试仍在用所以没删
+- 坐标参数在 CLI 有三种写法（`--x/--y/--z`、`--from "x,y,z"`、chunk 的 `--cx/--cz`），RPC 侧统一是 `[x,y,z]` 数组；没统一 CLI 是因为会破坏现有脚本
 - `inv.insert` / `inv.extract` 对目标方块已消失（如过压爆炸成 air）时报 `-32004 no block entity`，错误不够友好；改进：目标无 BE 时返回 `INVALID_TARGET`/`STORAGE_NOT_FOUND` 类错误并带 `reason`（ic2-fabric 过压测试曾踩中：机器放下即炸后 insertItem 必然撞上）
 
-## 11b. 已完成变更记录（v2 → 0.5.x）
+## 11b. 已完成变更记录（v2 → 0.6.x）
+
+- **0.6.3 服务端平面整理**
+  - reflect 映射表：删掉打包的 1.20.1 yarn/mojang 表（1.6MB，类名在 1.21.1 已对不上，如 BlockEntity 混淆名 `czn`→`dqh`），`generateReflectMappings` 构建时从 Loom 的 1.21.1 映射生成 intermediary↔Mojang 单表（~620KB）；运行时按 `currentRuntimeNamespace` 决定翻译方向（dev=Mojang、生产=intermediary），成员沿继承链查找，同名重载给出多个候选按参数挑。输出字段 `yarnClass/yarnName` → `mojangClass/mojangName`。顺带修了 `world.useItemHold` 在 dev 里找不到 `updatingUsingItem` 的问题（原来按 yarn 名 `tickActiveItemStack` 找）。
+  - 参数与错误：`api/Params.kt` 集中所有参数读取，缺参/类型错一律 `-32602` 并写明参数名（原来 42 处 `getAsJsonArray` 缺参时是 `-32603 ... must not be null`）；意外异常 `RpcErrors.internal` 带异常类与栈顶帧。
+  - `be.tick` 上限 0..12000（§1 例外条款）；`snapshot.diff` 默认忽略 `/tick` `/time`（`ignoreMeta:false` 才比较，CLI `--include-meta`）；`scan.findEntities` 改为整块包含语义（原来四周各扩 1 格）；`inv` 的 `slot` 接受数字；CLI `craft do` 的 `N=` 前缀真正按槽位放置并补齐 9 格；scan 帮助文本的返回形状改正。
+  - 删除 Forge 1.20.1 移植与两个 Kilt 时期诊断 RPC（见 §12）；`WorldOps.kt` 拆出 `WorldPlayerActions.kt`。
 
 - **GUI agent 迭代回路（1.21.1 线，未发版；设计与真机证据见 `docs/plan-gui-agent-loop.md`）**
   - 点击 settle（服务端 barrier + 2 tick 静默）取代固定 20 tick；`gui.act` 一次往返；`gui.settle`/`gui.reinit`/`gui.problems`/`gui.hotswap` 新方法；`gui.click {widget}`；`gui.screen` 递归控件、hover/focus/tooltip；截图 `annotate`/`drawLog`/`format:none`、只读回裁剪区、`pixelHash`；screen guard；轻量模式 RPC 唤醒限帧器；`gui compare --ignore/--report/--accept`；SDK `ScreenshotOptions`/`act`/`ScreenshotRegion`。
@@ -284,25 +281,28 @@ node scripts/set-version.mjs X.Y.Z
 - **Gradle 插件的 JitPack 构件**——已随 `gradle-plugin/` 子项目移除，不要恢复该插件或其坐标。
 - **Server mod jar 的 JitPack 构建仍在使用**。根项目是当前唯一的 Gradle 项目，`jitpack.yml` 通过 `publishToMavenLocal` 发布根项目的 `mavenJava` 构件。不要因为 Gradle 插件已移除而删除此配置。
   - `build.gradle` 里的 `maven { url "https://jitpack.io" }` 用于拉取第三方依赖，与本项目发布配置是两个不同用途。
-  - GitHub Release（`.github/workflows/release.yml`）同时提供 remapped jar，CLI 的 `mcdebug jar` 命令从 Release 下载并校验 sha256；它不取代 JitPack server jar 构建。
+  - GitHub Release（`.github/workflows/release.yml`）同时提供 remapped jar，给不用 CLI 的人；它不取代 JitPack server jar 构建。
+  - CLI 自带同一次构建的 mod jar（`cli/build.gradle` 把 `remapJar` 产物放进 fat jar 的 `META-INF/mcdebug/mod.jar`，native-image 由 `resource-config.json` 带上），`mcdebug jar [--output 文件|mods目录]` 直接写出、不联网。0.6.3 之前它从 Release 下载 + sha256 校验，没打 tag 的版本会 404，已删除。
 - **Kotlin test DSL / 注解扫描测试入口 / `scanPackages` 配置**——随 Gradle 插件一并移除。
+- **npm 壳包**（`package.json`、`bin/mcdebug.js`、`pnpm dlx` 用法）与进 git 的 `mcdebug-cli.jar`——0.6.3 移除，见 §10。
+- **Forge 1.20.1 原生移植**（`forge/` 嵌套 ForgeGradle 6 构建、`scripts/forge-smoke.sh`、`server.mantleInteract`/`server.forgeFluidCapability` 这两个 Kilt 时期的 Forge 诊断 RPC）——0.6.3 移除，1.20.1 线已归档。
+- **1.20.1 映射表**（`mappings/tiny-core.txt.gz` yarn、`mojang-core.txt.gz`）——0.6.3 起改为构建时从 Loom 生成 `mappings/reflect.txt.gz`（intermediary↔Mojang，必定与目标 MC 版本一致）。不要再手工打包映射表；yarn 名不再支持。
 - **`mc_source/` / `fabric-api_source/`**（反编译源码参考）——`.gitignore` 明确排除，永远不进仓库；需要时本地 `./gradlew genSources` 解压查看。
 
 本文件维护规则：改了仓库结构（新增/移除子系统、改发布通道、改默认端口/协议）必须同步本文件，避免下次又被旧描述带偏。
 
-## 13. Forge 1.20.1 原生移植（`forge/`，0.6.1 起）
+## 13. 查 Minecraft / Fabric API：看本地源码
 
-- **构建隔离**：ForgeGradle 6 跑不了根构建的 Gradle 9，所以 `forge/` 是**独立构建**（自带 wrapper = Gradle 8.1.1、`gradle.properties` 钉 JDK17、官方映射、KotlinForForge 4.11、Kotlin 2.3 编译器 + `apiVersion=1.9`，因为运行时 KFF 只带 1.9 标准库）。根 `settings.gradle` 把它作为委托项目 `:forge` 引入（`forge/delegate.gradle` 只是 Exec `forge/gradlew <task>`），所以 `./gradlew :forge:build` 和根 `./gradlew build` 都会构建它；产物 `forge/build/libs/mcdebug-forge-<mod_version>.jar`（版本取自根 `gradle.properties`，不单独 bump）。`./build.sh` 显式再跑一次 `:forge:build`，dist/ 里多一个 `mcdebug-forge-*.jar`。
-- **共享源码（不复制）**：`forge/build.gradle` 的 `syncShared` 把根 `src/main/kotlin/com/mcdebug/` 下与加载器无关的 `rpc/{JsonRpc,RpcErrors,RpcHandler,RpcServer,RpcEnv}.kt`、`wait/PredicateExpr.kt` 同步到 `forge/build/generated/` 编译。`RpcServer` 取游戏目录走 `RpcEnv.gameDir`（Fabric 在 `onInitializeServer` 里设 FabricLoader 的值，Forge 设 `FMLPaths.GAMEDIR`）。**改这几个文件时两端都要编译通过**；它们引用 `McDebugMod.LOGGER` / `MOD_VERSION` 与 `WaitOps.cancelConnection`，Forge 侧同名提供。
-- **移植的部分**（`forge/src/main/kotlin/com/mcdebug/`，Mojang 官方命名）：`McDebugMod`（`@Mod` + `ServerStartedEvent`/`ServerStoppingEvent`，只在服务端启动 RPC）、`api/*Ops`（16 组、80 个方法全部注册，`scripts/forge-smoke.sh` 会对照 `contract/Methods.kt` 逐个验证）、`util/{NbtJson,ServerContext,Mappings}`、`wait/WaitOps`。新增/改 RPC 方法时 Fabric 与 Forge 两端都要实现，并更新 `contract/Methods.kt`。
-- **与 Fabric 版的语义差异**（需在 README/排障时知道）：
-  - 存储走 Forge Capability：`vanilla:inventory`=`Container`，`fabric:item`=`ITEM_HANDLER`，`fabric:fluid`=`FLUID_HANDLER`(/`FLUID_HANDLER_ITEM`)，`teamreborn:energy`=`ENERGY`(FE)。句柄 id 沿用 Fabric 名（CLI 写死了它们），另接受 `forge:item|fluid|energy` 别名。
-  - **流体单位是 mB（1000/桶）**，Fabric 是 droplet（81000/桶）；流体结果带 `"unit":"mB"`。`fluid.insert --index` 无法指定罐（`IFluidHandler.fill` 不分罐），结果多一个 `changedTank`。
-  - 假玩家用 Forge `FakePlayer`（不进 `world.players`、不 tick），不是 Fabric 版手工 spawn 的 ServerPlayer；`UseEntityCallback` 等价物是手动调 `ForgeHooks.onInteractEntityAt`。
-  - `reflect.*`：只认 Mojang 官方类名；成员名在 dev 是官方名、生产是 SRG（`m_123_`），不带映射表（Fabric 版带 yarn/intermediary 表）。`reflect.mappings` 恒返回 available。
-  - `server.mantleInteract` 去掉了 Kilt 桥接的多步诊断 trace，只保留直接调用 Mantle `FluidTransferHelper.interactWithContainer` 的结果。
-- **运行/验证**：不要为 dedicated `runServer` 自行同意 EULA。用 `scripts/forge-smoke.sh`（起 `runGameTestServer`：开发用 GameTest 服务器不检查 EULA，`forge/src/devtest` 的 `RpcHold` 测试让它保持存活直到 flag 文件出现，该测试集只在 dev 运行时 classpath，不进 jar），或手动：`cd forge && ./gradlew runGameTestServer -PdevFlag=/tmp/x.done`，socket 在 `forge/run-gametest/mcdebug/socket`，结束时 `touch /tmp/x.done`。GameTest 服务器不限速 tick（1 秒可达数百上千 tick），`wait.until` 的 tick 数与实时时间无关。
-- 已知未验证：生产 Forge 服（SRG 运行时 + Connector 环境）下的行为；真正的 dedicated `runServer`/生产 `forge/` jar 放进 mods 的加载（只在 dev 的 userdev 环境验证了 mod 加载与全部 RPC）。
+遇到任何 Minecraft / Fabric API 的问题（类名、方法签名、继承链、事件、网络包），**直接查文件系统中的本地源码，不要猜、不要靠记忆、不要用 javap**：
+
+- MC 反编译源码（按版本）：`../mc_source_{version}/`
+  - `../mc_source_1.21.1/`（Mojang 官方名）
+- Fabric API 源码：`../fabric-api_{version}/`
+  - `../fabric-api_1.21.1/`（注意：fabric-api 树里它自己的 API 声明可信，但其中引用的 MC/JDK 方法名曾被工具损坏过，MC 名以 `mc_source_1.21.1` 为准）
+- mcdebug 用 Mojang 官方映射（`loom.officialMojangMappings()`），与 `mc_source_1.21.1` 直查一致。旧代码/文档里的 yarn 名要换成 Mojang 名时可复用 ic2 工具链：`../ic2-fabric-1.21.1/docs/yarn-to-mojang-1.21.1.tsv`（类/方法/字段）+ `tools/yarn2mojang.py` + `tools/bulk-rename-pass*.sed`。
+- mojang 侧两个 Kotlin 陷阱：私有字段与公有方法同名时（如 `Level.registryAccess`、`MinecraftServer.tickCount`、`BoundingBox.minX`），Kotlin 解析到私有字段报错，要用**调用形态**（`registryAccess()`、`minX()`）；`Registry.getId(x)` 在 mojang 是数字 id（IdMap），取注册名要用 `getKey(x)`。
+- 需要重新生成 MC 源码时：`sh gradlew genSources`，产物在**项目根目录**下的 `.gradle/loom-cache/minecraftMaven/net/minecraft/`（不是用户目录），解压其中 `*-sources.jar` 即得（按当前 mappings 命名）。
+- `mc_source_1.21.1` 里查不到的东西（fabric 专属 API）才去 `fabric-api_1.21.1` 查。
 
 ## 14. 客户端平面（`gui.*`，0.6.1 起）
 
@@ -325,7 +325,7 @@ node scripts/set-version.mjs X.Y.Z
 ### 14.1 实现不变式
 
 - **entrypoint 语义**：`fabric.mod.json` 的 `environment` 是 `"*"`，`server` entrypoint = `com.mcdebug.McDebugMod`（`DedicatedServerModInitializer`），`client` entrypoint = `com.mcdebug.client.McDebugClientMod`（`ClientModInitializer`）。loader 0.19.x **没有** `net.fabricmc.api.ServerModInitializer`，所以专用服务器不会触发 client entrypoint，而 client 上 server entrypoint **根本不触发**——单机客户端要两个平面都有，必须由 client entrypoint 自己调 `ServerPlane.installLifecycleHooks()`（它挂的是 `ServerLifecycleEvents`，集成服务器同样触发）。
-- **两个平面的端点必须区分**（单机客户端同进程同 gameDir）：服务端 `<gameDir>/mcdebug/socket` + 发现文件 `mcdebug/port`，TCP 25580 默认开；客户端 `<gameDir>/mcdebug/clientSocket` + `mcdebug/clientPort`，TCP **25581 默认关**（真实玩家客户端绝不能开）。配置键 `mcdebug.clientSocket`/`MCDEBUG_CLIENT_SOCKET`/json `clientSocket`（TCP 同理加 `client` 前缀）。`RpcServer` 的 `TransportConfig` 就是为这个抽的——它在 `RpcServer.kt` 里（Forge 会同步这个文件，所以不要把它挪到新文件）。
+- **两个平面的端点必须区分**（单机客户端同进程同 gameDir）：服务端 `<gameDir>/mcdebug/socket` + 发现文件 `mcdebug/port`，TCP 25580 默认开；客户端 `<gameDir>/mcdebug/clientSocket` + `mcdebug/clientPort`，TCP **25581 默认关**（真实玩家客户端绝不能开）。配置键 `mcdebug.clientSocket`/`MCDEBUG_CLIENT_SOCKET`/json `clientSocket`（TCP 同理加 `client` 前缀）。`RpcServer` 的 `TransportConfig` 就是为这个抽的——它在 `RpcServer.kt` 里。
 - **线程规则**：`gui.*` handler 的入参在 RPC 连接线程，一切客户端状态读写都要 `ClientTasks.onClient(client)`（`client.execute{}`，在客户端线程时内联执行）。**续接 future 也要用 `ClientTasks.thenOnClient`**：`thenApply` 在前一个 future 已完成时会跑在 RPC 线程上。截图先入有界队列，`MinecraftRenderMixin` 调原 `GameRenderer.render` 并 flush 后再由 `Capture.afterFrame` 在客户端线程读回新帧，PNG 编码/落盘才丢到 `Util.ioPool()`。**tick 不是新帧屏障**；不要用 `RenderSystem.recordRenderCall` 代替明确渲染完成点。业务等待仍是被动 tick 回调，同 §7 的"只观察不驱动"。
 - **点击报告与坐标**：四种点击方式都返回 `guiX/guiY`（slot = 槽中心）。截图 `transform.pixelsPerGuiXY=[sx,sy]` 来自实际渲染投影，不能用经过 ceil 的 guiScaledWidth 反推；PNG 坐标 = `[guiX*sx-crop[0], guiY*sy-crop[1]]`，`cropInGui` 保留浮点精度。`gui click --png` 反算 Screen 坐标；变换不是 GLFW 窗口坐标。
 - **点击与光标**：`Screen.mouseClicked/mouseReleased` 直接派发，slot 走 `GameMode.handleInventoryMouseClick`，服务端裁定。continuous 模式保留真实光标 warp（失焦时 MC 不更新内部鼠标）；轻量模式使用虚拟 Screen 光标，让手持物品/提示/高亮在后台也跟随 RPC 点击，不干扰桌面指针。`--no-cursor-move` 禁止更新光标。状态确认仍以服务端数据为准，截图不等于网络确认。
@@ -366,164 +366,10 @@ node scripts/set-version.mjs X.Y.Z
 
 - 第一版 backend 是目标项目自己的 Gradle wrapper + runClient（qualified task 也只允许 runClient），Linux setsid、日志重定向，无新 daemon、无 Gradle 插件、无独立 MC 实现。project 默认 CWD、gameDir 默认 project/run，子模块须显式 gameDir；显式相对路径相对 CWD。world 必须是已有 saves 目录名，不自动建/删世界，拒绝路径穿越及逃逸 symlink。
 - Registry 默认 XDG_STATE_HOME/mcdebug/sessions 或 ~/.local/state/mcdebug/sessions，每会话 JSON 含 schemaVersion/recordId、本次 token、启动配置、wrapper 与真实 MC 的 PID/startTime、instanceId、端点和日志。recordId 是 CAS 世代，不能只用 sessionToken（attached token 可以为空）。锁不能跨主线程 RPC/长等待持有；同 canonical gameDir 的 mdb.lock + mdb-owner.json 覆盖跨 registry/bootstrap 窗口。
-- server.ready 现在必须有 process 对象：pid、startTime（OS ProcessHandle 的 ISO Instant）、instanceId（每 JVM UUID）、sessionToken、canonical gameDir。两平面同 JVM 共用 RpcEnv 身份（Forge 同步 RpcEnv/RpcServer）；改共享文件两端都要编译。客户端原子发布 mcdebug/client.json，gui.status 同样返回 process。Session 路由不额外调用 status；实际 RPC 连接握手绑定完整 expectedProcess，禁止端点换实例后继续操作。
+- server.ready 现在必须有 process 对象：pid、startTime（OS ProcessHandle 的 ISO Instant）、instanceId（每 JVM UUID）、sessionToken、canonical gameDir。两平面同 JVM 共用 RpcEnv 身份。客户端原子发布 mcdebug/client.json，gui.status 同样返回 process。Session 路由不额外调用 status；实际 RPC 连接握手绑定完整 expectedProcess，禁止端点换实例后继续操作。
 - 客户端在 RPC 绑定前持有 mcdebug/client.lock 的进程锁，直到 JVM shutdown；不替代/删除 MC 的 session.lock。被取消或被新 token 超越的延迟 bootstrap 不绑定 RPC/不覆盖发现文件，在 CLIENT_STARTED 正常退出；启动过程中新增 stop 标记也会在 CLIENT_STARTED 检查。
 - managed launch 显式关闭两平面 TCP，并将两 socket 固定在自身 gameDir。全局 mod 端口/默认配置不变；Session v1 不把远端/独立多人服务器冒充集成服，外部目标继续用不带 --session 的显式 transport。
 - start 有限等待：未指定 world 返回 client_ready；指定后必须 inWorld 且 singleplayer 才 world_ready。超时/失败打印记录并非0退出，不能把遗留 socket 当就绪。logs 是有界 UTF-8 tail，不跟随。
 - stop 只允许 owned；attached 即使 --force 也拒绝。先核对真实 PID/startTime/instanceId/token，使用同一个已验证连接调用 gui.stop；--force 只能终止身份仍匹配的 owned MC，绝不枚举/杀共享 Gradle daemon。RPC 已关闭时 force 仍须核对完整发现身份和活 PID/startTime。启动中没有真实身份时，只写本 token 的 session-stop.json、取消自己且 PID/startTime 匹配的 wrapper；保留 stopping/占位，不谎报 stopped。保存世界期间仍持有 gameDir 锁。
 - 新 RPC `gui.stop` 参数必须带 instanceId/sessionToken，切客户端线程调 Minecraft.stop；同步了 Methods.CLIENT_METHODS 与 SDK。正常操作用 session stop，raw RPC 仅有实例校验，不是 owned/attached 权限边界或鉴权。token 是进程归属关联值，不是认证凭证。
 - 验证：CLI session 目录单测注入 SessionRuntime，不启动 MC/Gradle；临时 Unix/TCP 与假 shell wrapper 可测进程边界。帮助测试只用 parse 捕获 PrintHelpMessage，**不要在 JUnit 内调用 Clikt.main（会 exitProcess 杀掉测试 worker）**。真实集成验证须用隔离 gameDir/存档副本，通过 mdb 自己 start→双平面→截图→attach 禁止停止→owned stop，最后清理所有测试进程。
-
-## 15. 容器测试环境重建手册（Kilt + TConstruct + IC2）
-
-本节记录 mcdebug 的**本地隔离测试容器**重建步骤。该容器用于在 Kilt + TConstruct + IC2 环境下验证 mcdebug 的 RPC 能力（`shoot` 远程武器、`reflect` 任意反射、挖矿/掉落测试等），与生产服务器完全隔离。
-
-### 15.0 唯一硬规则：API 问题看本地源码（自 ic2-fabric 移植）
-
-遇到任何 Minecraft / Fabric API 的问题（类名、方法签名、继承链、事件、网络包），**直接查文件系统中的本地源码，不要猜、不要靠记忆、不要用 javap**：
-
-- MC 反编译源码（按版本）：`../mc_source_{version}/`
-  - `../mc_source_1.21.1/`（Mojang 官方名）
-  - `../mc_source_1.20.1/`（yarn 名，1.20.1 归档线用）
-- Fabric API 源码：`../fabric-api_{version}/`
-  - `../fabric-api_1.21.1/`、`../fabric-api_1.20.1/`（注意：fabric-api 树里它自己的 API 声明可信，但其中引用的 MC/JDK 方法名曾被工具损坏过，MC 名以 `mc_source_1.21.1` 为准）
-- **1.21.1 线（`port-fabric-1.21.1` 分支起）mcdebug 用 Mojang 官方映射**（`loom.officialMojangMappings()`），与 `mc_source_1.21.1` 直查一致；1.20.1 线（`main`）仍是 yarn。yarn→mojang 成员改名可复用 ic2 工具链：`../ic2-fabric-1.21.1/docs/yarn-to-mojang-1.21.1.tsv`（类/方法/字段）+ `tools/yarn2mojang.py` + `tools/bulk-rename-pass*.sed`。
-- mojang 侧两个 Kotlin 陷阱：私有字段与公有方法同名时（如 `Level.registryAccess`、`MinecraftServer.tickCount`、`BoundingBox.minX`），Kotlin 解析到私有字段报错，要用**调用形态**（`registryAccess()`、`minX()`）；`Registry.getId(x)` 在 mojang 是数字 id（IdMap），取注册名要用 `getKey(x)`。
-- 需要重新生成 MC 源码时：`sh gradlew genSources`，产物在**项目根目录**下的 `.gradle/loom-cache/minecraftMaven/net/minecraft/`（不是用户目录），解压其中 `*-sources.jar` 即得（按当前 mappings 命名）。
-- `mc_source_1.21.1` 里查不到的东西（fabric 专属 API）才去 `fabric-api_1.21.1` 查。
-
-### 15.1 为什么需要这个容器
-
-- mcdebug 是 Fabric 服务端调试工具，但生产环境是 **Kilt（Forge 兼容层）+ Forge mod**（TConstruct/Mantle/IC2）。
-- 纯 Fabric 最小环境无法验证 Forge mod 交互；生产服务器禁止直接操作。
-- 本容器在**本机 Docker** 运行（用户明确要求测试容器建在本地，不隔 SSH 操作远程），复刻生产依赖版本。
-
-### 15.2 容器概况
-
-| 项 | 值 |
-|---|---|
-| 容器名 | `mcdebug-tconstruct-luck-local` |
-| 镜像 | `servers-fabric-btrfs:jdk17`（本机已有） |
-| 工作目录 | `/server`（挂载宿主机目录） |
-| Minecraft 端口 | 25665 |
-| mcdebug RPC 端口 | 25680 |
-| 宿主机数据目录 | `/home/wangyu/mcdebug-tconstruct-luck-local` |
-| JVM | `java -Xmx5G -XX:+UseG1GC -jar fabric-server-launch.jar nogui` |
-
-### 15.3 重建步骤
-
-#### 15.3.1 准备数据目录
-
-```bash
-# 数据目录位于本机磁盘（非 NFS），删除重建即可
-rm -rf /home/wangyu/mcdebug-tconstruct-luck-local
-mkdir -p /home/wangyu/mcdebug-tconstruct-luck-local/{mods,config,logs,mcdebug}
-```
-
-#### 15.3.2 收集 mods（版本锁定，逐个核对 sha256）
-
-| jar | 来源 | sha256 |
-|---|---|---|
-| `fabric-server-launch.jar` | 旧目录保留 / 远程测试目录 `/tmp/mcdebug-tconstruct-luck-20260803/` | — |
-| `fabric-api-0.92.11+1.20.1.jar` | 旧目录 / 生产 `fabric1.20.1-1/mods/` | `3278787c04ad...` |
-| `fabric-language-kotlin-1.13.9+kotlin.2.3.10.jar` | 同上 | `fecd5e6dd6ae...` |
-| `architectury-9.2.14-fabric.jar` | 同上 | `bd7a7032bedb...` |
-| `ForgeConfigAPIPort-v8.0.3-1.20.1-Fabric.jar` | 同上 | `627d28ae4f5c...` |
-| `Kilt-20.1.14+build.639304-local.jar` | **本地构建** `develop/Kilt/build/libs/` | `69b129191369...` |
-| `Mantle-1.20.1-1.11.104.jar` | 生产 mods | `6052e47c3981...` |
-| `TConstruct-1.20.1-3.11.2.166.jar` | 生产 mods | `653b49d73481...` |
-| `ic2_120-0.4.jar` | **本地构建** `develop/ic2-fabric/core/build/libs/` | `d751882acdab...` |
-| `base-2.3.15+1.20.1.jar` | 生产 `kaleidoscope_cookery` jar 内嵌 `META-INF/jars/` 提取 | `886a8ca7809a...` |
-| `loot-2.3.15+1.20.1.jar` | 同上 | `4cf639ebfb0e...` |
-| `transfer-2.3.15+1.20.1.jar` | 同上 | `e71ab765097f...` |
-| `mcdebug-0.4.15.jar` | **本地构建** `develop/mcdebug/build/libs/` | `4ade2bb6623d...` |
-
-要点：
-- **Porting Lib 2.3.15 三个 jar**：从生产 `kaleidoscope_cookery-1.3.0-hotifix-fabric+mc1.20.1.jar` 的 `META-INF/jars/` 提取（生产环境由它提供 2.3.15；Kilt 内嵌的是 2.3.9）。生产环境依赖解析为 2.3.15，测试容器必须复刻。
-- **不要放独立 JEI**：ic2 0.4 已修复无 JEI 启动（`Ic2_120.kt` 的 `UuCostIndex.onRebuild` 回调加了 `isModLoaded("jei")` 保护，commit `8989177d`）。若用旧 ic2 jar 则需 JEI 或会启动崩溃。
-- 配置目录 `config/`：`fml.toml`、`forge-server.toml`、`mantle-server.toml`、`tconstruct-common.toml`、`mcdebug.json`（RPC 端口 25680）、`ic2_120.json` 从旧目录复制。
-- `server.properties`：`server-port=25665`、`online-mode=false`、`enable-command-block=true`、`level-type=minecraft:normal`。
-- `eula.txt`：`eula=true`。
-- `libraries/`、`versions/`：Fabric loader 首次启动自动下载，无需手工准备。
-
-#### 15.3.3 启动容器
-
-```bash
-docker rm -f mcdebug-tconstruct-luck-local
-docker run -d --name mcdebug-tconstruct-luck-local \
-  -p 25665:25665 -p 25680:25680 \
-  -v /home/wangyu/mcdebug-tconstruct-luck-local:/server \
-  -w /server \
-  --memory=6g \
-  servers-fabric-btrfs:jdk17 \
-  java -Xmx5G -XX:+UseG1GC -jar fabric-server-launch.jar nogui
-```
-
-等待就绪（脚本在数据目录下，轮询日志不阻塞）：
-
-```bash
-/home/wangyu/mcdebug-tconstruct-luck-local/wait-done.sh \
-  /home/wangyu/mcdebug-tconstruct-luck-local/logs/latest.log 300
-```
-
-验证：
-```bash
-docker ps --filter name=mcdebug-tconstruct --format "{{.Names}} {{.Status}}"
-nc -z 127.0.0.1 25680 && echo "RPC OK"
-# 0.4.x 时代是纯 TCP：node dist/cli.js --port 25680 status（TS 客户端 0.5.0 起已退役）
-java -jar mcdebug-cli.jar --tcp 127.0.0.1:25680 status
-```
-
-#### 15.3.4 部署新构建
-
-```bash
-# 服务端 jar（改完 Kotlin 后）
-cd /home/wangyu/server/develop/mcdebug && ./gradlew build
-cp build/libs/mcdebug-<version>.jar /home/wangyu/mcdebug-tconstruct-luck-local/mods/
-
-# CLI（Kotlin，0.5.0 起）
-./gradlew :cli:copyCliJar
-
-# 重启容器加载新 jar
-docker restart mcdebug-tconstruct-luck-local
-# 等待 Done + RPC ready（见 wait-done.sh）
-```
-
-### 15.4 常用测试命令
-
-```bash
-# 通用
-mcdebug status / find-entities / entity spawn/list-items/collect-items
-
-# 远程武器（shoot，服务端 RPC world.useItemHold）
-mcdebug shoot --item minecraft:bow --ammo minecraft:arrow --target <uuid> --hold 20
-mcdebug shoot --item minecraft:crossbow --ammo minecraft:arrow --target <uuid> --hold 30 --repeat 2
-mcdebug shoot --item ic2_120:mining_laser --nbt '{"Energy":200000}' --target <uuid> --hold 0
-mcdebug shoot --item tconstruct:shuriken --nbt @shuriken.json --target <uuid> --hold 0
-
-# 任意反射（reflect，服务端 RPC reflect.*）
-mcdebug reflect 'net.minecraft.entity.LivingEntity' --members
-mcdebug reflect 'net.minecraft.world.item.Items' --field DIAMOND        # 静态字段 → $ref
-mcdebug new 'net.minecraft.world.item.ItemStack' --args '[{"$ref":1},3]' # 带参构造
-mcdebug reflect --ref 2 --method setCount --args '[64]'                  # 实例方法
-mcdebug refs / raw reflect.release '{"ref":1}'
-
-# 挖矿 / 掉落（attack，服务端 RPC world.attackBlock）
-mcdebug attack --x 100 --y 65 --z 100 --face up --item tconstruct:pickaxe \
-  --nbt @pickaxe-luck3.json --gamemode survival
-```
-
-### 15.5 已知注意点
-
-- **假玩家热键栏 slot 0 = 主手**（`selectedSlot` 默认 0）。`shoot` 的弹药放副手 + slot 8，**绝不能写 slot 0**（会覆盖手持武器）。
-- **运行时是 intermediary 映射**（Kilt）：反射字符串必须用运行时名；`reflect` 通过内置 yarn/mojang 映射表自动转换（打包在 jar 资源 `mappings/*.gz`，jar 约 2MB）。
-- **`tickActiveItemStack` 反射名**：yarn 名在运行时不存在，须用 `method_6076`（Mappings 已处理）。
-- 测试生物（鸡）会自行移动、受击面积小——目标设近（2-5 格）或生成多只；IC2 镭射直线无下坠但射程有限。
-- 无 JEI 环境：ic2 0.4 已修复，其他 mod 若报 `ClassNotFoundException mezz.jei` 检查是否用旧 ic2 jar。
-- 容器数据目录在本机磁盘，可整体 `rm -rf` 重建；生产服务器不受任何影响。
-
-### 15.6 版本升级路径
-
-- **Kilt**：`develop/Kilt` 构建后替换 `Kilt-*.jar`（sha256 变化）。
-- **ic2**：`develop/ic2-fabric/core/build/libs/ic2_120-0.4.jar`。
-- **mcdebug**：见 §15.3.4。版本号在 `gradle.properties` 的 `mod_version`，升版后 jar 名变化需同步 CLI 版本匹配。
