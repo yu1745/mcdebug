@@ -3,7 +3,10 @@ package com.mcdebug.client
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
+import com.mcdebug.McDebugMod
 import com.mcdebug.client.mixin.AbstractContainerScreenAccessor
+import com.mcdebug.client.mixin.NativeImageAccessor
+import com.mojang.blaze3d.platform.GlStateManager
 import com.mcdebug.rpc.RpcEnv
 import com.mcdebug.rpc.RpcErrors
 import com.mcdebug.rpc.RpcException
@@ -13,7 +16,11 @@ import com.mojang.blaze3d.systems.RenderSystem
 import net.minecraft.Util
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen
+import org.lwjgl.opengl.GL11
+import org.lwjgl.opengl.GL30
+import org.lwjgl.system.MemoryUtil
 import java.lang.ref.WeakReference
+import java.nio.ByteBuffer
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.StandardCopyOption
@@ -56,9 +63,7 @@ object Capture {
 
     private class Request(
         val sequence: Long,
-        val mode: String,
-        val inline: Boolean,
-        val name: String?,
+        val options: CaptureOptions,
         val deadline: Long,
         val future: CompletableFuture<JsonElement>,
     ) {
@@ -67,7 +72,14 @@ object Capture {
         var shot: Shot? = null
     }
 
-    private class Shot(val image: NativeImage, val transform: JsonObject, val frameId: Long, val clientTick: Long)
+    private class Shot(
+        val image: NativeImage,
+        val transform: JsonObject,
+        val frameId: Long,
+        val clientTick: Long,
+        val drawLog: JsonObject?,
+        val boxes: List<Annotator.Box>,
+    )
     private data class Rect(val x: Int, val y: Int, val width: Int, val height: Int)
 
     /** All fields are frozen at the afterFrame boundary, never read from an IO worker. */
@@ -121,7 +133,7 @@ object Capture {
     fun hasPendingRequests(): Boolean = pendingCount != 0
 
     /** Enqueue only; no framebuffer access occurs until [afterFrame]. */
-    fun screenshot(client: Minecraft, mode: String, inline: Boolean, name: String?, delayTicks: Int = 0): CompletableFuture<JsonElement> {
+    fun screenshot(client: Minecraft, options: CaptureOptions): CompletableFuture<JsonElement> {
         val future = CaptureFuture()
         val deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(REQUEST_TIMEOUT_SECONDS)
         synchronized(lock) {
@@ -153,7 +165,7 @@ object Capture {
                 weak.get()?.completeExceptionally(timedOut())
             }
             val waiting = ClientTasks.onClient(client) {
-                if (future.isDone) CompletableFuture.completedFuture(Unit) else ClientTasks.awaitTicks(delayTicks).also { waiter ->
+                if (future.isDone) CompletableFuture.completedFuture(Unit) else ClientTasks.awaitTicks(options.delayTicks).also { waiter ->
                     // CompletableFuture cancellation does not propagate through
                     // thenCompose; cancel the actual tick waiter explicitly.
                     future.whenComplete { _, error -> if (error != null) waiter.cancel(false) }
@@ -166,12 +178,12 @@ object Capture {
                         when {
                             closed -> future.completeExceptionally(stopping())
                             expired(deadline) -> future.completeExceptionally(timedOut())
-                            mode != "window" && mode != "gui" -> future.completeExceptionally(
-                                RpcException(RpcErrors.INVALID_PARAMS, "unknown mode '$mode' (window/gui)"),
+                            options.mode != "window" && options.mode != "gui" -> future.completeExceptionally(
+                                RpcException(RpcErrors.INVALID_PARAMS, "unknown mode '${options.mode}' (window/gui)"),
                             )
                             active.size >= MAX_OUTSTANDING -> future.completeExceptionally(queueFull())
                             else -> {
-                                val request = Request(++requestSequence, mode, inline, name, deadline, future)
+                                val request = Request(++requestSequence, options, deadline, future)
                                 active.add(request)
                                 pending.addLast(request)
                                 pendingCount = pending.size
@@ -186,8 +198,11 @@ object Capture {
         return future
     }
 
+    /** Client thread: should the next frame record its GuiGraphics calls? */
+    fun wantsDrawLog(): Boolean = pendingCount != 0 && synchronized(lock) { pending.any { it.options.drawLog } }
+
     /** Called on the client/render thread only, after real rendering and its flush. */
-    fun afterFrame(client: Minecraft) {
+    fun afterFrame(client: Minecraft, drawLog: JsonObject? = null) {
         check(client.isSameThread()) { "Capture.afterFrame must run on the client thread" }
         cleanup()
         val batch = synchronized(lock) {
@@ -206,13 +221,16 @@ object Capture {
             batch.forEach { release(it); it.future.completeExceptionally(captureError(t)) }
             return
         }
+        // Annotation targets come from the Screen that produced these pixels, on this thread.
+        val boxes = if (batch.any { it.options.annotate }) annotationBoxes(client) else emptyList()
         for (request in batch) {
             if (!isLive(request)) {
                 release(request)
                 continue
             }
             val shot = try {
-                capture(frame, request.mode)
+                capture(frame, request.options, if (request.options.drawLog) drawLog else null,
+                    if (request.options.annotate) boxes else emptyList())
             } catch (t: Throwable) {
                 release(request)
                 request.future.completeExceptionally(if (t is RpcException) t else captureError(t))
@@ -296,7 +314,8 @@ object Capture {
         timeouts.forEach { it.completeExceptionally(timedOut()) }
     }
 
-    private fun capture(frame: Frame, mode: String): Shot {
+    private fun capture(frame: Frame, options: CaptureOptions, drawLog: JsonObject?, boxes: List<Annotator.Box>): Shot {
+        val mode = options.mode
         if (frame.width <= 0 || frame.height <= 0 || frame.framebufferWidth <= 0 || frame.framebufferHeight <= 0 ||
             !frame.scaleX.isFinite() || !frame.scaleY.isFinite() || frame.scaleX <= 0 || frame.scaleY <= 0) {
             throw RpcException(RpcErrors.CLIENT_NOT_READY, "framebuffer is not ready", reason("FRAMEBUFFER_NOT_READY"))
@@ -336,8 +355,48 @@ object Capture {
             addProperty("frameId", frame.id)
             addProperty("clientTick", frame.tick)
         }
-        // Equivalent to Screenshot.takeScreenshot, but that vanilla helper leaks
-        // its allocation if bind/download/flip throws before returning it.
+        val image = try {
+            readCrop(frame, crop)
+        } catch (t: Throwable) {
+            // Driver without a usable read framebuffer path: full texture download + crop.
+            McDebugMod.LOGGER.debug("mcdebug crop readback failed, using full texture download: {}", t.toString())
+            downloadAndCrop(frame, crop)
+        }
+        return Shot(image, transform, frame.id, frame.tick, drawLog, boxes)
+    }
+
+    /**
+     * Reads only the crop rectangle from the main framebuffer (glReadPixels), so a
+     * `--mode gui` capture of a 2560x1440 window no longer downloads 14 MiB and
+     * copies it. Alpha is forced opaque exactly like Screenshot.takeScreenshot.
+     */
+    private fun readCrop(frame: Frame, crop: Rect): NativeImage {
+        RenderSystem.assertOnRenderThread()
+        val image = NativeImage(NativeImage.Format.RGBA, crop.width, crop.height, false)
+        try {
+            val pointer = (image as NativeImageAccessor).`mcdebug$getPixels`()
+            val previous = GL11.glGetInteger(GL30.GL_READ_FRAMEBUFFER_BINDING)
+            try {
+                GlStateManager._glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, frame.target.frameBufferId)
+                NativeImage.Format.RGBA.setPackPixelStoreState()
+                // GL's origin is bottom-left; flipY below restores PNG row order.
+                GL11.nglReadPixels(crop.x, frame.height - crop.y - crop.height, crop.width, crop.height,
+                    GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, pointer)
+            } finally {
+                GlStateManager._glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, previous)
+            }
+            image.flipY()
+            val pixels = MemoryUtil.memIntBuffer(pointer, crop.width * crop.height)
+            for (i in 0 until pixels.capacity()) pixels.put(i, pixels.get(i) or OPAQUE)
+            return image
+        } catch (t: Throwable) {
+            image.close()
+            throw t
+        }
+    }
+
+    /** The previous path, kept as a fallback: Screenshot.takeScreenshot without its leak-on-throw. */
+    private fun downloadAndCrop(frame: Frame, crop: Rect): NativeImage {
         val full = NativeImage(frame.width, frame.height, false)
         var ownsFull = true
         var cropped: NativeImage? = null
@@ -346,24 +405,37 @@ object Capture {
             full.downloadTexture(0, true)
             full.flipY()
             if (crop.x == 0 && crop.y == 0 && crop.width == frame.width && crop.height == frame.height) {
-                val shot = Shot(full, transform, frame.id, frame.tick)
                 ownsFull = false
-                return shot
+                return full
             }
             val image = NativeImage(crop.width, crop.height, false)
             cropped = image
             full.copyRect(image, crop.x, crop.y, 0, 0, crop.width, crop.height, false, false)
-            full.close()
-            ownsFull = false
-            val shot = Shot(image, transform, frame.id, frame.tick)
             cropped = null
-            return shot
+            return image
         } finally {
-            // Includes crop allocation, download, flip, crop and Shot creation
-            // failures. At most one temporary full source exists beyond the eight
-            // bounded output/reservation slots, and it never reaches the IO queue.
+            // At most one temporary full source exists beyond the eight bounded
+            // output/reservation slots, and it never reaches the IO queue.
             try { cropped?.close() } finally { if (ownsFull) full.close() }
         }
+    }
+
+    /** Slots and widgets of the current Screen, in GUI units. Client thread only. */
+    private fun annotationBoxes(client: Minecraft): List<Annotator.Box> {
+        val screen = client.screen ?: return emptyList()
+        val boxes = ArrayList<Annotator.Box>()
+        (screen as? AbstractContainerScreen<*>)?.let { container ->
+            val accessor = container as AbstractContainerScreenAccessor
+            container.getMenu().slots.forEachIndexed { i, slot ->
+                if (slot.isActive) boxes.add(Annotator.Box("slot", i, (accessor.leftPos + slot.x).toDouble(),
+                    (accessor.topPos + slot.y).toDouble(), 16.0, 16.0, null))
+            }
+        }
+        GuiWidgets.collect(screen).forEachIndexed { i, widget ->
+            if (widget.visible) boxes.add(Annotator.Box("widget", i, widget.getX().toDouble(), widget.getY().toDouble(),
+                widget.getWidth().toDouble(), widget.getHeight().toDouble(), widget.getMessage().string))
+        }
+        return boxes
     }
 
     private fun encode(request: Request) {
@@ -374,38 +446,52 @@ object Capture {
             image
         }
         var path: Path? = null
+        val options = request.options
         val result: JsonObject
         try {
             result = shot.image.use { image ->
                 if (!isLive(request)) return
-                val bytes = image.asByteArray() // exactly one PNG encode; no disk readback
-                if (!isLive(request)) return
-                val output = shotPath(request.name)
-                path = output
-                // Only a complete PNG replaces the destination. The uniquely
-                // created staging file is ours to remove on failure/expiration.
-                val temporary = Files.createTempFile(output.toAbsolutePath().parent, ".mcdebug-", ".png.part")
-                try {
-                    Files.write(temporary, bytes)
-                    if (!isLive(request)) return
-                    Files.move(temporary, output, StandardCopyOption.REPLACE_EXISTING)
-                } finally {
-                    Files.deleteIfExists(temporary)
-                }
-                JsonObject().apply {
-                    addProperty("path", output.toAbsolutePath().toString())
-                    addProperty("file", output.fileName.toString())
-                    addProperty("relPath", relativeToGameDir(output))
-                    addProperty("bytes", bytes.size)
-                    addProperty("sha256", sha256(bytes))
+                val pointer = (image as NativeImageAccessor).`mcdebug$getPixels`()
+                val pixelHash = sha256(MemoryUtil.memByteBuffer(pointer, image.width * image.height * 4))
+                val json = JsonObject().apply {
+                    addProperty("format", options.format)
+                    addProperty("pixelHash", pixelHash)
                     val size = shot.transform.getAsJsonArray("pngSize")
                     addProperty("width", size[0].asInt)
                     addProperty("height", size[1].asInt)
                     addProperty("frameId", shot.frameId)
                     addProperty("clientTick", shot.clientTick)
                     add("transform", shot.transform.deepCopy())
-                    if (request.inline) addProperty("png", Base64.getEncoder().encodeToString(bytes))
+                    shot.drawLog?.let { add("drawLog", it) }
                 }
+                if (options.format == "none") return@use json
+                val bytes = image.asByteArray() // exactly one PNG encode; no disk readback
+                if (!isLive(request)) return
+                val output = shotPath(options.name)
+                path = output
+                writeAtomically(output, bytes) { isLive(request) } ?: return
+                json.apply {
+                    addProperty("path", output.toAbsolutePath().toString())
+                    addProperty("file", output.fileName.toString())
+                    addProperty("relPath", relativeToGameDir(output))
+                    addProperty("bytes", bytes.size)
+                    addProperty("sha256", sha256(bytes))
+                    if (options.inline) addProperty("png", Base64.getEncoder().encodeToString(bytes))
+                }
+                if (options.annotate) {
+                    // After the clean encode: the overlay never reaches the main PNG.
+                    val crop = shot.transform.getAsJsonArray("crop")
+                    val legend = Annotator.draw(NativeImageCanvas(image), shot.boxes,
+                        shot.transform.get("pixelsPerGuiX").asDouble, shot.transform.get("pixelsPerGuiY").asDouble,
+                        crop[0].asDouble, crop[1].asDouble)
+                    val annotatedBytes = image.asByteArray()
+                    val annotated = output.resolveSibling(output.fileName.toString().removeSuffix(".png") + ".annotated.png")
+                    writeAtomically(annotated, annotatedBytes) { isLive(request) } ?: return
+                    json.addProperty("annotatedPath", annotated.toAbsolutePath().toString())
+                    json.add("annotations", legend)
+                    if (options.inline) json.addProperty("annotatedPng", Base64.getEncoder().encodeToString(annotatedBytes))
+                }
+                json
             }
         } catch (t: Throwable) {
             request.future.completeExceptionally(RpcException(RpcErrors.INTERNAL_ERROR,
@@ -417,7 +503,8 @@ object Capture {
         }
         synchronized(lock) {
             if (!isLive(request)) return
-            if (request.sequence > publishedSequence) {
+            // A hash-only capture has no PNG, so it must not become the base for `--png` clicks.
+            if (options.format == "png" && request.sequence > publishedSequence) {
                 publishedSequence = request.sequence
                 lastPath = path
                 // Do not share the mutable JSON result object with publication.
@@ -475,8 +562,32 @@ object Capture {
         RpcEnv.gameDir().toAbsolutePath().relativize(path.toAbsolutePath()).toString()
     } catch (_: Exception) { path.toString() }
 
-    private fun sha256(bytes: ByteArray): String =
-        MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+    private fun sha256(bytes: ByteArray): String = hex(MessageDigest.getInstance("SHA-256").digest(bytes))
+    private fun sha256(buffer: ByteBuffer): String = hex(MessageDigest.getInstance("SHA-256").apply { update(buffer) }.digest())
+    private fun hex(digest: ByteArray) = digest.joinToString("") { "%02x".format(it) }
+    private const val OPAQUE = 0xFF shl 24
+
+    /** Only a complete file replaces the destination; returns null when [live] turned false. */
+    private fun writeAtomically(output: Path, bytes: ByteArray, live: () -> Boolean): Path? {
+        val temporary = Files.createTempFile(output.toAbsolutePath().parent, ".mcdebug-", ".png.part")
+        try {
+            Files.write(temporary, bytes)
+            if (!live()) return null
+            Files.move(temporary, output, StandardCopyOption.REPLACE_EXISTING)
+            return output
+        } finally {
+            Files.deleteIfExists(temporary)
+        }
+    }
+
+    /** NativeImage stores ABGR; the annotator speaks ARGB. */
+    private class NativeImageCanvas(private val image: NativeImage) : PixelCanvas {
+        override val width get() = image.width
+        override val height get() = image.height
+        override fun get(x: Int, y: Int): Int = swap(image.getPixelRGBA(x, y))
+        override fun set(x: Int, y: Int, argb: Int) = image.setPixelRGBA(x, y, swap(argb))
+        private fun swap(c: Int) = (c and 0xFF00FF00.toInt()) or (c shr 16 and 0xFF) or (c and 0xFF shl 16)
+    }
     private fun ints(vararg values: Int) = JsonArray().apply { values.forEach { add(it) } }
     private fun doubles(vararg values: Double) = JsonArray().apply { values.forEach { add(it) } }
 }
@@ -523,4 +634,45 @@ object CaptureGeometry {
     fun screenToWindow(x: Double, y: Double, windowWidth: Int, windowHeight: Int,
                        guiScaledWidth: Int, guiScaledHeight: Int): Pair<Double, Double> =
         Pair(x * windowWidth / guiScaledWidth, y * windowHeight / guiScaledHeight)
+}
+
+/** What one `gui.screenshot` (or the screenshot step of `gui.act`) asks for. */
+data class CaptureOptions(
+    val mode: String = "window",
+    val inline: Boolean = false,
+    val name: String? = null,
+    /** `png` (default) or `none`: no file/PNG, only the pixel hash + transform (cheap change detection). */
+    val format: String = "png",
+    /** Also write `*.annotated.png` with numbered slot/widget boxes plus a legend. */
+    val annotate: Boolean = false,
+    /** Include the GuiGraphics draw log of the captured frame. */
+    val drawLog: Boolean = false,
+    val delayTicks: Int = 1,
+) {
+    init {
+        require(mode == "window" || mode == "gui") { "unknown mode '$mode' (window/gui)" }
+        require(format == "png" || format == "none") { "format must be png or none" }
+        require(!(annotate && format == "none")) { "annotate needs format png" }
+        require(!(inline && format == "none")) { "inline needs format png" }
+        require(delayTicks in 0..1200) { "delayTicks must be in 0..1200" }
+    }
+
+    companion object {
+        fun parse(params: JsonObject?, defaultDelayTicks: Int = 1): CaptureOptions {
+            val p = params ?: JsonObject()
+            return try {
+                CaptureOptions(
+                    mode = (p.string("mode") ?: "window").lowercase(),
+                    inline = p.bool("inline", false),
+                    name = p.string("name"),
+                    format = (p.string("format") ?: "png").lowercase(),
+                    annotate = p.bool("annotate", false),
+                    drawLog = p.bool("drawLog", false),
+                    delayTicks = p.int("delayTicks", defaultDelayTicks),
+                )
+            } catch (e: IllegalArgumentException) {
+                throw RpcException(RpcErrors.INVALID_PARAMS, e.message ?: "invalid screenshot parameters")
+            }
+        }
+    }
 }

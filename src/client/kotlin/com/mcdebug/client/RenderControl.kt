@@ -1,15 +1,13 @@
 package com.mcdebug.client
 
 import com.google.gson.JsonObject
-import com.google.gson.JsonParser
 import com.mcdebug.McDebugMod
 import net.minecraft.client.DeltaTracker
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen
 import net.minecraft.client.renderer.GameRenderer
-import java.nio.file.Files
-import java.nio.file.Path
+import org.lwjgl.glfw.GLFW
 
 /**
  * Keep the normal game loop, network, client/server ticks and window event pump.
@@ -27,18 +25,8 @@ object RenderControl {
     private var effectiveMode = "continuous"
     private val virtualCursor = RenderCursor<Screen>()
 
-    fun install(gameDir: Path) {
-        val path = gameDir.resolve("config/mcdebug.json")
-        val config = try {
-            if (Files.exists(path)) Files.newBufferedReader(path).use { JsonParser.parseReader(it).asJsonObject } else JsonObject()
-        } catch (e: Exception) {
-            // The shared transport config is best-effort too. A broken/empty
-            // file must not prevent a normal player client from starting.
-            McDebugMod.LOGGER.warn("Cannot read render config {}: {}; ignoring file", path, e.message)
-            JsonObject()
-        }
-        fun setting(key: String, env: String, default: String): String =
-            System.getProperty("mcdebug.$key") ?: System.getenv(env) ?: config.get(key)?.asString ?: default
+    fun install() {
+        fun setting(key: String, env: String, default: String) = ClientConfig.setting(key, env, default)
         val settings = RenderSettings(
             RenderMode.parse(setting("clientRenderMode", "MCDEBUG_CLIENT_RENDER_MODE", "continuous")),
             setting("clientLoopFps", "MCDEBUG_CLIENT_LOOP_FPS", "20").toInt(),
@@ -74,18 +62,67 @@ object RenderControl {
             client.mainRenderTarget.clear(Minecraft.ON_OSX)
             client.mainRenderTarget.bindWrite(true)
         }
-        renderer.render(delta, renderWorld && mode != RenderMode.GUI_ONLY)
+        // Arm the draw log only for a frame a pending capture actually asked for.
+        val recordDraws = Capture.wantsDrawLog()
+        if (recordDraws) DrawRecorder.begin()
+        var drawLog: com.google.gson.JsonObject? = null
+        try {
+            renderer.render(delta, renderWorld && mode != RenderMode.GUI_ONLY)
+        } finally {
+            if (recordDraws) drawLog = DrawRecorder.end()
+        }
         frames++
         // LoadingOverlay and mod render callbacks may switch/init screens. Do not
         // pair the old frame's pixels with a new Screen's bounds; keep requests
         // pending so idleFps=0 still forces the following natural frame.
-        if (client.screen === screenBefore && client.getOverlay() === overlayBefore) Capture.afterFrame(client)
+        if (client.screen === screenBefore && client.getOverlay() === overlayBefore) Capture.afterFrame(client, drawLog)
     }
 
     /** Limit the outer loop, not the natural tick rate. Never throttle loading. */
     @JvmStatic
-    fun frameLimit(original: Int): Int =
-        if (schedule.settings.mode != RenderMode.CONTINUOUS && safeToThrottle(Minecraft.getInstance())) schedule.settings.loopFps else original
+    fun frameLimit(original: Int): Int {
+        throttling = schedule.settings.mode != RenderMode.CONTINUOUS && safeToThrottle(Minecraft.getInstance())
+        return if (throttling) schedule.settings.loopFps else original
+    }
+
+    // Set by frameLimit right before runTick calls limitDisplayFPS; read by RPC threads in wake().
+    @Volatile private var throttling = false
+    @Volatile private var wakeRequested = false
+    private var lastDrawTime = 0.0
+    private var wakes = 0L
+
+    /**
+     * Replaces vanilla's limitDisplayFPS only while throttling. Same deadline
+     * arithmetic, but an RPC hop queued during the wait ends it early, so a lite
+     * client answers the next task within one event-pump round instead of up to a
+     * whole 1/loopFps sleep. Returns false to leave vanilla's limiter in charge.
+     */
+    @JvmStatic
+    fun limitDisplayFps(fps: Int): Boolean {
+        if (!throttling || fps <= 0) return false
+        val deadline = lastDrawTime + 1.0 / fps
+        var now = GLFW.glfwGetTime()
+        while (now < deadline && !wakeRequested) {
+            GLFW.glfwWaitEventsTimeout(deadline - now)
+            now = GLFW.glfwGetTime()
+        }
+        if (wakeRequested) wakes++
+        wakeRequested = false
+        lastDrawTime = now
+        return true
+    }
+
+    /**
+     * Any thread: a client task was queued; cut the current frame-limit wait short.
+     * Only while our limiter owns the wait: that implies a live GLFW window. Posting
+     * an event before glfwInit leaves a pending GLFW error that vanilla's init check
+     * turns into a crash (an RPC probe can arrive that early).
+     */
+    fun wake() {
+        if (!throttling) return
+        wakeRequested = true
+        try { GLFW.glfwPostEmptyEvent() } catch (_: Throwable) { /* window torn down concurrently */ }
+    }
 
     /**
      * A lite client must not need focus or warp the user's desktop pointer just
@@ -116,5 +153,6 @@ object RenderControl {
         addProperty("skippedFrames", skipped)
         addProperty("capturePending", Capture.hasPendingRequests())
         addProperty("virtualCursor", virtualCursor.active)
+        addProperty("rpcWakes", wakes)
     }
 }

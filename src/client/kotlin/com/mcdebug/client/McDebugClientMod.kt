@@ -44,7 +44,10 @@ class McDebugClientMod : ClientModInitializer {
             return
         }
         ClientInfo.claimGameDir()
-        RenderControl.install(gameDir)
+        ClientConfig.load(gameDir)
+        RenderControl.install()
+        ScreenGuard.install()
+        ProblemLog.install()
         ClientTasks.install()
         ClientLifecycleEvents.CLIENT_STARTED.register { client ->
             if (ClientInfo.bootstrapStopRequested()) {
@@ -54,6 +57,7 @@ class McDebugClientMod : ClientModInitializer {
         }
         ClientLifecycleEvents.CLIENT_STOPPING.register { client ->
             GuiInputOps.close(client)
+            GuiSettle.close()
             Capture.close()
             ClientTasks.close()
             ClientInfo.close()

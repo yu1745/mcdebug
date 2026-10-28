@@ -4,16 +4,12 @@ import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.mojang.blaze3d.platform.GlUtil
-import com.mcdebug.client.mixin.AbstractContainerScreenAccessor
 import com.mcdebug.ServerPlane
 import com.mcdebug.contract.Methods
 import com.mcdebug.rpc.RpcEnv
 import com.mcdebug.rpc.RpcErrors
 import com.mcdebug.rpc.RpcException
-import com.mcdebug.util.ServerContext
 import net.minecraft.client.Minecraft
-import net.minecraft.client.gui.components.AbstractWidget
-import net.minecraft.client.gui.components.EditBox
 import net.minecraft.client.gui.screens.ConnectScreen
 import net.minecraft.client.gui.screens.GenericMessageScreen
 import net.minecraft.client.multiplayer.ClientLevel
@@ -21,27 +17,24 @@ import net.minecraft.client.server.IntegratedServer
 import net.minecraft.network.chat.Component
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.gui.screens.TitleScreen
-import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen
 import net.minecraft.client.multiplayer.ServerData
 import net.minecraft.client.multiplayer.resolver.ServerAddress
 import net.minecraft.client.player.LocalPlayer
-import net.minecraft.core.BlockPos
 import net.minecraft.core.Direction
 import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket
 import net.minecraft.world.InteractionHand
 import net.minecraft.world.inventory.AbstractContainerMenu
-import net.minecraft.world.inventory.ClickType
-import net.minecraft.world.inventory.Slot
-import net.minecraft.world.item.ItemStack
 import net.minecraft.world.phys.BlockHitResult
 import net.minecraft.world.phys.Vec3
-import org.lwjgl.glfw.GLFW
 import java.util.concurrent.CompletableFuture
 
 /**
  * Client plane (`gui.*`) — the GUI development loop for an agent: look
  * (`status` / `screen` / `screenshot`), act (`openBlock` / `click` / `close`),
- * and iterate without a human at the keyboard.
+ * and iterate without a human at the keyboard. This object holds the lifecycle
+ * and world-entry methods; [GuiScreenOps] (inspection), [GuiClickOps],
+ * [GuiInputOps] (key/type/drag) and [GuiDevOps] (act/settle/reinit/problems/
+ * hotswap) contribute the rest of the `gui.*` group.
  *
  * Two invariants:
  *  - every read of client state happens inside [ClientTasks.onClient], because a
@@ -59,13 +52,11 @@ object GuiOps : ClientRpcGroup {
         "connect" to ::connect,
         "openBlock" to ::openBlock,
         "screenshot" to ::screenshot,
-        "screen" to ::screen,
-        "click" to ::click,
         "close" to ::close,
         "reloadResources" to ::reloadResources,
         "stop" to ::stop,
         "disconnect" to ::disconnect,
-    ) + GuiInputOps.methods()
+    ) + GuiScreenOps.methods() + GuiClickOps.methods() + GuiInputOps.methods() + GuiDevOps.methods()
 
     // ---------------------------------------------------------------- status
 
@@ -139,6 +130,9 @@ object GuiOps : ClientRpcGroup {
                     addProperty("width", target.width)
                     addProperty("height", target.height)
                 })
+                add("problems", ProblemLog.statusJson())
+                add("screenGuard", ScreenGuard.statusJson(client))
+                add("hotswap", Hotswap.statusJson())
                 add("methods", JsonArray().apply { Methods.CLIENT_METHODS.sorted().forEach { add(it) } })
                 add("contractMismatch", JsonArray().apply { ClientInfo.contractMismatch().forEach { add(it) } })
             }
@@ -293,322 +287,11 @@ object GuiOps : ClientRpcGroup {
 
     // ------------------------------------------------------------ screenshot
 
-    private fun screenshot(client: Minecraft, params: JsonObject?): CompletableFuture<JsonElement> {
-        val p = params ?: JsonObject()
-        val mode = (p.string("mode") ?: "window").lowercase()
-        if (mode != "window" && mode != "gui") {
-            throw RpcException(RpcErrors.INVALID_PARAMS, "unknown mode '$mode' (window/gui)")
-        }
-        val inline = p.bool("inline", false)
-        val name = p.string("name")
-        val delayTicks = p.int("delayTicks", 1)
+    private fun screenshot(client: Minecraft, params: JsonObject?): CompletableFuture<JsonElement> =
         // Passive delay, client hops, render wait and encoding share ONE deadline
         // and settlement. A second wrapper timeout could report failure after the
         // capture had already published its PNG-click transform.
-        return Capture.screenshot(client, mode, inline, name, delayTicks)
-    }
-
-    // ---------------------------------------------------------------- screen
-
-    private fun screen(client: Minecraft, params: JsonObject?): CompletableFuture<JsonElement> =
-        ClientTasks.onClient(client) {
-            val current = client.screen
-            if (current == null) {
-                return@onClient JsonObject().apply {
-                    addProperty("open", false)
-                    addProperty("inWorld", client.player != null)
-                    addProperty("playerMenu", client.player?.containerMenu?.javaClass?.name ?: "")
-                }
-            }
-            JsonObject().apply {
-                addProperty("open", true)
-                addProperty("class", current.javaClass.name)
-                addProperty("type", screenType(current))
-                addProperty("title", current.getTitle().string)
-                addProperty("width", current.width)
-                addProperty("height", current.height)
-                val container = current as? AbstractContainerScreen<*>
-                if (container != null) {
-                    val accessor = container as AbstractContainerScreenAccessor
-                    val left = accessor.leftPos
-                    val top = accessor.topPos
-                    add("gui", JsonObject().apply {
-                        addProperty("left", left)
-                        addProperty("top", top)
-                        addProperty("imageWidth", accessor.imageWidth)
-                        addProperty("imageHeight", accessor.imageHeight)
-                    })
-                    addProperty("containerId", container.getMenu().containerId)
-                    add("carried", itemJson(container.getMenu().getCarried()))
-                    add("slots", JsonArray().apply {
-                        container.getMenu().slots.forEach { slot -> add(slotJson(slot, left, top)) }
-                    })
-                }
-                add("widgets", JsonArray().apply {
-                    current.children().filterIsInstance<AbstractWidget>().forEach { add(widgetJson(it)) }
-                })
-            }
-        }
-
-    private fun slotJson(slot: Slot, left: Int, top: Int): JsonObject {
-        val stack = slot.getItem()
-        return JsonObject().apply {
-            addProperty("index", slot.index)
-            addProperty("x", slot.x)
-            addProperty("y", slot.y)
-            addProperty("guiX", left + slot.x)
-            addProperty("guiY", top + slot.y)
-            addProperty("item", stack.item.toString())
-            addProperty("count", stack.count)
-            add("stack", itemJson(stack))
-        }
-    }
-
-    private fun widgetJson(widget: AbstractWidget): JsonObject = JsonObject().apply {
-        addProperty("class", widget.javaClass.name)
-        addProperty("text", widget.getMessage().string)
-        addProperty("x", widget.getX())
-        addProperty("y", widget.getY())
-        addProperty("width", widget.getWidth())
-        addProperty("height", widget.getHeight())
-        addProperty("active", widget.isActive)
-        addProperty("visible", widget.visible)
-        if (widget is EditBox) addProperty("value", widget.getValue())
-    }
-
-    // ----------------------------------------------------------------- click
-
-    private fun click(client: Minecraft, params: JsonObject?): CompletableFuture<JsonElement> {
-        val p = params ?: throw RpcException(
-            RpcErrors.INVALID_PARAMS,
-            "params required: slot= | text= | gui=[x,y] | png=[x,y] | x&y (+ button/clickType/shift/waitTicks)",
-        )
-        val slotElement = p.get("slot")?.takeIf { !it.isJsonNull }
-        val text = p.string("text")
-        val guiElement = p.get("gui")?.takeIf { !it.isJsonNull }
-        val pngElement = p.get("png")?.takeIf { !it.isJsonNull }
-        val waitTicks = p.int("waitTicks", 20)
-        val moveCursor = p.bool("moveCursor", true)
-        return when {
-            slotElement != null -> clickSlot(client, slotElement, p, waitTicks, moveCursor)
-            text != null -> {
-                val index = p.int("index", 0)
-                clickCoordinates(client, p, waitTicks, moveCursor) { resolveTextTarget(client, text, index) }
-            }
-            guiElement != null -> {
-                val pair = p.pair("gui")
-                clickCoordinates(client, p, waitTicks, moveCursor) { Target(pair.first, pair.second, "gui", null, null) }
-            }
-            pngElement != null -> {
-                val pair = p.pair("png")
-                clickCoordinates(client, p, waitTicks, moveCursor) {
-                    val gui = Capture.pngToGui(pair.first, pair.second)
-                    Target(gui.first, gui.second, "png", null, "png=${pair.first},${pair.second}")
-                }
-            }
-            else -> {
-                val x = p.num("x")
-                    ?: throw RpcException(RpcErrors.INVALID_PARAMS, "x is required when no slot/text/gui/png is given")
-                val y = p.num("y")
-                    ?: throw RpcException(RpcErrors.INVALID_PARAMS, "y is required when no slot/text/gui/png is given")
-                clickCoordinates(client, p, waitTicks, moveCursor) { Target(x, y, "gui", null, null) }
-            }
-        }
-    }
-
-    private class Target(
-        val x: Double,
-        val y: Double,
-        val mode: String,
-        val widget: AbstractWidget?,
-        val via: String?,
-    )
-
-    private fun clickSlot(
-        client: Minecraft,
-        slotElement: JsonElement,
-        params: JsonObject,
-        waitTicks: Int,
-        moveCursor: Boolean,
-    ): CompletableFuture<JsonElement> {
-        val index = slotIndex(slotElement)
-        val button = params.int("button", 0)
-        val clickTypeName = params.string("clickType")
-        val shift = params.bool("shift", false)
-        val clicked = ClientTasks.onClient(client) {
-            val player = client.player
-                ?: throw RpcException(RpcErrors.CLIENT_NOT_READY, "not in a world")
-            val gameMode = client.gameMode
-                ?: throw RpcException(RpcErrors.CLIENT_NOT_READY, "no game mode (still connecting?)")
-            val menu = (client.screen as? AbstractContainerScreen<*>)?.getMenu() ?: player.containerMenu
-            val slot = menu.slots.getOrNull(index)
-                ?: throw RpcException(
-                    RpcErrors.SLOT_OUT_OF_RANGE,
-                    "slot $index out of range for ${menu.javaClass.simpleName} (${menu.slots.size} slots)",
-                    JsonObject().apply {
-                        addProperty("reason", "SLOT_OUT_OF_RANGE")
-                        addProperty("slotCount", menu.slots.size)
-                    },
-                )
-            val clickType = when {
-                clickTypeName != null -> parseClickType(clickTypeName)
-                shift -> ClickType.QUICK_MOVE
-                else -> ClickType.PICKUP
-            }
-            val before = itemJson(slot.getItem())
-            val accessor = client.screen as? AbstractContainerScreenAccessor
-            // 槽位中心（绝对 GUI 单位）：既是 warp 目标，也回报给 agent——有了它 agent 才能把
-            // 这次点击对应到 gui.screenshot 的 PNG 像素（PNG 坐标 = (gui - gui.left/top) * pixelsPerGui）。
-            val guiX = (accessor?.leftPos ?: 0) + slot.x + 8.0
-            val guiY = (accessor?.topPos ?: 0) + slot.y + 8.0
-            val moved = moveCursor && warpCursor(client, guiX, guiY)
-            // The vanilla body of AbstractContainerScreen#slotClicked (which is
-            // protected): the client only sends the intent, the server owns the result.
-            gameMode.handleInventoryMouseClick(menu.containerId, slot.index, button, clickType, player)
-            ClickResult(
-                mode = "slot",
-                slotIndex = index,
-                button = button,
-                clickType = clickType.name,
-                before = before,
-                beforeCount = before.get("count")?.asInt ?: 0,
-                x = guiX,
-                y = guiY,
-                cursorMoved = moved,
-            )
-        }
-        return ClientTasks.thenOnClient(client, clicked) {
-            ClientTasks.awaitTicks(waitTicks.coerceAtLeast(0))
-        }.thenCompose { waited ->
-            // `clicked` is already complete here, so `join()` cannot block; it just
-            // hands the ClickResult to the next client-thread hop.
-            ClientTasks.thenOnClient(client, waited) { clickReport(client, clicked.join()) }
-        }
-    }
-
-    private fun clickCoordinates(
-        client: Minecraft,
-        params: JsonObject,
-        waitTicks: Int,
-        moveCursor: Boolean,
-        resolve: () -> Target,
-    ): CompletableFuture<JsonElement> {
-        val button = params.int("button", 0)
-        val clicked = ClientTasks.onClient(client) {
-            val screen = client.screen ?: throw noScreen()
-            val target = resolve()
-            val moved = moveCursor && warpCursor(client, target.x, target.y)
-            // Ordinary Screen event dispatch — no GLFW input synthesis, no focus needed.
-            // Widgets and container slots both resolve positionally from (x, y), so the
-            // synthetic click lands exactly where the coordinates say.
-            val pressed = screen.mouseClicked(target.x, target.y, button)
-            val released = screen.mouseReleased(target.x, target.y, button)
-            ClickResult(
-                mode = target.mode,
-                slotIndex = null,
-                button = button,
-                clickType = null,
-                before = target.widget?.let { widgetJson(it) },
-                beforeCount = null,
-                x = target.x,
-                y = target.y,
-                via = target.via,
-                pressed = pressed,
-                released = released,
-                cursorMoved = moved,
-            )
-        }
-        return ClientTasks.thenOnClient(client, clicked) {
-            ClientTasks.awaitTicks(waitTicks.coerceAtLeast(0))
-        }.thenCompose { waited ->
-            ClientTasks.thenOnClient(client, waited) { clickReport(client, clicked.join()) }
-        }
-    }
-
-    private class ClickResult(
-        val mode: String,
-        val slotIndex: Int?,
-        val button: Int,
-        val clickType: String?,
-        val before: JsonObject?,
-        val beforeCount: Int?,
-        val x: Double? = null,
-        val y: Double? = null,
-        val via: String? = null,
-        val pressed: Boolean = false,
-        val released: Boolean = false,
-        val cursorMoved: Boolean = false,
-    )
-
-    /** Reports the post-click state; the server needs a tick or two to answer. */
-    private fun clickReport(client: Minecraft, result: ClickResult): JsonObject {
-        val screen = client.screen
-        val player = client.player
-        val menu = (screen as? AbstractContainerScreen<*>)?.getMenu() ?: player?.containerMenu
-        return JsonObject().apply {
-            addProperty("ok", true)
-            addProperty("mode", result.mode)
-            result.x?.let { addProperty("guiX", it) }
-            result.y?.let { addProperty("guiY", it) }
-            result.via?.let { addProperty("via", it) }
-            result.slotIndex?.let { addProperty("slot", it) }
-            addProperty("button", result.button)
-            addProperty("cursorMoved", result.cursorMoved)
-            result.clickType?.let { addProperty("clickType", it) }
-            result.before?.let { add("before", it) }
-            if (result.mode != "slot") {
-                addProperty("pressed", result.pressed)
-                addProperty("released", result.released)
-            }
-            addProperty("screen", screen?.javaClass?.name ?: "")
-            addProperty("screenTitle", screen?.let { it.getTitle().string } ?: "")
-            val index = result.slotIndex
-            if (index != null && menu != null) {
-                val slot = menu.slots.getOrNull(index)
-                add("slotAfter", slot?.let { itemJson(it.getItem()) } ?: JsonObject())
-                val after = slot?.let { itemJson(it.getItem()) }
-                if (after != null && result.beforeCount != null) {
-                    addProperty("changed", (after.get("count")?.asInt ?: 0) != result.beforeCount)
-                }
-            }
-            add("carried", menu?.let { itemJson(it.getCarried()) } ?: JsonObject())
-        }
-    }
-
-    private fun resolveTextTarget(client: Minecraft, text: String, index: Int): Target {
-        val screen = client.screen ?: throw noScreen()
-        val all = screen.children().filterIsInstance<AbstractWidget>()
-        val matches = all.filter { it.getMessage().string.contains(text, ignoreCase = true) }
-        val clickable = matches.filter { it.isActive && it.visible }
-        val pool = if (clickable.isNotEmpty()) clickable else matches
-        val widget = pool.getOrNull(index)
-            ?: throw RpcException(
-                RpcErrors.GUI_ELEMENT_NOT_FOUND,
-                if (matches.isEmpty()) {
-                    "no widget contains \"$text\" on ${screen.javaClass.simpleName}"
-                } else {
-                    "no widget at index $index contains \"$text\" (${pool.size} match(es))"
-                },
-                JsonObject().apply {
-                    addProperty("reason", "GUI_ELEMENT_NOT_FOUND")
-                    addProperty("query", text)
-                    addProperty("matchCount", matches.size)
-                    addProperty("clickableMatchCount", clickable.size)
-                    add("available", JsonArray().apply {
-                        all.filter { it.visible && it.getMessage().string.isNotBlank() }
-                            .take(60)
-                            .forEach { add(it.getMessage().string) }
-                    })
-                },
-            )
-        return Target(
-            widget.getX() + widget.getWidth() / 2.0,
-            widget.getY() + widget.getHeight() / 2.0,
-            "text",
-            widget,
-            "text=\"$text\"",
-        )
-    }
+        Capture.screenshot(client, CaptureOptions.parse(params))
 
     // ----------------------------------------------------------------- close
 
@@ -723,80 +406,10 @@ object GuiOps : ClientRpcGroup {
 
     // --------------------------------------------------------------- helpers
 
-    /**
-     * Widens a concrete `JsonElement` future to the handler's declared type —
-     * `CompletableFuture` is invariant, so `CompletableFuture<JsonObject>` is not
-     * a `CompletableFuture<JsonElement>`.
-     */
-    private fun <T : JsonElement> CompletableFuture<T>.asElement(): CompletableFuture<JsonElement> = thenApply { it }
-
-    /**
-     * Keeps hover/tooltips/carried stacks at the synthetic Screen click position.
-     * Lite mode uses the render gate's virtual Screen-space cursor, without focus
-     * or OS pointer movement. Continuous mode retains the real cursor path.
-     *
-     * The latter deliberately inverts MouseHandler's ceil-sized guiScaled mapping,
-     * NOT GameRenderer's unrounded width/guiScale projection. PNG coordinates are
-     * converted to Screen semantics by Capture first; applying render guiScale here
-     * instead would make the click correct but leave hover at a different position.
-     */
-    private fun warpCursor(
-        client: Minecraft,
-        x: Double,
-        y: Double,
-        offsetX: Int = 0,
-        offsetY: Int = 0,
-    ): Boolean {
-        if (client.screen == null) return false
-        if (RenderControl.moveCursor(x + offsetX, y + offsetY)) return true
-        val window = client.window
-        val scaledWidth = window.getGuiScaledWidth()
-        val scaledHeight = window.getGuiScaledHeight()
-        if (scaledWidth <= 0 || scaledHeight <= 0 || window.getWindow() == 0L) return false
-        val cursor = CaptureGeometry.screenToWindow(x + offsetX, y + offsetY,
-            window.getScreenWidth(), window.getScreenHeight(), scaledWidth, scaledHeight)
-        return try {
-            GLFW.glfwSetCursorPos(window.getWindow(), cursor.first, cursor.second)
-            true
-        } catch (t: Throwable) {
-            false
-        }
-    }
-
-    private fun noScreen(): RpcException = RpcException(
-        RpcErrors.SCREEN_NOT_FOUND,
-        "no screen is open; use gui.openBlock or gui.connect first",
-        JsonObject().apply { addProperty("reason", "SCREEN_NOT_FOUND") },
-    )
-
     private fun gameDir(): java.nio.file.Path? = try {
         RpcEnv.gameDir()
     } catch (t: Throwable) {
         null
-    }
-
-    private fun screenType(screen: Screen?): String = when {
-        screen == null -> "none"
-        screen is AbstractContainerScreen<*> -> "container"
-        else -> screen.javaClass.simpleName
-    }
-
-    private fun itemJson(stack: ItemStack): JsonObject = ServerContext.itemStackToJson(stack)
-
-    private fun slotIndex(element: JsonElement): Int = when {
-        element.isJsonPrimitive && element.asJsonPrimitive.isNumber -> element.asInt
-        element.isJsonPrimitive -> element.asString.trim().toIntOrNull()
-            ?: throw RpcException(RpcErrors.INVALID_PARAMS, "slot must be a number, got '${element.asString}'")
-        else -> throw RpcException(RpcErrors.INVALID_PARAMS, "slot must be a number")
-    }
-
-    private fun parseClickType(name: String): ClickType {
-        val normalized = name.trim().uppercase().replace('-', '_')
-        return ClickType.entries.firstOrNull { it.name == normalized }
-            ?: throw RpcException(
-                RpcErrors.INVALID_PARAMS,
-                "unknown clickType '$name' (${ClickType.entries.joinToString("/") { it.name }})",
-            )
     }
 
     /**
@@ -823,43 +436,11 @@ object GuiOps : ClientRpcGroup {
         player.getInventory().selected = previous
         client.connection?.send(ServerboundSetCarriedItemPacket(previous))
     }
-
-    private fun JsonObject.string(name: String): String? =
-        get(name)?.takeIf { !it.isJsonNull && it.isJsonPrimitive }?.asString
-
-    private fun JsonObject.num(name: String): Double? =
-        get(name)?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }?.asDouble
-
-    private fun JsonObject.int(name: String, default: Int): Int =
-        get(name)?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }?.asInt ?: default
-
-    private fun JsonObject.bool(name: String, default: Boolean): Boolean =
-        get(name)?.takeIf { !it.isJsonNull && it.isJsonPrimitive }?.asBoolean ?: default
-
-    /** `[x, y]` in GUI units, or PNG pixels for `png`. Falls back to `x` + `y`. */
-    private fun JsonObject.pair(name: String): Pair<Double, Double> {
-        val element = get(name)
-        if (element != null && element.isJsonArray) {
-            val array = element.asJsonArray
-            if (array.size() >= 2) return Pair(array[0].asDouble, array[1].asDouble)
-        }
-        val x = num("x")
-        val y = num("y")
-        if (x != null && y != null) return Pair(x, y)
-        throw RpcException(RpcErrors.INVALID_PARAMS, "$name must be [x, y], or accompanied by x and y")
-    }
-
-    /** `pos: [x,y,z]` (the server-plane shape) or separate `x`/`y`/`z` fields. */
-    private fun JsonObject.pos(): BlockPos {
-        val element = get("pos")
-        if (element != null && element.isJsonArray) {
-            val array = element.asJsonArray
-            if (array.size() >= 3) return BlockPos(array[0].asInt, array[1].asInt, array[2].asInt)
-        }
-        val x = get("x")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }?.asInt
-        val y = get("y")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }?.asInt
-        val z = get("z")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }?.asInt
-        if (x != null && y != null && z != null) return BlockPos(x, y, z)
-        throw RpcException(RpcErrors.INVALID_PARAMS, "pos [x,y,z] (or x/y/z) is required")
-    }
 }
+
+/**
+ * Widens a concrete `JsonElement` future to the handler's declared type —
+ * `CompletableFuture` is invariant, so `CompletableFuture<JsonObject>` is not
+ * a `CompletableFuture<JsonElement>`.
+ */
+internal fun <T : JsonElement> CompletableFuture<T>.asElement(): CompletableFuture<JsonElement> = thenApply { it }

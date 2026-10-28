@@ -6,6 +6,8 @@ import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
+import com.github.ajalt.clikt.parameters.groups.provideDelegate
+import com.github.ajalt.clikt.parameters.types.choice
 import com.github.ajalt.clikt.parameters.types.int
 import com.google.gson.JsonObject
 import java.nio.file.Files
@@ -42,11 +44,14 @@ class GuiCommands : CliktCommand(
 - `mcdebug raw world.setBlock '{"pos":[100,64,100],"block":"minecraft:chest"}'`
 - `mcdebug raw inv.setSlot '{"pos":[100,64,100],"slot":"0","item":"minecraft:diamond","count":5}'`
 - `mcdebug gui open-block --x 100 --y 64 --z 100`
-- `mcdebug gui screenshot --mode gui --out shot-1.png`
-- `mcdebug gui screen --brief`
-- `mcdebug gui click --slot 0`
-- `mcdebug gui screenshot --mode gui --out shot-2.png`
+- `mcdebug gui screenshot --mode gui --annotate` (numbered slots/widgets in `*.annotated.png`)
+- `mcdebug gui click --slot 0 --shot gui` (click, settle, screenshot: one round trip)
+- `mcdebug gui problems` (WARN/ERROR log lines and render faults since a cursor)
 - `mcdebug gui close`
+
+**Code iteration without restarting the client**
+- edit, `./gradlew classes`, then `mcdebug gui hotswap --classes build/classes/kotlin/client` (re-runs the open Screen's init)
+- a render exception no longer crashes the client: the Screen stops drawing, `gui problems`/`screenFault` show the trace; fix, hotswap, `gui reinit`
 
 **Reading the result**
 - game state is authoritative: `gui screen`, the click report (`slotAfter`, `carried`, `changed`) or server-plane NBT
@@ -75,6 +80,9 @@ class GuiStatusCmd : CliktCommand(
 - `windowFocused` - see below
 - `jarPath` - the jar the client really loaded; the answer to "my change is not there" is rebuild, copy into mods/, restart the client
 - `contractMismatch` - non-empty when the loaded jar disagrees with the CLI method list (stale jar); entries read `missing:` / `undeclared:`
+- `problems` - `next` cursor and error count of the WARN/ERROR log (`gui problems`)
+- `screenGuard` - `fault` is present while the open Screen's render threw (it is then not drawn; `gui reinit` after fixing)
+- `hotswap` - whether the agent is attached and enhanced redefinition is available
 - `clientEndpoint` - where this CLI is connected
 
 **Examples**
@@ -211,6 +219,9 @@ class GuiScreenshotCmd : CliktCommand(
 - `--delay-ticks N` - passive delay before requesting a fresh frame (default 1; 0 still waits for a new rendered frame)
 - `--path-only` - print just the path, for shell pipelines
 - `--inline` - embed base64 in the JSON (small images; the socket limit is 64 MiB)
+- `--annotate` - also write `*.annotated.png`: numbered cyan boxes = slot indices, magenta boxes = widget indices (`gui click --slot N` / `--widget N`); the legend is in `annotations`
+- `--draw-log` - include `drawLog`: every blit (texture, texel UV, sprite), fill, string, item and tooltip of that frame with its GUI-unit rect
+- `--hash-only` - no PNG/file, only `pixelHash` + transform: cheap "did the picture change?" polling
 
 **Pitfalls**
 - readback happens after a new frame has rendered and flushed; this is not an acknowledgement of a previous server operation
@@ -224,9 +235,16 @@ class GuiScreenshotCmd : CliktCommand(
     private val inline by option("--inline", help = "embed the PNG as base64 in the JSON (small images only)").flag()
     private val delayTicks by option("--delay-ticks", help = "passively wait N ticks before requesting a fresh frame (default 1; 0 also captures a new frame)").int()
     private val pathOnly by option("--path-only", help = "print only the PNG path (for shell pipelines)").flag()
+    private val annotate by option("--annotate", help = "also write *.annotated.png with numbered slot/widget boxes").flag()
+    private val drawLog by option("--draw-log", help = "include the frame's GuiGraphics draw calls (drawLog)").flag()
+    private val hashOnly by option("--hash-only", help = "no PNG: only pixelHash + transform (change detection)").flag()
 
     override fun run() = withGuiApi { api ->
-        val r = api.gui.screenshot(mode, inline, name, delayTicks)
+        if (hashOnly && (annotate || inline || out != null || pathOnly)) {
+            throw UsageError("--hash-only writes no PNG; it cannot be combined with --annotate/--inline/--out/--path-only")
+        }
+        val r = api.gui.screenshot(ScreenshotOptions(mode = mode, format = if (hashOnly) "none" else "png", annotate = annotate,
+            drawLog = drawLog, inline = inline, name = name, delayTicks = delayTicks))
         val o = r.asJsonObject
         var printed = o.get("path")?.asString ?: ""
         out?.let { target ->
@@ -312,7 +330,8 @@ class GuiClickCmd : CliktCommand(
 **Clicks in the open screen.** Five ways to say where, all positional: no GLFW input synthesis and no window focus needed. Slot clicks go through the vanilla inventory-click path (the server still decides the outcome); other targets are dispatched as ordinary Screen mouse events.
 
 **Where (pick one)**
-- `--slot N` - container slot index from `gui screen`
+- `--slot N` - container slot index from `gui screen` (cyan numbers in `screenshot --annotate`)
+- `--widget N` - widget index from `gui screen` (magenta numbers in `screenshot --annotate`)
 - `--text "Label"` - widget whose text contains the label (case-insensitive); `--index K` picks the K-th match (default 0)
 - `--gui X,Y` - GUI-unit coordinates: canvas widgets, drag handles
 - `--png X,Y` - PNG pixels from the most recent `gui screenshot` (converted for you)
@@ -322,8 +341,10 @@ class GuiClickCmd : CliktCommand(
 - `--button 0|1` - 0 = left (default), 1 = right
 - `--click-type TYPE` - `pickup|quick_move|swap|clone|throw|quick_craft|pickup_all` (slot clicks; default pickup)
 - `--shift` - shorthand for `--click-type quick_move`
-- `--wait-ticks N` - wait N client ticks for the server's answer (default 20)
+- `--wait-ticks N` - upper bound for settling (default 20): the click returns as soon as the server answered and the GUI stayed quiet for 2 ticks (`settle` in the result)
+- `--no-settle` - wait exactly `--wait-ticks` instead (the previous fixed-wait behaviour)
 - `--no-cursor-move` - do not warp the real cursor to the click point
+- `--shot MODE` - `gui|window`: one round trip that also returns a screenshot (`gui.act`); add `--annotate` / `--draw-log` / `--screen`
 
 **What comes back**
 - `ok`, `mode`, `guiX`/`guiY` (the landing point; slot clicks report the slot centre), `before`, `slotAfter`, `carried`, `changed`, `pressed`/`released`, `screen`, `cursorMoved` - enough to assert the click worked without looking at pixels
@@ -334,6 +355,7 @@ class GuiClickCmd : CliktCommand(
 - `mcdebug gui click --text "Start"`
 - `mcdebug gui click --png 384,150`
 - `mcdebug gui click --slot 2 --click-type throw --button 1`
+- `mcdebug gui click --widget 3 --shot gui --annotate`
 
 **The cursor warp**
 - the carried stack, tooltips and hover highlight are drawn at the physical cursor, so by default the cursor is warped to the click point and screenshots show the result where you clicked
@@ -341,6 +363,7 @@ class GuiClickCmd : CliktCommand(
 """.trimIndent(),
 ) {
     private val slot by option("--slot", help = "container slot index (from gui screen)").int()
+    private val widget by option("--widget", help = "widget index (from gui screen / annotated screenshot)").int()
     private val text by option("--text", help = "widget label, case-insensitive substring")
     private val index by option("--index", help = "which match to use when --text matches several (default 0)").int()
     private val gui by option("--gui", help = "GUI-unit coordinates \"x,y\"")
@@ -350,30 +373,54 @@ class GuiClickCmd : CliktCommand(
     private val button by option("--button", help = "0 = left (default), 1 = right").int().default(0)
     private val clickType by option("--click-type", help = "pickup|quick_move|swap|clone|throw|quick_craft|pickup_all (slot clicks only)")
     private val shift by option("--shift", help = "shift-click = quick_move (slot clicks only)").flag()
-    private val waitTicks by option("--wait-ticks", help = "wait N client ticks for the server's answer (default 20)").int()
+    private val waitTicks by option("--wait-ticks", help = "upper bound in client ticks for settling (default 20)").int()
+    private val noSettle by option("--no-settle", help = "wait exactly --wait-ticks instead of returning once settled").flag()
     private val noCursorMove by option(
         "--no-cursor-move",
         help = "do not warp the real cursor to the click point (warping keeps screenshots honest: " +
             "the carried stack and tooltips are drawn at the physical cursor)",
     ).flag()
 
-    override fun run() = withGuiApi { api ->
-        val move = !noCursorMove
-        val r = when {
-            slot != null -> api.gui.clickSlot(slot!!, button, if (shift) "quick_move" else clickType, waitTicks, move)
-            text != null -> api.gui.clickText(text!!, index, button, waitTicks, move)
-            gui != null -> {
-                val (gx, gy) = parsePair(gui!!, "--gui")
-                api.gui.clickGui(gx, gy, button, waitTicks, move)
-            }
-            png != null -> {
-                val (px, py) = parsePair(png!!, "--png")
-                api.gui.clickPng(px, py, button, waitTicks, move)
-            }
-            x != null && y != null -> api.gui.clickGui(x!!.toDouble(), y!!.toDouble(), button, waitTicks, move)
-            else -> throw UsageError("one of --slot / --text / --gui / --png / --x+--y is required")
+    private val follow by FollowUpOptions()
+
+    override fun run() {
+        follow.validate()
+        val target: Map<String, Any?> = when {
+            slot != null -> mapOf("slot" to slot, "clickType" to if (shift) "quick_move" else clickType)
+            widget != null -> mapOf("widget" to widget)
+            text != null -> mapOf("text" to text, "index" to index)
+            gui != null -> mapOf("gui" to parsePair(gui!!, "--gui").toList())
+            png != null -> mapOf("png" to parsePair(png!!, "--png").toList())
+            x != null && y != null -> mapOf("gui" to listOf(x!!.toDouble(), y!!.toDouble()))
+            else -> throw UsageError("one of --slot / --widget / --text / --gui / --png / --x+--y is required")
         }
-        printJson(r)
+        val params = target + mapOf("button" to button, "waitTicks" to waitTicks, "moveCursor" to !noCursorMove,
+            "settle" to if (noSettle) false else null)
+        withGuiApi { api ->
+            printJson(follow.run(api, "click", params) ?: api.rpc.call("gui.click", gson.toJsonTree(params.filterValues { it != null })))
+        }
+    }
+}
+
+/** `--shot/--annotate/--draw-log/--screen`: turn an input command into one `gui.act` round trip. */
+class FollowUpOptions : com.github.ajalt.clikt.parameters.groups.OptionGroup("Follow-up (one round trip via gui.act)") {
+    val shot by option("--shot", metavar = "MODE", help = "after the action settles, return a screenshot: gui | window")
+        .choice("gui", "window")
+    val annotate by option("--annotate", help = "with --shot: also write *.annotated.png (numbered slots/widgets)").flag()
+    val drawLog by option("--draw-log", help = "with --shot: include the frame's draw calls").flag()
+    val screen by option("--screen", help = "also return the gui screen JSON after the action").flag()
+
+    /** Call before connecting, so a usage error never opens an RPC connection. */
+    fun validate() {
+        if (shot == null && (annotate || drawLog)) throw UsageError("--annotate/--draw-log need --shot")
+    }
+
+    /** Null when no follow-up was requested: the caller then uses the plain method. */
+    fun run(api: DebugApi, action: String, params: Map<String, Any?>): com.google.gson.JsonElement? {
+        validate()
+        if (shot == null && !screen) return null
+        val options = shot?.let { ScreenshotOptions(mode = it, annotate = annotate, drawLog = drawLog) }
+        return api.gui.act(action, params, screen = screen, screenshot = options)
     }
 }
 
@@ -412,7 +459,7 @@ class GuiConnectCmd : CliktCommand(
 
 **When it works**
 - from the title screen or any other non-world screen
-- it cannot be used while a world is open: there is no key input yet (`gui.key`), so the client could not be brought back out - use it as the first step instead
+- it cannot be used while a world is open: `gui disconnect` first
 
 **Examples**
 - `mcdebug gui connect --host 127.0.0.1:25565`
@@ -434,7 +481,7 @@ class GuiConnectCmd : CliktCommand(
 class GuiReloadResourcesCmd : CliktCommand(
     name = "reload-resources",
     help = "client-side F3+T: reload resource packs (textures/lang/models) without restarting the client — " +
-        "use this after changing assets; Java/Kotlin changes still need a client restart",
+        "use this after changing assets; for Java/Kotlin changes use gui hotswap",
     epilog = """
 **Client-side F3+T**: reloads resource packs - textures, models, language files, sounds - without restarting the client. The fast path while iterating on assets.
 
@@ -442,7 +489,7 @@ class GuiReloadResourcesCmd : CliktCommand(
 - `mcdebug gui reload-resources`
 
 **Limits**
-- Java/Kotlin changes are not picked up (classes load at startup), so those still need a client restart
+- Java/Kotlin changes are not resources: use `gui hotswap` (method bodies) or restart the client
 - the reload blocks the client thread for a few seconds, so `gui.*` calls made right after it returns can be slow
 """.trimIndent(),
 ) {
@@ -453,6 +500,7 @@ fun guiSubcommands() = listOf(
     GuiStatusCmd(), GuiScreenCmd(), GuiScreenshotCmd(), GuiOpenBlockCmd(),
     GuiClickCmd(), GuiCloseCmd(), GuiConnectCmd(), GuiReloadResourcesCmd(),
     GuiKeyCmd(), GuiTypeCmd(), GuiDragCmd(), GuiDisconnectCmd(), GuiCompareCmd(),
+    GuiActCmd(), GuiSettleCmd(), GuiReinitCmd(), GuiProblemsCmd(), GuiHotswapCmd(),
 )
 
 /** 供其他命令复用：把 `{"a":1}` 结果按键取字符串。 */

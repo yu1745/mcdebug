@@ -324,6 +324,44 @@ class GuiApi(private val rpc: RpcClient) {
     fun screenshot(mode: String? = null, inline: Boolean? = null, name: String? = null, delayTicks: Int? = null): JsonElement =
         rpc.call("gui.screenshot", params { p("mode", mode); p("inline", inline); p("name", name); p("delayTicks", delayTicks) })
 
+    /**
+     * Full screenshot options: [format] `png`|`none` (pixel hash only), [annotate] writes
+     * `*.annotated.png` with numbered slot/widget boxes, [drawLog] returns the frame's
+     * GuiGraphics calls.
+     */
+    fun screenshot(options: ScreenshotOptions): JsonElement = rpc.call("gui.screenshot", options.toJson())
+
+    /** One round trip: [action] (`click`/`key`/`type`/`drag`/`close`/`openBlock`/`reinit`/`none`) + settle + views. */
+    fun act(
+        action: String,
+        actionParams: Map<String, Any?> = emptyMap(),
+        settle: Boolean = true,
+        settleMaxTicks: Int? = null,
+        screen: Boolean = false,
+        screenshot: ScreenshotOptions? = null,
+    ): JsonElement = rpc.call("gui.act", params {
+        p("action", action)
+        p("params", actionParams.filterValues { it != null })
+        if (!settle) p("settle", false) else settleMaxTicks?.let { p("settle", mapOf("maxTicks" to it)) }
+        p("screen", screen)
+        screenshot?.let { put("screenshot", it.toJson()) }
+    })
+
+    /** Wait until the server answered and the GUI is quiet (passive; never drives ticks). */
+    fun settle(maxTicks: Int? = null, quietTicks: Int? = null): JsonElement =
+        rpc.call("gui.settle", params { p("maxTicks", maxTicks); p("quietTicks", quietTicks) })
+
+    /** Re-run the open Screen's init() (new code after a hotswap); clears a screen-guard fault. */
+    fun reinit(): JsonElement = rpc.call("gui.reinit")
+
+    /** WARN/ERROR log entries and render faults with seq >= [since]. */
+    fun problems(since: Long? = null, level: String? = null, limit: Int? = null): JsonElement =
+        rpc.call("gui.problems", params { p("since", since); p("level", level); p("limit", limit) })
+
+    /** Redefine changed classes from [dirs]; the agent must already be attached (see `gui hotswap`). */
+    fun hotswap(dirs: List<String>, since: Long? = null, all: Boolean? = null, reinit: Boolean? = null): JsonElement =
+        rpc.call("gui.hotswap", params { p("dirs", dirs); p("since", since); p("all", all); p("reinit", reinit) })
+
     fun screen(): JsonElement = rpc.call("gui.screen")
 
     fun key(key: String, modifiers: Int = 0): JsonElement =
@@ -347,23 +385,30 @@ class GuiApi(private val rpc: RpcClient) {
     fun disconnect(waitTicks: Int? = null): JsonElement =
         rpc.call("gui.disconnect", params { p("waitTicks", waitTicks) })
 
-    /** Compare a fresh remote PNG locally; never updates the golden baseline. */
+    /** Compare a fresh remote PNG locally; never updates the golden baseline. [ignore] masks PNG rectangles. */
     fun assertScreenshot(
         expected: Path, diff: Path? = null, mode: String = "gui", delayTicks: Int = 0,
-        channelTolerance: Int = 0, maxDifferentRatio: Double = 0.0,
+        channelTolerance: Int = 0, maxDifferentRatio: Double = 0.0, ignore: List<ScreenshotRegion> = emptyList(),
     ): ScreenshotComparisonResult {
         require(Files.isRegularFile(expected)) { "expected PNG does not exist: $expected" }
         require(channelTolerance in 0..255) { "channelTolerance must be in 0..255" }
         require(maxDifferentRatio.isFinite() && maxDifferentRatio in 0.0..1.0) { "maxDifferentRatio must be finite in 0..1" }
         val shot = screenshot(mode = mode, inline = true, delayTicks = delayTicks).asJsonObject
         val actual = Base64.getDecoder().decode(requireNotNull(shot.get("png")) { "inline PNG was not returned" }.asString)
-        return ScreenshotComparison.compare(expected, actual, channelTolerance, maxDifferentRatio, diff).requireMatch()
+        return ScreenshotComparison.compare(expected, actual, channelTolerance, maxDifferentRatio, diff, ignore).requireMatch()
     }
 
     /** 按槽位点击（走 `handleInventoryMouseClick`，服务端裁定结果）。 */
     fun clickSlot(slot: Int, button: Int? = null, clickType: String? = null, waitTicks: Int? = null, moveCursor: Boolean? = null): JsonElement =
         rpc.call("gui.click", params {
             p("slot", slot); p("button", button); p("clickType", clickType)
+            p("waitTicks", waitTicks); p("moveCursor", moveCursor)
+        })
+
+    /** 按 `gui.screen` / 标注截图里的控件序号点击。 */
+    fun clickWidget(index: Int, button: Int? = null, waitTicks: Int? = null, moveCursor: Boolean? = null): JsonElement =
+        rpc.call("gui.click", params {
+            p("widget", index); p("button", button)
             p("waitTicks", waitTicks); p("moveCursor", moveCursor)
         })
 
@@ -396,6 +441,22 @@ class GuiApi(private val rpc: RpcClient) {
     /** Stop this exact client instance, not an endpoint that replaced it. */
     fun stop(instanceId: String, sessionToken: String): JsonElement =
         rpc.call("gui.stop", params { p("instanceId", instanceId); p("sessionToken", sessionToken) })
+}
+
+/** `gui.screenshot` options (see [GuiApi.screenshot]). */
+data class ScreenshotOptions(
+    val mode: String = "gui",
+    val format: String = "png",
+    val annotate: Boolean = false,
+    val drawLog: Boolean = false,
+    val inline: Boolean = false,
+    val name: String? = null,
+    val delayTicks: Int? = null,
+) {
+    fun toJson(): JsonElement = params {
+        p("mode", mode); p("format", format); p("annotate", annotate); p("drawLog", drawLog)
+        p("inline", inline); p("name", name); p("delayTicks", delayTicks)
+    }
 }
 
 class DebugApi(val rpc: RpcClient) {

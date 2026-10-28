@@ -193,9 +193,13 @@ launch then logs `Failed to read level ... already locked` and falls back to the
 | method | what it does |
 |---|---|
 | `gui.status` | client state: screen, window/gui scale, framebuffer, endpoint, **loaded jar path**, contract self-check |
-| `gui.screen` | the open screen: container slots in GUI units + widget list (text/x/y/size/value) |
-| `gui.screenshot` | real PNG — `--mode window` (framebuffer) or `--mode gui` (just the container GUI) + a transform mapping PNG pixels back to GUI units |
-| `gui.click` | click by container slot, widget text, GUI coordinates, or **PNG pixels from the previous screenshot** |
+| `gui.screen` | the open screen: container slots in GUI units, hovered slot + its tooltip, widgets (nested ones too) with index/text/x/y/size/value/focus/tooltip |
+| `gui.screenshot` | real PNG — `--mode window` (framebuffer) or `--mode gui` (just the container GUI) + a transform mapping PNG pixels back to GUI units; optional `annotate` (numbered slots/widgets), `drawLog` (the frame's draw calls), `format:"none"` (pixel hash only) |
+| `gui.click` | click by container slot, **widget index**, widget text, GUI coordinates, or **PNG pixels from the previous screenshot**; returns once the GUI has settled |
+| `gui.act` | one round trip: click/key/type/drag/close/openBlock/reinit + settle + optional `gui.screen` + screenshot + problems logged meanwhile |
+| `gui.settle` | wait until the server answered everything sent so far and the GUI stayed quiet (passive) |
+| `gui.problems` | WARN/ERROR log entries of the client JVM and caught Screen render faults, paged by cursor |
+| `gui.hotswap` / `gui.reinit` | redefine changed classes from compiled output dirs / re-run the open Screen's `init()` |
 | `gui.openBlock` | walk the client's own use-on-block path so a machine GUI opens |
 | `gui.close` / `gui.connect` / `gui.reloadResources` | close the screen (Esc) / join `host[:port]` / client-side F3+T |
 | `gui.key` / `gui.type` | one current-Screen key tap / Unicode char events, with scoped logical modifiers |
@@ -208,10 +212,11 @@ launch then logs `Failed to read level ... already locked` and falls back to the
 mcdebug raw world.setBlock '{"pos":[100,64,100],"block":"minecraft:chest"}'
 mcdebug raw inv.setSlot   '{"pos":[100,64,100],"slot":"0","item":"minecraft:diamond","count":5}'
 mcdebug gui open-block --x 100 --y 64 --z 100
-mcdebug gui screenshot --mode gui --out shot-1.png   # only the machine GUI
-mcdebug gui click --slot 0                           # server-authoritative slot click
-mcdebug gui screenshot --mode gui --out shot-2.png
+mcdebug gui screenshot --mode gui --annotate         # only the machine GUI, plus *.annotated.png with numbered slots/widgets
+mcdebug gui click --slot 0 --shot gui                # server-authoritative slot click, settle, new screenshot: one round trip
+mcdebug gui click --widget 2                         # widget index from gui screen / the annotated PNG
 mcdebug gui click --png 48,78                        # click by PNG pixel of the last screenshot
+mcdebug gui problems --brief                         # WARN/ERROR lines and render faults since the client started
 mcdebug gui close
 ```
 
@@ -241,8 +246,65 @@ Notes that save time:
 * `gui.connect` expects the client to be outside a world; use `gui disconnect` to save/leave first.
   Loading overlays and in-progress ConnectScreen cancellation are deliberately rejected by disconnect.
   Its wait is passive; a timeout does not undo a stop/save already requested.
-* Java/Kotlin changes require a client restart; only textures/lang/models support
-  `gui reload-resources`. Check `gui.status.jarPath` when deployment looks stale.
+* Java/Kotlin method-body changes can be hot-swapped (`gui hotswap`, below); structural changes
+  (new fields/methods) still need a restart unless the client runs on a JetBrains Runtime with
+  `-XX:+AllowEnhancedClassRedefinition`. Textures/lang/models use `gui reload-resources`.
+  Check `gui.status.jarPath` when deployment looks stale.
+
+### Agent iteration loop
+
+The pieces an agent needs to change GUI code and see the result without a human, or a restart:
+
+* **Settle instead of sleeping.** `gui.click` used to wait a fixed 20 ticks (1 s). It now sends a
+  server barrier (a command-suggestion round trip, which the server handles on its main thread after
+  every earlier packet), then waits until slots, carried stack, Screen and widgets stay unchanged
+  for 2 ticks. `waitTicks` is only the upper bound; `settle:false` / `--no-settle` restores the
+  fixed wait. Container data slots (progress, energy) are excluded, so a running machine still
+  settles. `gui settle` is the same wait on its own, e.g. after `be.setNbt`.
+* **One round trip per step.** `gui act` (or `--shot gui|window`, `--screen`, `--annotate`,
+  `--draw-log` on `click`/`key`/`type`/`drag`) returns the action result, settle report,
+  screenshot, screen JSON and the problems logged during the call. Action errors are returned as
+  `error` together with the views, so the agent still sees what happened.
+* **Pictures a model can act on.** `--annotate` writes `<name>.annotated.png` next to the clean PNG:
+  cyan numbers are slot indices (`--slot N`), magenta numbers widget indices (`--widget N`); the
+  legend with PNG rectangles is in `annotations`. The clean PNG is never modified.
+* **Draw log.** `--draw-log` returns every blit (texture, normalised UV, texel UV and texture size
+  for `blit`, sprite name for `blitSprite`), fill, string, item and tooltip of the captured frame,
+  with its on-screen rectangle in GUI units. Progress arrows and energy bars drawn in `renderBg` are
+  not widgets; this is how an agent checks them as data. At most 5000 entries per frame.
+* **Cheap change detection.** `--hash-only` (`format:"none"`) skips PNG encoding and file writes and
+  returns `pixelHash` (SHA-256 of the RGBA pixels). Every capture reads back only its crop rectangle.
+* **Render faults don't kill the client.** If the open Screen's `render` throws, the error is logged
+  at ERROR, shown in `gui problems` / `gui.status.screenGuard.fault` / `act.screenFault`, and only that
+  Screen stops drawing. Fix, hotswap, `gui reinit`. `clientScreenGuard=false` restores vanilla's crash.
+* **Hotswap.** `./gradlew classes`, then `mcdebug gui hotswap --classes build/classes/kotlin/client`.
+  The first call attaches a one-class JDK agent to the local client (same user); classes changed since
+  the last swap go through Fabric's and Mixin's transformers and are redefined, then the open Screen
+  is re-initialised (`--no-reinit` to skip). Failures (schema changes on stock HotSpot) are listed with
+  a hint and exit 2; the client keeps the old code.
+* **Lite modes answer immediately.** In `demand`/`gui-only` the throttled frame limiter is woken by an
+  incoming RPC, so a hop no longer waits out the rest of a 1/loopFps sleep.
+
+```bash
+pnpm dlx @yu1745/mcdebug --session demo raw gui.act '{"action":"click","params":{"slot":0},"screen":true,"screenshot":{"mode":"gui","annotate":true}}'
+pnpm dlx @yu1745/mcdebug --session demo raw gui.settle '{"maxTicks":40,"quietTicks":2}'
+pnpm dlx @yu1745/mcdebug --session demo raw gui.screenshot '{"mode":"gui","drawLog":true,"format":"none"}'
+pnpm dlx @yu1745/mcdebug --session demo raw gui.click '{"widget":2}'
+pnpm dlx @yu1745/mcdebug --session demo raw gui.problems '{"since":1,"level":"error","limit":50}'
+pnpm dlx @yu1745/mcdebug --session demo raw gui.reinit '{}'
+pnpm dlx @yu1745/mcdebug --session demo gui hotswap --classes build/classes/kotlin/client   # raw gui.hotswap needs the agent attached first
+```
+
+Measured on one machine (llvmpipe software GL, 854×480, `demand` mode, same world; RPC over the Unix
+socket without CLI startup; previous jar vs this one):
+
+| | previous | now |
+|---|---:|---:|
+| one-hop call in world view (`gui.status`, p50) | 37.1 ms | 0.8 ms |
+| `gui.screen` with a chest open (p50) | 37.0 ms | 0.7 ms |
+| `gui.screenshot --mode gui` (p50 / p95) | 37.0 / 48.4 ms | 21.5 / 24.0 ms |
+| `gui.click --slot` (p50) | 988 ms | 102 ms |
+| code change visible (Screen method body) | client restart (≈25–30 s) | `classes` 9 s + `gui hotswap` 1.2 s |
 
 ### Screen input and golden assertions
 
@@ -270,12 +332,19 @@ and release the original target; `ok:false`/screenChanged may mean a key success
 another Screen, not that it had no effect. Errors/cancellation do not roll back partial edits.
 Text is limited to valid Unicode <=4096 UTF-16 units; newline/control keys use `gui key`.
 
-Local golden comparisons never update a baseline, align or resize images:
+Local golden comparisons never update a baseline implicitly, align or resize images:
 
 ```bash
 mcdebug gui compare --expected golden/chest.png --actual artifacts/chest.png --diff artifacts/diff.png
 mcdebug gui compare --expected golden/chest.png --actual artifacts/chest.png --channel-tolerance 2 --max-different-ratio 0.001
+mcdebug gui compare --expected golden/chest.png --actual artifacts/chest.png --ignore 0,333,352,3 --report artifacts/review.html
+mcdebug gui compare --expected golden/chest.png --actual artifacts/chest.png --accept   # explicit: replace (or create) the golden
 ```
+
+`--ignore x,y,w,h` (repeatable) masks PNG rectangles such as the cursor, an animated arrow or a
+fractional crop edge; the ratio is computed over compared pixels and the diff shows masks in blue.
+`--report` writes a self-contained HTML page with expected/actual/diff for review. Only `--accept`
+writes the baseline, and then exits 0.
 
 Mismatch exits **1** with JSON pixel counts/ratio/max channel delta/bounds; dimensions must match.
 Default is exact RGBA including alpha and hidden RGB; tolerance and allowed different-pixel ratio
@@ -288,7 +357,9 @@ SDK/JUnit consumers can use a local compare, or request a new **inline** PNG and
 
 ```kotlin
 ScreenshotComparison.compare(expected, actual, diff = diff).requireMatch()
-api.gui.assertScreenshot(expected, diff = diff, mode = "gui", channelTolerance = 0)
+api.gui.assertScreenshot(expected, diff = diff, mode = "gui", channelTolerance = 0,
+    ignore = listOf(ScreenshotRegion(0, 333, 352, 3)))
+api.gui.act("click", mapOf("slot" to 0), screenshot = ScreenshotOptions(mode = "gui", annotate = true))
 ```
 
 `expected`, `actual`, `diff` are `Path`s. SDK assertion throws `AssertionError` on mismatch and protects

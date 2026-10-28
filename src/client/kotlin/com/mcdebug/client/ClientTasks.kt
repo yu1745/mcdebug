@@ -72,7 +72,10 @@ object ClientTasks {
             }
         }
         return try {
+            val queued = !client.isSameThread
             client.execute(run)
+            // A lite client may be sleeping in its frame limiter; do not make this hop wait it out.
+            if (queued) RenderControl.wake()
             future
         } catch (t: Throwable) {
             future.completeExceptionally(t)

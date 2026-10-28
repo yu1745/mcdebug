@@ -220,3 +220,62 @@ class ScreenshotComparisonTest {
         }
     }
 }
+
+class ScreenshotReviewTest {
+    @org.junit.jupiter.api.io.TempDir lateinit var temp: java.nio.file.Path
+
+    private fun write(name: String, rgba: ByteArray, width: Int = 2, height: Int = 1): java.nio.file.Path =
+        java.nio.file.Files.write(temp.resolve(name), PngCodec.encode(PngCodec.Image(width, height, rgba)))
+
+    @org.junit.jupiter.api.Test
+    fun `ignore regions exclude pixels from the difference and the ratio`() {
+        val expected = write("e.png", byteArrayOf(1, 2, 3, -1, 9, 9, 9, -1))
+        val actual = write("a.png", byteArrayOf(1, 2, 3, -1, 100, 9, 9, -1))
+        val strict = ScreenshotComparison.compare(expected, actual)
+        org.junit.jupiter.api.Assertions.assertFalse(strict.matches)
+        val masked = ScreenshotComparison.compare(expected, actual, ignore = listOf(ScreenshotRegion(1, 0, 1, 1)),
+            diff = temp.resolve("d.png"))
+        org.junit.jupiter.api.Assertions.assertTrue(masked.matches)
+        org.junit.jupiter.api.Assertions.assertEquals(1L, masked.ignoredPixels)
+        org.junit.jupiter.api.Assertions.assertEquals(0L, masked.differentPixels)
+        val diff = PngCodec.read(temp.resolve("d.png"))
+        org.junit.jupiter.api.Assertions.assertEquals(160, diff.rgba[6].toInt() and 255) // ignored pixel drawn blue
+        org.junit.jupiter.api.Assertions.assertEquals(1, masked.toJson()["ignore"].asJsonArray.size())
+    }
+
+    @org.junit.jupiter.api.Test
+    fun `region syntax is strict`() {
+        org.junit.jupiter.api.Assertions.assertEquals(ScreenshotRegion(1, 2, 3, 4), ScreenshotRegion.parse(" 1,2, 3,4"))
+        for (bad in listOf("1,2,3", "a,b,c,d", "1,2,0,4", "-1,0,1,1")) {
+            org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException::class.java) { ScreenshotRegion.parse(bad) }
+        }
+    }
+
+    @org.junit.jupiter.api.Test
+    fun `accept creates replaces or leaves the golden and refuses non PNG input`() {
+        val actual = write("a.png", byteArrayOf(1, 2, 3, -1, 4, 5, 6, -1))
+        val golden = temp.resolve("golden.png")
+        org.junit.jupiter.api.Assertions.assertEquals("created", ScreenshotReview.accept(golden, actual))
+        org.junit.jupiter.api.Assertions.assertEquals("unchanged", ScreenshotReview.accept(golden, actual))
+        val other = write("b.png", byteArrayOf(9, 9, 9, -1, 9, 9, 9, -1))
+        org.junit.jupiter.api.Assertions.assertEquals("replaced", ScreenshotReview.accept(golden, other))
+        org.junit.jupiter.api.Assertions.assertArrayEquals(java.nio.file.Files.readAllBytes(other), java.nio.file.Files.readAllBytes(golden))
+        val junk = java.nio.file.Files.write(temp.resolve("junk.png"), byteArrayOf(1, 2, 3))
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException::class.java) { ScreenshotReview.accept(golden, junk) }
+    }
+
+    @org.junit.jupiter.api.Test
+    fun `report embeds the three images and refuses to overwrite an input`() {
+        val expected = write("e.png", byteArrayOf(1, 2, 3, -1, 9, 9, 9, -1))
+        val actual = write("a.png", byteArrayOf(1, 2, 3, -1, 100, 9, 9, -1))
+        val result = ScreenshotComparison.compare(expected, actual, diff = temp.resolve("d.png"))
+        val report = temp.resolve("review.html")
+        ScreenshotReview.writeReport(report, expected, actual, result.diff, result)
+        val html = java.nio.file.Files.readString(report)
+        org.junit.jupiter.api.Assertions.assertEquals(3, Regex("data:image/png;base64,").findAll(html).count())
+        org.junit.jupiter.api.Assertions.assertTrue(html.contains("MISMATCH"))
+        org.junit.jupiter.api.Assertions.assertThrows(IllegalArgumentException::class.java) {
+            ScreenshotReview.writeReport(expected, expected, actual, null, result)
+        }
+    }
+}

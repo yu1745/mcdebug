@@ -145,3 +145,54 @@ class GuiCompareCommandTest {
         return buffer.toString(Charsets.UTF_8)
     }
 }
+
+@Isolated
+class GuiCompareReviewCommandTest {
+    @TempDir lateinit var temp: Path
+
+    @Test
+    fun `accept on a missing golden creates it and exits zero`() {
+        val actual = Files.write(temp.resolve("actual.png"), PngTestFixtures.encoded())
+        val golden = temp.resolve("golden.png")
+        val out = captureOut { GuiCompareCmd().parse(listOf("--expected", golden.toString(), "--actual", actual.toString(), "--accept")) }
+        assertEquals("created", JsonParser.parseString(out).asJsonObject["accepted"].asString)
+        assertTrue(Files.exists(golden))
+    }
+
+    @Test
+    fun `report with mismatch writes page and diff and still exits one without accept`() {
+        val expected = Files.write(temp.resolve("e.png"), PngTestFixtures.encoded())
+        val actual = Files.write(temp.resolve("a.png"), PngTestFixtures.encoded(rgba = PngTestFixtures.rgba(9, 9, 9, 255)))
+        val report = temp.resolve("r.html")
+        val args = listOf("--expected", expected.toString(), "--actual", actual.toString(), "--report", report.toString())
+        val out = captureOut { assertEquals(1, assertThrows(CliExit::class.java) { GuiCompareCmd().parse(args) }.code) }
+        assertTrue(Files.exists(report))
+        assertTrue(Files.exists(temp.resolve("r.html.diff.png")))
+        assertEquals(report.toString(), JsonParser.parseString(out).asJsonObject["report"].asString)
+        val accepted = captureOut { GuiCompareCmd().parse(args + "--accept") }
+        assertEquals("replaced", JsonParser.parseString(accepted).asJsonObject["accepted"].asString)
+        assertArrayEquals(Files.readAllBytes(actual), Files.readAllBytes(expected))
+    }
+
+    @Test
+    fun `ignore masks the only differing pixel`() {
+        val expected = Files.write(temp.resolve("e.png"), PngTestFixtures.encoded())
+        val actual = Files.write(temp.resolve("a.png"), PngTestFixtures.encoded(rgba = PngTestFixtures.rgba(9, 9, 9, 255)))
+        val out = captureOut { GuiCompareCmd().parse(listOf("--expected", expected.toString(), "--actual", actual.toString(), "--ignore", "0,0,1,1")) }
+        assertTrue(JsonParser.parseString(out).asJsonObject["matches"].asBoolean)
+    }
+
+    private fun captureOut(block: () -> Unit): String {
+        val previous = System.out
+        val buffer = ByteArrayOutputStream()
+        try {
+            PrintStream(buffer, true, Charsets.UTF_8).use { stream ->
+                System.setOut(stream)
+                block()
+            }
+        } finally {
+            System.setOut(previous)
+        }
+        return buffer.toString(Charsets.UTF_8)
+    }
+}

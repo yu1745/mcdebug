@@ -6,7 +6,6 @@ import com.mcdebug.rpc.RpcErrors
 import com.mcdebug.rpc.RpcException
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.screens.Screen
-import org.lwjgl.glfw.GLFW
 import java.lang.ref.WeakReference
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CompletionException
@@ -286,7 +285,7 @@ object GuiInputOps : ClientRpcGroup {
         }
 
         fun moveCursor() {
-            if (warpCursor(client, x, y)) report.addProperty("cursorMoved", true)
+            if (GuiCursor.warp(client, x, y)) report.addProperty("cursorMoved", true)
         }
 
         fun cleanup() {
@@ -402,22 +401,6 @@ object GuiInputOps : ClientRpcGroup {
             val cleanup = Runnable { op.fail(op.problem("CLIENT_STOPPING", "client is stopping")) }
             if (client.isSameThread) cleanup.run() else client.execute(cleanup)
         }
-    }
-
-    /** Copied continuous-mode path from GuiOps; lightweight mode never moves the desktop pointer. */
-    private fun warpCursor(client: Minecraft, x: Double, y: Double): Boolean {
-        if (client.screen == null) return false
-        if (RenderControl.moveCursor(x, y)) return true
-        val window = client.window
-        val width = window.getGuiScaledWidth()
-        val height = window.getGuiScaledHeight()
-        if (width <= 0 || height <= 0 || window.getWindow() == 0L) return false
-        val cursor = CaptureGeometry.screenToWindow(x, y, window.getScreenWidth(), window.getScreenHeight(), width, height)
-        if (!cursor.first.isFinite() || !cursor.second.isFinite()) return false
-        return try {
-            GLFW.glfwSetCursorPos(window.getWindow(), cursor.first, cursor.second)
-            true
-        } catch (_: Throwable) { false }
     }
 
     private fun required(params: JsonObject?): JsonObject = params ?: throw IllegalArgumentException("params required")

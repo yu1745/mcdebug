@@ -7,6 +7,7 @@ import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.required
 import com.github.ajalt.clikt.parameters.types.choice
+import com.github.ajalt.clikt.parameters.groups.provideDelegate
 import com.github.ajalt.clikt.parameters.types.int
 
 abstract class GuiModifiersCmd(name: String, help: String, epilog: String) :
@@ -15,6 +16,7 @@ abstract class GuiModifiersCmd(name: String, help: String, epilog: String) :
     private val shift by option("--shift", help = "logical Shift modifier").flag()
     private val alt by option("--alt", help = "logical Alt modifier").flag()
     private val superKey by option("--super", help = "logical Super/Command modifier").flag()
+    protected val follow by FollowUpOptions()
     protected fun modifiers(): Int = (if (shift) 1 else 0) or (if (ctrl) 2 else 0) or
         (if (alt) 4 else 0) or (if (superKey) 8 else 0)
 }
@@ -27,7 +29,11 @@ class GuiKeyCmd : GuiModifiersCmd(
     private val code by option("--code", help = "numeric GLFW key code instead of --key").int()
     override fun run() {
         if ((key == null) == (code == null)) throw UsageError("choose exactly one of --key or --code")
-        withGuiApi { api -> printJson(code?.let { api.gui.key(it, modifiers()) } ?: api.gui.key(key!!, modifiers())) }
+        follow.validate()
+        withGuiApi { api ->
+            val params = mapOf("key" to (code ?: key), "modifiers" to modifiers())
+            printJson(follow.run(api, "key", params) ?: code?.let { api.gui.key(it, modifiers()) } ?: api.gui.key(key!!, modifiers()))
+        }
     }
 }
 
@@ -37,7 +43,13 @@ class GuiTypeCmd : GuiModifiersCmd(
 ) {
     private val text by option("--text", help = "text to dispatch, at most 4096 UTF-16 units").required()
     private val clear by option("--clear", help = "send logical select-all/backspace before typing").flag()
-    override fun run() = withGuiApi { api -> printJson(api.gui.type(text, clear, modifiers())) }
+    override fun run() {
+        follow.validate()
+        withGuiApi { api ->
+            val params = mapOf("text" to text, "clear" to clear, "modifiers" to modifiers())
+            printJson(follow.run(api, "type", params) ?: api.gui.type(text, clear, modifiers()))
+        }
+    }
 }
 
 class GuiDragCmd : GuiModifiersCmd(
@@ -57,7 +69,12 @@ class GuiDragCmd : GuiModifiersCmd(
         }
         val start = pair(from)
         val end = pair(to)
-        withGuiApi { api -> printJson(api.gui.drag(start, end, space, button, steps, stepTicks, modifiers(), !noCursor)) }
+        follow.validate()
+        withGuiApi { api ->
+            val params = mapOf("from" to start, "to" to end, "space" to space, "button" to button, "steps" to steps,
+                "stepTicks" to stepTicks, "modifiers" to modifiers(), "moveCursor" to !noCursor)
+            printJson(follow.run(api, "drag", params) ?: api.gui.drag(start, end, space, button, steps, stepTicks, modifiers(), !noCursor))
+        }
     }
     private fun pair(value: String): List<Double> {
         val parts = value.split(',')

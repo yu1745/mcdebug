@@ -57,8 +57,9 @@ mcdebug/
 │       ├── mcdebug.mixins.json   # 服务端 mixin 配置（当前为空占位）
 │       └── modid.mixins.json     # ← Fabric 模板遗留，别删也别用
 └── src/client/                   # 客户端平面（gui.*），由 client entrypoint 加载，见 §14
-    ├── kotlin/com/mcdebug/client/{McDebugClientMod,GuiOps,Capture,ClientTasks,ClientRpc,ClientInfo}.kt
-    ├── java/com/mcdebug/client/mixin/AbstractContainerScreenAccessor.java
+    ├── kotlin/com/mcdebug/client/{McDebugClientMod,GuiOps,GuiScreenOps,GuiClickOps,GuiInputOps,GuiDevOps,Capture,ClientTasks,ClientRpc,ClientInfo}.kt
+    │                             # + GuiSettle/ProblemLog/ScreenGuard/DrawRecorder/Annotator/Hotswap（agent 迭代回路，见 §14）
+    ├── java/com/mcdebug/client/mixin/{AbstractContainerScreenAccessor,…,GuiGraphicsMixin,ClientPacketListenerMixin,RenderSystemMixin}.java
     └── resources/mcdebug.client.mixins.json
 ```
 
@@ -234,6 +235,10 @@ node scripts/set-version.mjs X.Y.Z
 
 ## 11b. 已完成变更记录（v2 → 0.5.x）
 
+- **GUI agent 迭代回路（1.21.1 线，未发版；设计与真机证据见 `docs/plan-gui-agent-loop.md`）**
+  - 点击 settle（服务端 barrier + 2 tick 静默）取代固定 20 tick；`gui.act` 一次往返；`gui.settle`/`gui.reinit`/`gui.problems`/`gui.hotswap` 新方法；`gui.click {widget}`；`gui.screen` 递归控件、hover/focus/tooltip；截图 `annotate`/`drawLog`/`format:none`、只读回裁剪区、`pixelHash`；screen guard；轻量模式 RPC 唤醒限帧器；`gui compare --ignore/--report/--accept`；SDK `ScreenshotOptions`/`act`/`ScreenshotRegion`。
+  - 同一机器 A/B（llvmpipe、demand、Unix socket 直连）：节流时单跳 37ms→0.8ms，`gui.click --slot` 988ms→102ms，GUI 截图 p50 37→21.5ms；Screen 方法体改动 `classes` 9s + hotswap 1.2s 生效（原需重启 ≈25–30s）。
+
 - **0.6.0 功能批（trace 自动停止 / wait 默认超时 / diff 忽略元数据 / 编码修复 / 批处理 / watch / health / replace-box / repl 增强 / 退出码）**
   - `trace.start` 新增 `maxTicks`：到期自动停止（抓最后一帧，`autoStopped:true`），移入 finished 表（上限 64）供 `trace.get` 继续读；0/缺省 = 不自动停止。
   - `wait.until` 默认 `timeoutTicks=1200`（1min @20tps）；0 = 无限（需显式传）。runner 侧总是显式传超时，不受影响。
@@ -304,6 +309,19 @@ node scripts/set-version.mjs X.Y.Z
 
 **为什么要有它**：服务端平面只能返回数据，永远拿不到像素——渲染是客户端的事。`screen.*`（服务端假玩家菜单）给的是槽位 JSON；`gui.*` 在**真实客户端**里截图与点击，agent 才能闭环调试 GUI（"摆方块/写 NBT → 打开 GUI → 截图 → 点击 → 再截图"）。
 
+### 14.0 怎么用（agent 工作流，先读这段）
+
+1. 摆场景走服务端平面（`world.setBlock` / `inv.setSlot` / `be.setNbt`），写完 `gui settle` 再看 GUI。
+2. 看：`gui screenshot --mode gui --annotate`（`*.annotated.png` 里青色数字=槽位、品红数字=控件序号）+ `gui screen`；要核对 `renderBg` 里画的进度条/能量条/贴图偏移，用 `--draw-log`（每个 blit/fill/文字/物品/tooltip 及其 GUI 单位矩形、贴图与 texel UV）。
+3. 动：`gui click --slot N|--widget N|--text|--png`，加 `--shot gui [--screen]` 一次往返拿"结果+settle+截图+期间日志"（底层 `gui.act`）；点击默认 settle 返回，不再固定睡 20 tick。
+4. 出问题先看 `gui problems --brief`（全 JVM WARN/ERROR + Screen 渲染异常）；Screen render 抛异常不再崩客户端（screen guard），`gui.status.screenGuard.fault` 有堆栈。
+5. 改代码：`./gradlew classes` → `mcdebug gui hotswap --classes build/classes/kotlin/client`（自动 reinit 当前 Screen）；只改资源用 `gui reload-resources`；加字段/方法要重启（或 JBR `-XX:+AllowEnhancedClassRedefinition`）。
+6. 回归：`gui compare --ignore x,y,w,h --report r.html`；只有显式 `--accept` 写基线。
+
+下面 14.1 起是**实现不变式**（改 `src/client/**` 时要守的规则）。
+
+### 14.1 实现不变式
+
 - **entrypoint 语义**：`fabric.mod.json` 的 `environment` 是 `"*"`，`server` entrypoint = `com.mcdebug.McDebugMod`（`DedicatedServerModInitializer`），`client` entrypoint = `com.mcdebug.client.McDebugClientMod`（`ClientModInitializer`）。loader 0.19.x **没有** `net.fabricmc.api.ServerModInitializer`，所以专用服务器不会触发 client entrypoint，而 client 上 server entrypoint **根本不触发**——单机客户端要两个平面都有，必须由 client entrypoint 自己调 `ServerPlane.installLifecycleHooks()`（它挂的是 `ServerLifecycleEvents`，集成服务器同样触发）。
 - **两个平面的端点必须区分**（单机客户端同进程同 gameDir）：服务端 `<gameDir>/mcdebug/socket` + 发现文件 `mcdebug/port`，TCP 25580 默认开；客户端 `<gameDir>/mcdebug/clientSocket` + `mcdebug/clientPort`，TCP **25581 默认关**（真实玩家客户端绝不能开）。配置键 `mcdebug.clientSocket`/`MCDEBUG_CLIENT_SOCKET`/json `clientSocket`（TCP 同理加 `client` 前缀）。`RpcServer` 的 `TransportConfig` 就是为这个抽的——它在 `RpcServer.kt` 里（Forge 会同步这个文件，所以不要把它挪到新文件）。
 - **线程规则**：`gui.*` handler 的入参在 RPC 连接线程，一切客户端状态读写都要 `ClientTasks.onClient(client)`（`client.execute{}`，在客户端线程时内联执行）。**续接 future 也要用 `ClientTasks.thenOnClient`**：`thenApply` 在前一个 future 已完成时会跑在 RPC 线程上。截图先入有界队列，`MinecraftRenderMixin` 调原 `GameRenderer.render` 并 flush 后再由 `Capture.afterFrame` 在客户端线程读回新帧，PNG 编码/落盘才丢到 `Util.ioPool()`。**tick 不是新帧屏障**；不要用 `RenderSystem.recordRenderCall` 代替明确渲染完成点。业务等待仍是被动 tick 回调，同 §7 的"只观察不驱动"。
@@ -311,7 +329,7 @@ node scripts/set-version.mjs X.Y.Z
 - **点击与光标**：`Screen.mouseClicked/mouseReleased` 直接派发，slot 走 `GameMode.handleInventoryMouseClick`，服务端裁定。continuous 模式保留真实光标 warp（失焦时 MC 不更新内部鼠标）；轻量模式使用虚拟 Screen 光标，让手持物品/提示/高亮在后台也跟随 RPC 点击，不干扰桌面指针。`--no-cursor-move` 禁止更新光标。状态确认仍以服务端数据为准，截图不等于网络确认。
 - **轻量运行**：见 `docs/plan-lightweight-client.md`。`RenderControl` + `RenderSchedule` 只门控 GameRenderer，不取消 runTick/自然 tick/网络/窗口事件泵。`clientRenderMode=continuous` 默认不变；`demand` 按需完整出帧，`gui-only` 显式跳世界/HUD（像素语义可能不同）。配置优先级 JVM属性 → 环境变量 → config/mcdebug.json；`clientLoopFps=20`（20..260）、`clientIdleFps=1`（0..loopFps，0=只响应截图/切屏）。仅在稳定世界/容器界面节流，加载/overlay/其他 Screen 保持正常渲染；模式不省略资源/GL初始化，不承诺低内存。失焦不自动暂停，显式暂停界面仍遵循引擎语义。
 - **探测要设上限**：CLI `--timeout` 管连接/握手（毫秒），`--request-timeout` 管请求（秒；0=无限）。普通请求默认30秒，`wait.until` 默认遵循服务端 tick timeout、不额外套墙钟限制；显式选项可覆盖。超时结束本地等待并关闭连接，**不代表远端操作取消/回滚**。版本检查读 server.ready，不再先发 status。发现 socket 只代表端点存在，世界就绪还需检查 `gui.status.inWorld`。
-- **mixins**：客户端有 `AbstractContainerScreenAccessor`（GUI矩形）、`MinecraftRenderMixin`（渲染完成屏障/调度/限帧）、`GameRendererMixin`（轻量模式失焦策略/虚拟光标）。锁定1.21.1，不加旧版分支。Loom 1.15 在 remapJar 直接重映射注解值，不需要 refmap；必须用真实客户端验证注入点，编译通过不等于注入成功。
+- **mixins**：客户端有 `AbstractContainerScreenAccessor`（GUI矩形/hoveredSlot）、`MinecraftRenderMixin`（渲染完成屏障/调度/限帧）、`GameRendererMixin`（失焦策略；`renderWithTooltip` 一个 MixinExtras `@WrapOperation` 同时做虚拟光标与 screen guard，别再拆回两个 `@ModifyArg`）、`RenderSystemMixin`（节流时可被 RPC 唤醒的 limitDisplayFPS）、`GuiGraphicsMixin`（draw log，只观察不改）、`ClientPacketListenerMixin`（只吞 settle barrier 自己的 suggestion 回包）、`NativeImageAccessor`/`ClientTextTooltipAccessor`。锁定1.21.1，不加旧版分支。Loom 1.15 在 remapJar 直接重映射注解值，不需要 refmap；必须用真实客户端验证注入点，编译通过不等于注入成功（`defaultRequire: 1`，注入失败即启动失败）。`@Inject` handler 要么带全部目标参数要么一个都不带，多重载各写一个。
 - **契约与测试**：启动时仍将 `GuiOps.methods()` 与 `Methods.CLIENT_METHODS` 对账，将 mismatch 写进 `gui.status`。test classpath 含 client output，用于无GL的纯调度/几何单测；真实截图/线程/mixin 仍靠客户端冒烟验证。停止时取消截图和 tick waiters 并关闭客户端 RPC。
 - **自包含 jar（踩过的坑）**：发布 jar 是**单个**文件丢进 `mods/`，所以 `contract` 的源码被 `sourceSets.main.kotlin.srcDir` 直接编进 mod（不是 `implementation project(':contract')`，那样 dev 能跑、装到别的项目里就 `NoClassDefFoundError`）。`verifyJarSelfContained` 守住这条线。
 - **一条命令进存档（快捷方式）**：MC 从 1.20 起支持 `--quickPlaySingleplayer <存档目录名>`，所以「起客户端 + 点存档」可以合成一行（`<存档目录名>` 是 `saves/` 下的**目录名**，不是显示名；Gradle `--args` 支持引号，带空格的目录名写成 `\"New World\"`）：
@@ -323,7 +341,15 @@ node scripts/set-version.mjs X.Y.Z
 - **怎么验**：`DISPLAY=:0 ./gradlew runClient`（mcdebug 自己的 run/）验证代码；把发布 jar 拷到**消费者项目**的 `run/mods/` 再起它的 `runClient` 验证打包（Loom dev 会把生产 jar 重映射到官方名，`gui.status.jarPath` 显示 `run/.fabric/processedMods/...` 那个副本）。已按此在 ic2-fabric-1.21.1（1.21.1 + official mappings，窗口 2560x1440 @ 显示器 (640,360)、guiScale 6、`gui` 427x240）完整跑通「加载已有存档 → `inv.setSlot` 摆物品 → `gui open-block ic2_120:batbox` → `--mode gui` 截图（1073x1175）→ `gui click --slot 0`（报告中心 (188,47)、`slotAfter` 空、`carried` 红石 x7）→ 再截图（sha 变化）→ 服务端 `be.getNbt` 确认 `Items=[]`」；PNG→GUI 往返也精确：槽中心 (188,47) ↔ PNG (384,150) ↔ 回读 `guiX=187.98`。
 - **后续GUI增强已实现**：见 `docs/plan-gui-input-regression.md`。`GuiInputOps` 提供当前Screen的 key/type/drag；`GuiInputModifiers` + `ScreenInputMixin` 只在事件调用栈覆盖静态修饰键查询，禁止全局键盘注入/跨请求持键。拖拽单操作、被动tick、有界30秒，切屏/改尺寸/错误/停止时释放原目标一次；CLIENT_STOPPING先调用GuiInputOps.close再关ClientTasks。`gui.disconnect`在服务端自身线程请求正常halt，客户端被动等shutdown后走原版清理/标题页，不停止进程、不从RPC泵runTick。加载/连接中拒绝，超时不回滚已请求的保存。
 - **golden回归**：CLI-only `gui compare` 和 SDK `GuiApi.assertScreenshot`（远端inline PNG）可由消费者JUnit使用，无新DSL/plugin。PngCodec是有界CRC校验RGB/RGBA8非交错PNG实现，无AWT/ImageIO/native-image反射依赖；不支持格式明确拒绝。默认精确RGBA，可显式tolerance/差异比例；尺寸不同直接失败，diff不能覆盖输入/别名，不自动更新golden。比较不匹配CLI exit1、SDK AssertionError。单测stdout capture必须@Isolated，不能与其它命令并发抢System.out。
-- **仍未做**：`--repeat`连拍、离屏定尺寸截图、全局游戏键绑定/移动、IME组合输入、连接尚未完成时的独立取消RPC、跨GPU像素确定性/自动基线更新。
+- **settle（`GuiSettle`）**：barrier 用 `ServerboundCommandSuggestionPacket`（服务端主线程 `ensureRunningOnSameThread` 后按序处理，回包排在此前请求引起的包之后）；**不能用 ping**——`handlePingRequest` 在网络线程直接回 pong，可能早于点击被处理。barrier id 从 `Int.MIN_VALUE` 递增，绝不与 `ClientSuggestionProvider`（0 起、空闲 -1）冲突。指纹=Screen 身份/槽位/carried/控件（文本、位置、active/visible），**刻意不含 container data slots**（运行中的机器照样能 settle）。被动观察 client tick，`waitTicks`/`maxTicks` 只是上限，超时返回 `settled:false` 不报错。
+- **gui.act（`GuiDevOps`）**：动作白名单 click/key/type/drag/close/openBlock/reinit/none（不含 act/stop/disconnect）；顺序=动作→settle（click 自带 settle 时跳过）→**先截图再取 screen**（截图强制新帧，hover 状态与图一致）→ problems(cursor 起)。动作失败也返回 views（`ok:false` + `error`）。
+- **截图（`Capture`）**：只 `glReadPixels` 裁剪矩形（绑 READ_FRAMEBUFFER 后恢复原绑定，flipY + alpha 置不透明，与 `Screenshot.takeScreenshot` 语义一致），失败回退旧的整图下载+裁剪。`pixelHash` 是 RGBA 像素 SHA-256（区别于 PNG 文件 `sha256`）。`format:"none"` 不编码不落盘，且**不更新** `--png` 点击用的 lastTransform。`annotate` 在干净 PNG 编码之后再画，写 `*.annotated.png`，主 PNG 永不带标注；标注目标在 afterFrame（客户端线程、同一 Screen）采集。`drawLog` 只在有请求要它的那一帧 arm（`RenderControl.renderFrame` 前后 begin/end），上限 5000 条。
+- **draw log 坐标**：pose 矩阵变换后的轴对齐包围盒，单位 = Screen/GUI 单位（与 `gui click --gui` 一致）；HUD 也会被记录（整帧）。
+- **screen guard（`ScreenGuard`）**：只包 `Screen.renderWithTooltip`，世界/HUD/overlay 异常照旧崩。捕获后该 Screen 实例不再绘制，`gui.reinit`/关屏清除；`clientScreenGuard=false`（JVM 属性/env/`config/mcdebug.json`）恢复原版崩溃。ERROR 日志经 appender 进 ProblemLog，不要再手动 record 一次（只在 appender 不可用时）。
+- **ProblemLog**：log4j root logger 加 WARN 级 appender，环形 500 条、单条截断；`since` 用返回的 `next` 游标。安装失败只 WARN 不阻止启动。
+- **唤醒（`RenderControl.wake`）**：只在我们的限帧器正在节流时 `glfwPostEmptyEvent`。**glfwInit 之前 post 会留下 GLFW 错误，原版 `_initGlfw` 的检查直接崩溃**（RPC 探测可能那么早到，真机冒烟踩过）。连续模式/非节流状态不接管原版 limitDisplayFPS。
+- **hotswap（`Hotswap` + CLI `AgentAttach`）**：Instrumentation 由 CLI 动态 attach 的单类 agent（`cli/src/main/java/com/mcdebug/agent/InstrumentationAgent.java`，纯 JDK，生成单类 jar，**不能**把 CLI fat jar 当 agent 加载——会把 kotlin/clikt 塞进目标 system classpath）放进 `System.getProperties()["mcdebug.instrumentation"]`。字节码：Knot classpath 读到的正是该文件时走 `getClassByteArray(name,true)`（Fabric pre-mixin 变换），再过 Mixin `transformClassBytes`；批量失败逐个重试以报告具体类。只有全部成功才推进 `since`。CLI 端 attach 用反射（没有 jdk.attach 的运行时给明确错误）。
+- **仍未做**：`--repeat`连拍、离屏定尺寸截图、全局游戏键绑定/移动、IME组合输入、连接尚未完成时的独立取消RPC、跨GPU像素确定性/自动基线更新、consumer 注册的 Screen 夹具（`gui.openScreen`）、截图时临时隐藏光标/tooltip 的确定性开关。
 
 ---
 

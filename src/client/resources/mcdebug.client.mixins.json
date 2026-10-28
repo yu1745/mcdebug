@@ -6,7 +6,12 @@
     "AbstractContainerScreenAccessor",
     "MinecraftRenderMixin",
     "GameRendererMixin",
-    "ScreenInputMixin"
+    "ScreenInputMixin",
+    "ClientPacketListenerMixin",
+    "NativeImageAccessor",
+    "ClientTextTooltipAccessor",
+    "GuiGraphicsMixin",
+    "RenderSystemMixin"
   ],
   "injectors": {
     "defaultRequire": 1
