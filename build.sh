@@ -39,9 +39,6 @@ if [ "$CLEAN" = 1 ]; then
   ./gradlew clean --console=plain
 fi
 ./gradlew $TASKS --console=plain
-# Forge 1.20.1 port（forge/ 嵌套 ForgeGradle 构建）。已含在根 `build` 里；这里显式再跑一次
-# （增量，通常 UP-TO-DATE），防止 build-tasks.txt 覆盖时漏掉。产物 forge/build/libs/mcdebug-forge-<ver>.jar
-./gradlew :forge:build --console=plain
 
 rm -rf "$OUT"
 mkdir -p "$OUT"
@@ -49,11 +46,6 @@ mkdir -p "$OUT"
 # 收集产物 jar：排除 sources/dev 件；其余（含 shadow/-all）都收
 find . -path '*/build/libs/*.jar' ! -name '*-sources.jar' ! -name '*-dev.jar' -print0 \
   | while IFS= read -r -d '' j; do cp "$j" "$OUT/"; done
-
-if ! ls "$OUT"/mcdebug-forge-*.jar >/dev/null 2>&1; then
-  echo "build.sh: 未收集到 Forge 产物 mcdebug-forge-*.jar（检查 forge/ 构建）" >&2
-  exit 1
-fi
 
 # 可选过滤：build-jars.txt 每行一个 glob，只保留匹配的 jar
 if [ -f build-jars.txt ]; then

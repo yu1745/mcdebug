@@ -1,96 +1,64 @@
 package com.mcdebug.cli
 
 import com.github.ajalt.clikt.core.CliktCommand
-import com.github.ajalt.clikt.parameters.options.flag
+import com.github.ajalt.clikt.core.UsageError
 import com.github.ajalt.clikt.parameters.options.option
-import java.net.URI
-import java.net.http.HttpClient
-import java.net.http.HttpRequest
-import java.net.http.HttpResponse
 import java.nio.file.Files
 import java.nio.file.Path
+import java.nio.file.StandardCopyOption
 import java.security.MessageDigest
 
-/** 下载 mcdebug mod jar（GitHub Releases + sha256 校验）。 */
-class JarCmd : CliktCommand(name = "jar", help = "download the mcdebug mod JAR from GitHub Releases (sha256-verified)") {
-    private val latest by option("--latest", help = "download the latest release instead of matching CLI version").flag()
-    private val output by option("--output", help = "output file path (default: mcdebug-{version}.jar)")
+/** Classpath location of the mod jar built in the same Gradle run as this CLI (see cli/build.gradle). */
+internal const val EMBEDDED_MOD_JAR = "META-INF/mcdebug/mod.jar"
+
+/**
+ * Write the embedded mcdebug mod jar. It is the jar of this exact build, so it always matches
+ * the CLI version and needs no network.
+ */
+class JarCmd : CliktCommand(
+    name = "jar",
+    help = "write the mcdebug mod JAR bundled with this CLI (same version, no download); " +
+        "--output DIR (e.g. run/mods) also removes older mcdebug-*.jar there, since two copies fail to load",
+) {
+    private val output by option("--output", help = "file or existing directory (default: ./mcdebug-<version>.jar)")
 
     override fun run() {
-        val ver = if (latest) fetchLatestVersion() else cliVersion()
-        val filePath = Path.of(output ?: "mcdebug-$ver.jar")
-        filePath.toAbsolutePath().parent?.let { Files.createDirectories(it) }
-
-        val expectedSha = tryFetchSha256(ver)
-        val actualSha = downloadAndHash(ver, filePath)
-        System.err.println("Computed SHA256: $actualSha")
-
-        if (expectedSha != null) {
-            if (actualSha != expectedSha) {
-                runCatching { Files.deleteIfExists(filePath) }
-                throw IllegalStateException(
-                    "SHA256 mismatch — the downloaded file is not the expected artifact.\n" +
-                        "  expected: $expectedSha\n" +
-                        "  actual:   $actualSha\n" +
-                        "The downloaded file has been deleted.",
-                )
-            }
-            System.err.println("SHA256 verified")
-        } else {
-            System.err.println("(no .sha256 sidecar in release — verification skipped)")
-        }
+        val written = writeEmbeddedModJar(output?.let(Path::of))
+        written.removed.forEach { System.err.println("removed older $it") }
+        System.err.println("SHA256: ${written.sha256}")
+        println(written.path)
     }
+}
 
-    private val http: HttpClient = HttpClient.newBuilder().followRedirects(HttpClient.Redirect.NORMAL).build()
+internal data class WrittenJar(val path: Path, val sha256: String, val removed: List<Path>)
 
-    private fun cliVersion(): String =
-        JarCmd::class.java.`package`.implementationVersion
-            ?: error("cannot determine CLI version (not built from a tagged release); use --latest")
-
-    private fun get(url: String): String =
-        http.send(
-            HttpRequest.newBuilder(URI.create(url)).GET().build(),
-            HttpResponse.BodyHandlers.ofString(),
-        ).body()
-
-    private fun download(url: String, file: Path): String {
-        val response = http.send(
-            HttpRequest.newBuilder(URI.create(url)).GET().build(),
-            HttpResponse.BodyHandlers.ofInputStream(),
-        )
-        if (response.statusCode() >= 400) throw IllegalStateException("HTTP ${response.statusCode()} for $url")
-        val digest = MessageDigest.getInstance("SHA-256")
-        response.body().use { input ->
-            Files.newOutputStream(file).use { output ->
-                val buf = ByteArray(64 * 1024)
-                while (true) {
-                    val n = input.read(buf)
-                    if (n < 0) break
-                    digest.update(buf, 0, n)
-                    output.write(buf, 0, n)
-                }
-            }
-        }
-        return digest.digest().joinToString("") { "%02x".format(it) }
+internal fun writeEmbeddedModJar(output: Path?, version: String = cliVersion()): WrittenJar {
+    val name = "mcdebug-$version.jar"
+    val target = when {
+        output == null -> Path.of(name)
+        Files.isDirectory(output) -> output.resolve(name)
+        else -> output
     }
+    val bytes = JarCmd::class.java.classLoader.getResourceAsStream(EMBEDDED_MOD_JAR)?.use { it.readAllBytes() }
+        ?: throw UsageError("this CLI build has no embedded mod jar ($EMBEDDED_MOD_JAR); build it with ./gradlew :cli:shadowJar")
+    target.toAbsolutePath().parent?.let { Files.createDirectories(it) }
+    val tmp = Files.createTempFile(target.toAbsolutePath().parent, ".mcdebug-", ".jar.part")
+    Files.write(tmp, bytes)
+    Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE)
+    val removed = if (output != null && Files.isDirectory(output)) removeOlderModJars(output, keep = target) else emptyList()
+    val sha = MessageDigest.getInstance("SHA-256").digest(bytes).joinToString("") { "%02x".format(it) }
+    return WrittenJar(target, sha, removed)
+}
 
-    private fun fetchLatestVersion(): String {
-        val res = http.send(
-            HttpRequest.newBuilder(URI.create("https://github.com/yu1745/mcdebug/releases/latest")).GET().build(),
-            HttpResponse.BodyHandlers.ofString(),
-        )
-        val m = Regex("/releases/tag/(v?[\\d.+a-z-]+)$", RegexOption.IGNORE_CASE).find(res.uri().toString())
-        val tag = m?.groupValues?.get(1) ?: error("cannot parse latest version from ${res.uri()}")
-        return tag.removePrefix("v")
+/** Other mcdebug mod jars (`mcdebug-<version>.jar`, not -sources/-cli) in a mods directory. */
+private fun removeOlderModJars(dir: Path, keep: Path): List<Path> {
+    val pattern = Regex("""mcdebug-\d[\w.+-]*\.jar""")
+    val stale = Files.list(dir).use { files ->
+        files.filter { f ->
+            val n = f.fileName.toString()
+            pattern.matches(n) && !n.endsWith("-sources.jar") && Files.isRegularFile(f) && !Files.isSameFile(f, keep)
+        }.toList()
     }
-
-    private fun tryFetchSha256(ver: String): String? = try {
-        val body = get("https://github.com/yu1745/mcdebug/releases/download/v$ver/mcdebug-$ver.jar.sha256").trim()
-        body.substringBefore(" ").takeIf { it.isNotEmpty() }
-    } catch (_: Exception) {
-        null
-    }
-
-    private fun downloadAndHash(ver: String, file: Path): String =
-        download("https://github.com/yu1745/mcdebug/releases/download/v$ver/mcdebug-$ver.jar", file)
+    stale.forEach(Files::delete)
+    return stale
 }

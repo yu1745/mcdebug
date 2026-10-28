@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""契约一致性检查（fabric-smoke.sh / forge-smoke.sh 共用）。
+"""契约一致性检查（fabric-smoke.sh 使用）。
 
 用法: contract-parity.py <socket 路径> <Methods.kt 路径>
 

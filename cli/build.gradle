@@ -33,18 +33,25 @@ application {
 	mainClass = 'com.mcdebug.cli.MainKt'
 }
 
+// The mod jar of this same build travels inside the CLI (`mcdebug jar` writes it out): versions
+// always match and nothing is downloaded. The root project is evaluated first, so remapJar exists.
+def modJar = rootProject.tasks.named('remapJar')
+
 tasks.shadowJar {
 	archiveClassifier = ''
 	archiveFileName = 'mcdebug-cli.jar'
 	mergeServiceFiles()
+	from(modJar.flatMap { it.archiveFile }) {
+		into 'META-INF/mcdebug'
+		rename { 'mod.jar' }
+	}
 	manifest {
 		attributes 'Main-Class': application.mainClass.get()
 		attributes 'Implementation-Version': project.version
 	}
 }
 
-// 端到端验证与发布共用的产物任务：产出根目录的 mcdebug-cli.jar（固定名，进 git）。
-// 发布流程：shadowJar → copyCliJar → set-version → commit+tag → push
+// 产出根目录的 mcdebug-cli.jar（固定名，不进 git）：冒烟脚本/本地使用，release.yml 把它传到 Release。
 // 注意：不能用 Copy task —— Gradle 9 的 input snapshot 会扫描目标目录，
 // 遇到 run/mcdebug/socket（unix socket）非普通文件直接失败；doLast 里拷贝不参与快照。
 tasks.register('copyCliJar') {
