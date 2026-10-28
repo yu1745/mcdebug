@@ -146,6 +146,12 @@ tasks.register('verifyJarSelfContained') {
 			'com/mcdebug/client/GuiClickOps.class',                // agent loop (0.7): settle/act/inspection
 			'com/mcdebug/client/GuiScreenOps.class',
 			'com/mcdebug/client/GuiDevOps.class',
+			'com/mcdebug/client/GuiPointerOps.class',
+			'com/mcdebug/client/GuiTargets.class',
+			'com/mcdebug/client/ScreenFactory.class',
+			'com/mcdebug/client/ScreenArgs.class',
+			'com/mcdebug/client/ScreenReload.class',
+			'com/mcdebug/client/ScreenClassLoader.class',
 			'com/mcdebug/client/GuiSettle.class',
 			'com/mcdebug/client/ProblemLog.class',
 			'com/mcdebug/client/ScreenGuard.class',

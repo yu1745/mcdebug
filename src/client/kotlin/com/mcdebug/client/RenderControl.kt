@@ -62,20 +62,23 @@ object RenderControl {
             client.mainRenderTarget.clear(Minecraft.ON_OSX)
             client.mainRenderTarget.bindWrite(true)
         }
-        // Arm the draw log only for a frame a pending capture actually asked for.
-        val recordDraws = Capture.wantsDrawLog()
+        // Arm the draw log / hidden cursor only for a frame a pending capture asked for.
+        val frameCursor = Capture.nextFrameCursor()
+        val recordDraws = Capture.wantsDrawLog(frameCursor)
         if (recordDraws) DrawRecorder.begin()
+        hideCursor = frameCursor == "hide"
         var drawLog: com.google.gson.JsonObject? = null
         try {
             renderer.render(delta, renderWorld && mode != RenderMode.GUI_ONLY)
         } finally {
+            hideCursor = false
             if (recordDraws) drawLog = DrawRecorder.end()
         }
         frames++
         // LoadingOverlay and mod render callbacks may switch/init screens. Do not
         // pair the old frame's pixels with a new Screen's bounds; keep requests
         // pending so idleFps=0 still forces the following natural frame.
-        if (client.screen === screenBefore && client.getOverlay() === overlayBefore) Capture.afterFrame(client, drawLog)
+        if (client.screen === screenBefore && client.getOverlay() === overlayBefore) Capture.afterFrame(client, drawLog, frameCursor ?: "keep")
     }
 
     /** Limit the outer loop, not the natural tick rate. Never throttle loading. */
@@ -138,11 +141,15 @@ object RenderControl {
     @JvmStatic
     fun keepRunningUnfocused(): Boolean = schedule.settings.mode != RenderMode.CONTINUOUS
 
-    @JvmStatic
-    fun mouseX(original: Int): Int = virtualCursor.x(original)
+    // Client thread, only during one capture frame (`cursor: hide`).
+    private var hideCursor = false
+    private const val HIDDEN = -100_000
 
     @JvmStatic
-    fun mouseY(original: Int): Int = virtualCursor.y(original)
+    fun mouseX(original: Int): Int = if (hideCursor) HIDDEN else virtualCursor.x(original)
+
+    @JvmStatic
+    fun mouseY(original: Int): Int = if (hideCursor) HIDDEN else virtualCursor.y(original)
 
     fun statusJson(): JsonObject = JsonObject().apply {
         addProperty("mode", schedule.settings.mode.id)

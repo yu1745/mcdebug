@@ -6,7 +6,6 @@ import com.mcdebug.client.mixin.AbstractContainerScreenAccessor
 import com.mcdebug.rpc.RpcErrors
 import com.mcdebug.rpc.RpcException
 import net.minecraft.client.Minecraft
-import net.minecraft.client.gui.components.AbstractWidget
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen
 import net.minecraft.world.inventory.ClickType
 import java.util.concurrent.CompletableFuture
@@ -28,53 +27,14 @@ object GuiClickOps : ClientRpcGroup {
             RpcErrors.INVALID_PARAMS,
             "params required: slot= | widget= | text= | gui=[x,y] | png=[x,y] | x&y (+ button/clickType/shift/waitTicks)",
         )
-        val slotElement = p.get("slot")?.takeIf { !it.isJsonNull }
-        val widgetIndex = p.get("widget")?.takeIf { !it.isJsonNull }
-        val text = p.string("text")
-        val guiElement = p.get("gui")?.takeIf { !it.isJsonNull }
-        val pngElement = p.get("png")?.takeIf { !it.isJsonNull }
         val wait = WaitPolicy(p.boundedInt("waitTicks", 20, 0..1200), p.bool("settle", true), p.boundedInt("quietTicks", 2, 0..100))
         val moveCursor = p.bool("moveCursor", true)
-        return when {
-            slotElement != null -> clickSlot(client, slotIndex(slotElement), p, wait, moveCursor)
-            widgetIndex != null -> {
-                val index = slotIndex(widgetIndex)
-                clickCoordinates(client, p, wait, moveCursor) { resolveWidgetTarget(client, index) }
-            }
-            text != null -> {
-                val index = p.int("index", 0)
-                clickCoordinates(client, p, wait, moveCursor) { resolveTextTarget(client, text, index) }
-            }
-            guiElement != null -> {
-                val pair = p.pair("gui")
-                clickCoordinates(client, p, wait, moveCursor) { Target(pair.first, pair.second, "gui", null, null) }
-            }
-            pngElement != null -> {
-                val pair = p.pair("png")
-                clickCoordinates(client, p, wait, moveCursor) {
-                    val gui = Capture.pngToGui(pair.first, pair.second)
-                    Target(gui.first, gui.second, "png", null, "png=${pair.first},${pair.second}")
-                }
-            }
-            else -> {
-                val x = p.num("x")
-                    ?: throw RpcException(RpcErrors.INVALID_PARAMS, "x is required when no slot/widget/text/gui/png is given")
-                val y = p.num("y")
-                    ?: throw RpcException(RpcErrors.INVALID_PARAMS, "y is required when no slot/widget/text/gui/png is given")
-                clickCoordinates(client, p, wait, moveCursor) { Target(x, y, "gui", null, null) }
-            }
-        }
+        val slotElement = p.get("slot")?.takeIf { !it.isJsonNull }
+        return if (slotElement != null) clickSlot(client, GuiTargets.index(slotElement), p, wait, moveCursor)
+        else GuiTargets.prepare(client, p).thenCompose { q -> clickCoordinates(client, q, wait, moveCursor) { GuiTargets.resolve(client, q) } }
     }
 
     private class WaitPolicy(val maxTicks: Int, val settle: Boolean, val quietTicks: Int)
-
-    private class Target(
-        val x: Double,
-        val y: Double,
-        val mode: String,
-        val widget: Pair<Int, AbstractWidget>?,
-        val via: String?,
-    )
 
     private class ClickResult(
         val mode: String,
@@ -151,7 +111,7 @@ object GuiClickOps : ClientRpcGroup {
         params: JsonObject,
         wait: WaitPolicy,
         moveCursor: Boolean,
-        resolve: () -> Target,
+        resolve: () -> GuiTarget,
     ): CompletableFuture<JsonElement> {
         val button = params.int("button", 0)
         val clicked = ClientTasks.onClient(client) {
@@ -230,68 +190,6 @@ object GuiClickOps : ClientRpcGroup {
             }
             add("carried", menu?.let { itemJson(it.getCarried()) } ?: JsonObject())
         }
-    }
-
-    private fun resolveWidgetTarget(client: Minecraft, index: Int): Target {
-        val screen = client.screen ?: throw noScreen()
-        val widgets = GuiWidgets.collect(screen)
-        val widget = widgets.getOrNull(index)
-            ?: throw RpcException(
-                RpcErrors.GUI_ELEMENT_NOT_FOUND,
-                "no widget $index on ${screen.javaClass.simpleName} (${widgets.size} widgets; indices from gui.screen)",
-                JsonObject().apply {
-                    addProperty("reason", "GUI_ELEMENT_NOT_FOUND")
-                    addProperty("widgetCount", widgets.size)
-                },
-            )
-        return Target(
-            widget.getX() + widget.getWidth() / 2.0,
-            widget.getY() + widget.getHeight() / 2.0,
-            "widget",
-            index to widget,
-            "widget=$index",
-        )
-    }
-
-    private fun resolveTextTarget(client: Minecraft, text: String, index: Int): Target {
-        val screen = client.screen ?: throw noScreen()
-        val all = GuiWidgets.collect(screen).withIndex().toList()
-        val matches = all.filter { it.value.getMessage().string.contains(text, ignoreCase = true) }
-        val clickable = matches.filter { it.value.isActive && it.value.visible }
-        val pool = if (clickable.isNotEmpty()) clickable else matches
-        val widget = pool.getOrNull(index)
-            ?: throw RpcException(
-                RpcErrors.GUI_ELEMENT_NOT_FOUND,
-                if (matches.isEmpty()) {
-                    "no widget contains \"$text\" on ${screen.javaClass.simpleName}"
-                } else {
-                    "no widget at index $index contains \"$text\" (${pool.size} match(es))"
-                },
-                JsonObject().apply {
-                    addProperty("reason", "GUI_ELEMENT_NOT_FOUND")
-                    addProperty("query", text)
-                    addProperty("matchCount", matches.size)
-                    addProperty("clickableMatchCount", clickable.size)
-                    add("available", stringArray(
-                        all.map { it.value }.filter { it.visible && it.getMessage().string.isNotBlank() }
-                            .take(60).map { it.getMessage().string },
-                    ))
-                },
-            )
-        return Target(
-            widget.value.getX() + widget.value.getWidth() / 2.0,
-            widget.value.getY() + widget.value.getHeight() / 2.0,
-            "text",
-            widget.index to widget.value,
-            "text=\"$text\"",
-        )
-    }
-
-    private fun slotIndex(element: JsonElement): Int = when {
-        element.isJsonPrimitive && element.asJsonPrimitive.isNumber -> element.asInt
-        element.isJsonPrimitive -> element.asString.trim().toIntOrNull()
-            ?: throw RpcException(RpcErrors.INVALID_PARAMS, "index must be a number, got '${element.asString}'")
-        else -> throw RpcException(RpcErrors.INVALID_PARAMS, "index must be a number")
     }
 
     private fun parseClickType(name: String): ClickType {

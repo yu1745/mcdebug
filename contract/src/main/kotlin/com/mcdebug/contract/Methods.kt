@@ -99,6 +99,7 @@ object Methods {
         "gui.screen", "gui.click", "gui.close", "gui.reloadResources", "gui.stop",
         "gui.key", "gui.type", "gui.drag", "gui.disconnect",
         "gui.act", "gui.settle", "gui.reinit", "gui.problems", "gui.hotswap",
+        "gui.hover", "gui.scroll", "gui.openScreen", "gui.reloadScreen",
     )
 
     /** 客户端平面全部方法名。 */

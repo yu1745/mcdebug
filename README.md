@@ -195,11 +195,15 @@ launch then logs `Failed to read level ... already locked` and falls back to the
 | `gui.status` | client state: screen, window/gui scale, framebuffer, endpoint, **loaded jar path**, contract self-check |
 | `gui.screen` | the open screen: container slots in GUI units, hovered slot + its tooltip, widgets (nested ones too) with index/text/x/y/size/value/focus/tooltip |
 | `gui.screenshot` | real PNG — `--mode window` (framebuffer) or `--mode gui` (just the container GUI) + a transform mapping PNG pixels back to GUI units; optional `annotate` (numbered slots/widgets), `drawLog` (the frame's draw calls), `format:"none"` (pixel hash only) |
-| `gui.click` | click by container slot, **widget index**, widget text, GUI coordinates, or **PNG pixels from the previous screenshot**; returns once the GUI has settled |
-| `gui.act` | one round trip: click/key/type/drag/close/openBlock/reinit + settle + optional `gui.screen` + screenshot + problems logged meanwhile |
+| `gui.click` | click by container slot, **widget index**, widget text (falls back to text the frame *drew*), GUI coordinates, or **PNG pixels from the previous screenshot**; returns once the GUI has settled |
+| `gui.hover` | move the cursor onto a target, render one frame, return the **tooltips that frame drew** (custom `renderBg` tooltips too), hovered slot/widget |
+| `gui.scroll` | mouse wheel (`Screen.mouseScrolled`) at a target, then settle |
+| `gui.openScreen` | open `inventory`, `pkg.Class` or `pkg.Class#staticFactory`: a Screen fixture without a block |
+| `gui.act` | one round trip: click/hover/scroll/key/type/drag/close/openBlock/openScreen/reinit/reloadScreen + settle + optional `gui.screen` + screenshot + problems logged meanwhile |
 | `gui.settle` | wait until the server answered everything sent so far and the GUI stayed quiet (passive) |
 | `gui.problems` | WARN/ERROR log entries of the client JVM and caught Screen render faults, paged by cursor |
-| `gui.hotswap` / `gui.reinit` | redefine changed classes from compiled output dirs / re-run the open Screen's `init()` |
+| `gui.hotswap` / `gui.reinit` | redefine changed classes from compiled output dirs (all or nothing) / re-run the open Screen's `init()` |
+| `gui.reloadScreen` | rebuild the open Screen from compiled output in a fresh class loader: **any** change to its class, same container menu |
 | `gui.openBlock` | walk the client's own use-on-block path so a machine GUI opens |
 | `gui.close` / `gui.connect` / `gui.reloadResources` | close the screen (Esc) / join `host[:port]` / client-side F3+T |
 | `gui.key` / `gui.type` | one current-Screen key tap / Unicode char events, with scoped logical modifiers |
@@ -216,6 +220,8 @@ mcdebug gui screenshot --mode gui --annotate         # only the machine GUI, plu
 mcdebug gui click --slot 0 --shot gui                # server-authoritative slot click, settle, new screenshot: one round trip
 mcdebug gui click --widget 2                         # widget index from gui screen / the annotated PNG
 mcdebug gui click --png 48,78                        # click by PNG pixel of the last screenshot
+mcdebug gui hover --slot 0                           # tooltips really drawn, hovered slot/widget
+mcdebug gui screenshot --mode gui --hide-cursor      # golden without hover/tooltip/carried stack
 mcdebug gui problems --brief                         # WARN/ERROR lines and render faults since the client started
 mcdebug gui close
 ```
@@ -247,7 +253,8 @@ Notes that save time:
   Loading overlays and in-progress ConnectScreen cancellation are deliberately rejected by disconnect.
   Its wait is passive; a timeout does not undo a stop/save already requested.
 * Java/Kotlin method-body changes can be hot-swapped (`gui hotswap`, below); structural changes
-  (new fields/methods) still need a restart unless the client runs on a JetBrains Runtime with
+  (new fields/methods/lambdas) in the open Screen's own class use `gui reload-screen`; elsewhere
+  they need a restart unless the client runs on a JetBrains Runtime with
   `-XX:+AllowEnhancedClassRedefinition`. Textures/lang/models use `gui reload-resources`.
   Check `gui.status.jarPath` when deployment looks stale.
 
@@ -280,8 +287,27 @@ The pieces an agent needs to change GUI code and see the result without a human,
 * **Hotswap.** `./gradlew classes`, then `mcdebug gui hotswap --classes build/classes/kotlin/client`.
   The first call attaches a one-class JDK agent to the local client (same user); classes changed since
   the last swap go through Fabric's and Mixin's transformers and are redefined, then the open Screen
-  is re-initialised (`--no-reinit` to skip). Failures (schema changes on stock HotSpot) are listed with
-  a hint and exit 2; the client keeps the old code.
+  is re-initialised (`--no-reinit` to skip). It is all or nothing: schema changes on stock HotSpot are
+  listed per class (`added method init$lambda$0(...)`, `added field ...`) before anything is applied,
+  exit 2, and the client keeps the old code — a partial swap would let new code call missing members.
+* **Reload the Screen class itself.** `mcdebug gui reload-screen --classes build/classes/kotlin/client`
+  loads the open Screen's class (and nested classes; `--also PREFIX` for more) from the output dirs
+  into a fresh child-first class loader and swaps a new instance in. Any change works — new buttons,
+  fields, lambdas. A container screen is rebuilt around the **same menu** without closing it, so the
+  server container, slots and carried stack survive; a plain screen gets the old one's parent. Limits:
+  the new instance starts with fresh fields; other classes stay as loaded; Java package-private access
+  into the rest of the package fails; reopening the GUI the normal way uses the originally loaded class.
+* **Screen fixtures.** `gui open-screen inventory | pkg.Class | pkg.Class#factory` opens any client
+  Screen. Constructors/factories may take `Screen` (parent), `Player`, `Minecraft`, `Options`; put a
+  dev-only factory that fills a Screen with test data in your mod's dev source set (Kotlin: `@JvmStatic`).
+  Container screens need a server menu: use `gui open-block`, or a factory built on `player.inventoryMenu`.
+* **Hover, scroll, drawn text.** `gui hover` returns the tooltips the next frame actually drew (energy
+  bars, tank levels included); `gui scroll --dy N` scrolls lists. `--text` matches widget labels first
+  and otherwise the strings the frame drew, so hand-drawn buttons and list entries are reachable
+  (`mode:"drawnText"`).
+* **Deterministic goldens.** `--hide-cursor` renders the captured frame with the cursor off-screen (no
+  hover highlight, tooltip or carried stack); the following frame is normal again. Entity previews
+  (the inventory player) still animate: mask them with `gui compare --ignore`.
 * **Lite modes answer immediately.** In `demand`/`gui-only` the throttled frame limiter is woken by an
   incoming RPC, so a hop no longer waits out the rest of a 1/loopFps sleep.
 
@@ -293,6 +319,11 @@ pnpm dlx @yu1745/mcdebug --session demo raw gui.click '{"widget":2}'
 pnpm dlx @yu1745/mcdebug --session demo raw gui.problems '{"since":1,"level":"error","limit":50}'
 pnpm dlx @yu1745/mcdebug --session demo raw gui.reinit '{}'
 pnpm dlx @yu1745/mcdebug --session demo gui hotswap --classes build/classes/kotlin/client   # raw gui.hotswap needs the agent attached first
+pnpm dlx @yu1745/mcdebug --session demo raw gui.reloadScreen '{"dirs":["build/classes/kotlin/client"]}'
+pnpm dlx @yu1745/mcdebug --session demo raw gui.hover '{"slot":0}'
+pnpm dlx @yu1745/mcdebug --session demo raw gui.scroll '{"gui":[100,80],"dy":-3}'
+pnpm dlx @yu1745/mcdebug --session demo raw gui.openScreen '{"screen":"com.example.dev.Fixtures#machineScreen"}'
+pnpm dlx @yu1745/mcdebug --session demo raw gui.screenshot '{"mode":"gui","cursor":"hide"}'
 ```
 
 Measured on one machine (llvmpipe software GL, 854×480, `demand` mode, same world; RPC over the Unix
@@ -305,6 +336,7 @@ socket without CLI startup; previous jar vs this one):
 | `gui.screenshot --mode gui` (p50 / p95) | 37.0 / 48.4 ms | 21.5 / 24.0 ms |
 | `gui.click --slot` (p50) | 988 ms | 102 ms |
 | code change visible (Screen method body) | client restart (≈25–30 s) | `classes` 9 s + `gui hotswap` 1.2 s |
+| code change visible (new field/method/lambda in the Screen) | client restart (≈25–30 s) | `classes` + `gui reload-screen`, no restart |
 
 ### Screen input and golden assertions
 
@@ -358,8 +390,10 @@ SDK/JUnit consumers can use a local compare, or request a new **inline** PNG and
 ```kotlin
 ScreenshotComparison.compare(expected, actual, diff = diff).requireMatch()
 api.gui.assertScreenshot(expected, diff = diff, mode = "gui", channelTolerance = 0,
-    ignore = listOf(ScreenshotRegion(0, 333, 352, 3)))
+    ignore = listOf(ScreenshotRegion(0, 333, 352, 3)), hideCursor = true)
 api.gui.act("click", mapOf("slot" to 0), screenshot = ScreenshotOptions(mode = "gui", annotate = true))
+api.gui.hover(mapOf("slot" to 0))           // tooltips drawn in that frame
+api.gui.openScreen("com.example.dev.Fixtures#machineScreen")
 ```
 
 `expected`, `actual`, `diff` are `Path`s. SDK assertion throws `AssertionError` on mismatch and protects

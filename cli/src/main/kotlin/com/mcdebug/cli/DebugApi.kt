@@ -362,7 +362,25 @@ class GuiApi(private val rpc: RpcClient) {
     fun hotswap(dirs: List<String>, since: Long? = null, all: Boolean? = null, reinit: Boolean? = null): JsonElement =
         rpc.call("gui.hotswap", params { p("dirs", dirs); p("since", since); p("all", all); p("reinit", reinit) })
 
+    /** Rebuild the open Screen from [dirs] in a new class loader (any change to its class; same menu). */
+    fun reloadScreen(dirs: List<String>, also: List<String> = emptyList()): JsonElement =
+        rpc.call("gui.reloadScreen", params { p("dirs", dirs); if (also.isNotEmpty()) p("also", also) })
+
     fun screen(): JsonElement = rpc.call("gui.screen")
+
+    /**
+     * Hover a target (`slot`/`widget`/`text`/`gui`/`png` as for click) and report
+     * `tooltips` actually drawn in the next frame plus `hoveredSlot`/`hoveredWidget`.
+     */
+    fun hover(target: Map<String, Any?>): JsonElement =
+        rpc.call("gui.hover", gson.toJsonTree(target.filterValues { it != null }))
+
+    /** Mouse wheel at a target; positive [dy] = wheel up. Settles afterwards like a click. */
+    fun scroll(target: Map<String, Any?>, dy: Double, dx: Double? = null, waitTicks: Int? = null): JsonElement =
+        rpc.call("gui.scroll", gson.toJsonTree((target + mapOf("dy" to dy, "dx" to dx, "waitTicks" to waitTicks)).filterValues { it != null }))
+
+    /** Open `inventory`, `pkg.Class` (public constructor) or `pkg.Class#staticFactory`. */
+    fun openScreen(screen: String): JsonElement = rpc.call("gui.openScreen", params { p("screen", screen) })
 
     fun key(key: String, modifiers: Int = 0): JsonElement =
         rpc.call("gui.key", params { p("key", key); p("modifiers", modifiers) })
@@ -389,11 +407,13 @@ class GuiApi(private val rpc: RpcClient) {
     fun assertScreenshot(
         expected: Path, diff: Path? = null, mode: String = "gui", delayTicks: Int = 0,
         channelTolerance: Int = 0, maxDifferentRatio: Double = 0.0, ignore: List<ScreenshotRegion> = emptyList(),
+        hideCursor: Boolean = false,
     ): ScreenshotComparisonResult {
         require(Files.isRegularFile(expected)) { "expected PNG does not exist: $expected" }
         require(channelTolerance in 0..255) { "channelTolerance must be in 0..255" }
         require(maxDifferentRatio.isFinite() && maxDifferentRatio in 0.0..1.0) { "maxDifferentRatio must be finite in 0..1" }
-        val shot = screenshot(mode = mode, inline = true, delayTicks = delayTicks).asJsonObject
+        val shot = screenshot(ScreenshotOptions(mode = mode, inline = true, delayTicks = delayTicks,
+            cursor = if (hideCursor) "hide" else null)).asJsonObject
         val actual = Base64.getDecoder().decode(requireNotNull(shot.get("png")) { "inline PNG was not returned" }.asString)
         return ScreenshotComparison.compare(expected, actual, channelTolerance, maxDifferentRatio, diff, ignore).requireMatch()
     }
@@ -452,10 +472,12 @@ data class ScreenshotOptions(
     val inline: Boolean = false,
     val name: String? = null,
     val delayTicks: Int? = null,
+    /** `hide`: render the captured frame with the cursor off-screen (no hover/tooltip/carried stack). */
+    val cursor: String? = null,
 ) {
     fun toJson(): JsonElement = params {
         p("mode", mode); p("format", format); p("annotate", annotate); p("drawLog", drawLog)
-        p("inline", inline); p("name", name); p("delayTicks", delayTicks)
+        p("inline", inline); p("name", name); p("delayTicks", delayTicks); p("cursor", cursor)
     }
 }
 

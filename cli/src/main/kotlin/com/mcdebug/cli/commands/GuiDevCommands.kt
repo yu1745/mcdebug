@@ -23,7 +23,7 @@ class GuiActCmd : CliktCommand(
 **The iteration step in one call** (`gui.act`). Instead of click → screen → screenshot → logs as four commands, ask for all of it at once.
 
 **Options**
-- `--action NAME` - `click|key|type|drag|close|openBlock|reinit|none` (default none: just settle and look)
+- `--action NAME` - `click|hover|scroll|key|type|drag|close|openBlock|openScreen|reinit|reloadScreen|none` (default none: just settle and look)
 - `--params JSON` - the action's parameters, exactly as for `raw gui.<action>` (or `@file.json`)
 - `--shot gui|window` / `--annotate` / `--draw-log` / `--screen` - what to return afterwards
 - `--settle-ticks N` - upper bound for the settle wait (default 40); `--no-settle` skips it
@@ -37,7 +37,7 @@ class GuiActCmd : CliktCommand(
 - `mcdebug gui act --shot gui --draw-log` (no action: settle, then look)
 """.trimIndent(),
 ) {
-    private val action by option("--action", help = "click|key|type|drag|close|openBlock|reinit|none").default("none")
+    private val action by option("--action", help = "click|hover|scroll|key|type|drag|close|openBlock|openScreen|reinit|reloadScreen|none").default("none")
     private val params by option("--params", metavar = "JSON", help = "action parameters as JSON or @file")
     private val noSettle by option("--no-settle", help = "do not wait for the GUI to settle").flag()
     private val settleTicks by option("--settle-ticks", help = "upper bound for settling (default 40)").int()
@@ -129,7 +129,8 @@ class GuiHotswapCmd : CliktCommand(
 - the open Screen is re-initialised (`--no-reinit` to skip), so changed `init()` layout takes effect
 
 **Limits**
-- standard HotSpot accepts method-body changes only; added/removed fields or methods fail with a hint, unless the client runs on a JetBrains Runtime with `-XX:+AllowEnhancedClassRedefinition`
+- standard HotSpot accepts method-body changes only (a new Kotlin lambda is a new method); added/removed fields or methods are listed per class and nothing is applied (all or nothing), unless the client runs on a JetBrains Runtime with `-XX:+AllowEnhancedClassRedefinition`
+- for schema changes in the open Screen's own class use `gui reload-screen` instead
 - existing objects keep their field values; reopen the GUI when constructor logic changed
 - resources (textures, lang) still go through `gui reload-resources`
 """.trimIndent(),
@@ -164,5 +165,42 @@ class GuiHotswapCmd : CliktCommand(
         r.addProperty("attached", attached)
         printJson(r)
         if (r.get("ok")?.asBoolean == false) throw CliExit(2, "some classes could not be redefined (see failed)")
+    }
+}
+
+class GuiReloadScreenCmd : CliktCommand(
+    name = "reload-screen",
+    help = "rebuild the open Screen from freshly compiled classes in a new class loader: any change to that class, same menu, no restart",
+    epilog = """
+**For edits hotswap cannot apply** (new fields, methods, Kotlin lambdas, extra widgets) in the open Screen's own class. After `./gradlew classes`:
+
+- `mcdebug gui reload-screen --classes build/classes/kotlin/client`
+
+**How it works**
+- the open Screen's class and its nested classes (inner classes, companion objects) load from the output dirs into a fresh child-first class loader; everything else (your mod's registries, singletons, Minecraft) stays the loaded version
+- a container screen is rebuilt around the *same* menu (constructor `(menu, inventory, title)` or similar) and swapped in without closing it: the server-side container, slots and carried stack are untouched
+- a plain screen gets the old screen's parent (its first Screen-typed field)
+- it is a new instance: Screen fields start fresh (the menu's slots/carried stack are what survives)
+
+**Options**
+- `--also PREFIX` - also reload these classes child-first (repeatable), e.g. a widget class used only by this screen
+- `--shot gui|window` / `--annotate` / `--draw-log` / `--screen` - one round trip that also looks at the result
+
+**Limits**
+- other changed classes need `gui hotswap` (or `--also`); Java package-private access from the reloaded class to the rest of its package fails (different runtime package; Kotlin `internal` is fine)
+- Mixins do not apply to the reloaded copy; reopening the GUI the normal way uses the originally loaded class until a restart
+- a constructor/init failure is returned with `data.trace`; the old screen stays open
+""".trimIndent(),
+) {
+    private val classes by option("--classes", metavar = "DIR", help = "class output directory (repeatable)").multiple(required = true)
+    private val also by option("--also", metavar = "PREFIX", help = "extra class name/prefix to reload child-first (repeatable)").multiple()
+    private val follow by FollowUpOptions()
+
+    override fun run() {
+        follow.validate()
+        val params = mapOf("dirs" to classes.map { Path.of(it).toAbsolutePath().normalize().toString() }, "also" to also.ifEmpty { null })
+        withGuiApi { api ->
+            printJson(follow.run(api, "reloadScreen", params) ?: api.gui.reloadScreen(params["dirs"] as List<String>, also))
+        }
     }
 }

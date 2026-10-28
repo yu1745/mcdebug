@@ -53,6 +53,54 @@ class GuiDevCommandsTest {
     }
 
     @Test
+    fun `hover scroll and open-screen map their targets`() {
+        expectCall(listOf("hover", "--slot", "2"), "gui.hover") { p -> assertEquals(2, p["slot"].asInt) }
+        expectCall(listOf("hover", "--gui", "160.5,30"), "gui.hover") { p ->
+            assertEquals(160.5, p.getAsJsonArray("gui")[0].asDouble)
+        }
+        expectCall(listOf("hover", "--text", "Start", "--shot", "gui", "--hide-cursor"), "gui.act") { p ->
+            assertEquals("hover", p["action"].asString)
+            assertEquals("Start", p.getAsJsonObject("params")["text"].asString)
+            assertEquals("hide", p.getAsJsonObject("screenshot")["cursor"].asString)
+        }
+        expectCall(listOf("scroll", "--widget", "4", "--dy", "-3", "--no-settle"), "gui.scroll") { p ->
+            assertEquals(4, p["widget"].asInt)
+            assertEquals(-3.0, p["dy"].asDouble)
+            assertFalse(p["settle"].asBoolean)
+            assertFalse(p.has("dx"))
+        }
+        expectCall(listOf("open-screen", "com.example.Fixtures#screen"), "gui.openScreen") { p ->
+            assertEquals("com.example.Fixtures#screen", p["screen"].asString)
+        }
+        expectCall(listOf("open-screen", "inventory", "--shot", "gui"), "gui.act") { p ->
+            assertEquals("openScreen", p["action"].asString)
+            assertEquals("inventory", p.getAsJsonObject("params")["screen"].asString)
+        }
+        expectCall(listOf("screenshot", "--hide-cursor"), "gui.screenshot") { p -> assertEquals("hide", p["cursor"].asString) }
+        expectCall(listOf("reload-screen", "--classes", "out", "--also", "com.example.Widget"), "gui.reloadScreen") { p ->
+            assertTrue(p.getAsJsonArray("dirs")[0].asString.endsWith("out"))
+            assertEquals("com.example.Widget", p.getAsJsonArray("also")[0].asString)
+        }
+        expectCall(listOf("reload-screen", "--classes", "out", "--shot", "gui"), "gui.act") { p ->
+            assertEquals("reloadScreen", p["action"].asString)
+            assertFalse(p.getAsJsonObject("params").has("also"))
+        }
+    }
+
+    @Test
+    fun `pointer usage errors happen before connecting`() {
+        for (args in listOf(
+            listOf("hover"),
+            listOf("hover", "--slot", "1", "--widget", "2"),
+            listOf("hover", "--gui", "1"),
+            listOf("scroll", "--slot", "1"),
+            listOf("hover", "--slot", "1", "--hide-cursor"),
+        )) {
+            assertThrows(UsageError::class.java, { buildCli().parse(listOf("--client-tcp", "127.0.0.1:1", "gui") + args) }, args.toString())
+        }
+    }
+
+    @Test
     fun `plain click keeps gui click and exposes widget and no-settle`() {
         expectCall(listOf("click", "--widget", "4", "--no-settle", "--wait-ticks", "5"), "gui.click") { p ->
             assertEquals(4, p["widget"].asInt)

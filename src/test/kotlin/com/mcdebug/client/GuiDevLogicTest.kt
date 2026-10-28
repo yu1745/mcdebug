@@ -114,12 +114,31 @@ class GuiDevLogicTest {
         assertTrue(ok.annotate && ok.drawLog)
         assertEquals(1, ok.delayTicks)
         assertEquals(0, CaptureOptions.parse(null, 0).delayTicks)
+        assertEquals("keep", ok.cursor)
+        assertEquals("hide", CaptureOptions.parse(JsonObject().apply { addProperty("cursor", "HIDE") }).cursor)
         for (bad in listOf(
             JsonObject().apply { addProperty("format", "none"); addProperty("annotate", true) },
             JsonObject().apply { addProperty("format", "none"); addProperty("inline", true) },
             JsonObject().apply { addProperty("format", "jpeg") },
             JsonObject().apply { addProperty("mode", "world") },
             JsonObject().apply { addProperty("delayTicks", 5000) },
+            JsonObject().apply { addProperty("cursor", "center") },
         )) assertThrows(RpcException::class.java) { CaptureOptions.parse(bad) }
+    }
+
+    private class SchemaSample(val a: Int) {
+        private val lambda = { x: Int -> x + a }
+        fun twice(): Int = lambda(a) * 2
+    }
+
+    @Test
+    fun `schema diff agrees between bytes and the loaded class and names changes`() {
+        val bytes = SchemaSample::class.java.getResourceAsStream("GuiDevLogicTest\$SchemaSample.class")!!.use { it.readBytes() }
+        val fromBytes = SchemaDiff.of(bytes)
+        val loaded = SchemaDiff.of(SchemaSample::class.java)
+        assertEquals(emptyList<String>(), SchemaDiff.changes(loaded, fromBytes))
+        val changed = SchemaDiff.Members(fromBytes.methods + "extra()V", fromBytes.fields - fromBytes.fields.first())
+        val changes = SchemaDiff.changes(loaded, changed)
+        assertEquals(listOf("added method extra()V", "removed field ${fromBytes.fields.first()}"), changes)
     }
 }

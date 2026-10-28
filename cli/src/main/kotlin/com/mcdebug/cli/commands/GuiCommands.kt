@@ -46,11 +46,14 @@ class GuiCommands : CliktCommand(
 - `mcdebug gui open-block --x 100 --y 64 --z 100`
 - `mcdebug gui screenshot --mode gui --annotate` (numbered slots/widgets in `*.annotated.png`)
 - `mcdebug gui click --slot 0 --shot gui` (click, settle, screenshot: one round trip)
+- `mcdebug gui hover --slot 0` (the tooltips that frame really drew; also custom renderBg tooltips)
 - `mcdebug gui problems` (WARN/ERROR log lines and render faults since a cursor)
 - `mcdebug gui close`
+- client-only Screens need no block: `mcdebug gui open-screen pkg.Fixtures#myScreen`
 
 **Code iteration without restarting the client**
-- edit, `./gradlew classes`, then `mcdebug gui hotswap --classes build/classes/kotlin/client` (re-runs the open Screen's init)
+- edit, `./gradlew classes`, then `mcdebug gui hotswap --classes build/classes/kotlin/client` (method bodies; re-runs the open Screen's init)
+- new fields/methods/lambdas in the open Screen's class: `mcdebug gui reload-screen --classes build/classes/kotlin/client` (fresh class loader, same menu)
 - a render exception no longer crashes the client: the Screen stops drawing, `gui problems`/`screenFault` show the trace; fix, hotswap, `gui reinit`
 
 **Reading the result**
@@ -222,6 +225,7 @@ class GuiScreenshotCmd : CliktCommand(
 - `--annotate` - also write `*.annotated.png`: numbered cyan boxes = slot indices, magenta boxes = widget indices (`gui click --slot N` / `--widget N`); the legend is in `annotations`
 - `--draw-log` - include `drawLog`: every blit (texture, texel UV, sprite), fill, string, item and tooltip of that frame with its GUI-unit rect
 - `--hash-only` - no PNG/file, only `pixelHash` + transform: cheap "did the picture change?" polling
+- `--hide-cursor` - render the captured frame with the cursor parked off-screen (no hover highlight, tooltip or carried stack; the next frame is normal again): goldens that do not depend on where the last click left the cursor
 
 **Pitfalls**
 - readback happens after a new frame has rendered and flushed; this is not an acknowledgement of a previous server operation
@@ -238,13 +242,14 @@ class GuiScreenshotCmd : CliktCommand(
     private val annotate by option("--annotate", help = "also write *.annotated.png with numbered slot/widget boxes").flag()
     private val drawLog by option("--draw-log", help = "include the frame's GuiGraphics draw calls (drawLog)").flag()
     private val hashOnly by option("--hash-only", help = "no PNG: only pixelHash + transform (change detection)").flag()
+    private val hideCursor by option("--hide-cursor", help = "render this frame with the cursor off-screen: no hover highlight, tooltip or carried stack").flag()
 
     override fun run() = withGuiApi { api ->
         if (hashOnly && (annotate || inline || out != null || pathOnly)) {
             throw UsageError("--hash-only writes no PNG; it cannot be combined with --annotate/--inline/--out/--path-only")
         }
         val r = api.gui.screenshot(ScreenshotOptions(mode = mode, format = if (hashOnly) "none" else "png", annotate = annotate,
-            drawLog = drawLog, inline = inline, name = name, delayTicks = delayTicks))
+            drawLog = drawLog, inline = inline, name = name, delayTicks = delayTicks, cursor = if (hideCursor) "hide" else null))
         val o = r.asJsonObject
         var printed = o.get("path")?.asString ?: ""
         out?.let { target ->
@@ -409,17 +414,18 @@ class FollowUpOptions : com.github.ajalt.clikt.parameters.groups.OptionGroup("Fo
     val annotate by option("--annotate", help = "with --shot: also write *.annotated.png (numbered slots/widgets)").flag()
     val drawLog by option("--draw-log", help = "with --shot: include the frame's draw calls").flag()
     val screen by option("--screen", help = "also return the gui screen JSON after the action").flag()
+    val hideCursor by option("--hide-cursor", help = "with --shot: render the shot without hover/tooltip/carried stack").flag()
 
     /** Call before connecting, so a usage error never opens an RPC connection. */
     fun validate() {
-        if (shot == null && (annotate || drawLog)) throw UsageError("--annotate/--draw-log need --shot")
+        if (shot == null && (annotate || drawLog || hideCursor)) throw UsageError("--annotate/--draw-log/--hide-cursor need --shot")
     }
 
     /** Null when no follow-up was requested: the caller then uses the plain method. */
     fun run(api: DebugApi, action: String, params: Map<String, Any?>): com.google.gson.JsonElement? {
         validate()
         if (shot == null && !screen) return null
-        val options = shot?.let { ScreenshotOptions(mode = it, annotate = annotate, drawLog = drawLog) }
+        val options = shot?.let { ScreenshotOptions(mode = it, annotate = annotate, drawLog = drawLog, cursor = if (hideCursor) "hide" else null) }
         return api.gui.act(action, params, screen = screen, screenshot = options)
     }
 }
@@ -501,6 +507,7 @@ fun guiSubcommands() = listOf(
     GuiClickCmd(), GuiCloseCmd(), GuiConnectCmd(), GuiReloadResourcesCmd(),
     GuiKeyCmd(), GuiTypeCmd(), GuiDragCmd(), GuiDisconnectCmd(), GuiCompareCmd(),
     GuiActCmd(), GuiSettleCmd(), GuiReinitCmd(), GuiProblemsCmd(), GuiHotswapCmd(),
+    GuiHoverCmd(), GuiScrollCmd(), GuiOpenScreenCmd(), GuiReloadScreenCmd(),
 )
 
 /** 供其他命令复用：把 `{"a":1}` 结果按键取字符串。 */

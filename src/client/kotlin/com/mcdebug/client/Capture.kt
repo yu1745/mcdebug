@@ -198,20 +198,30 @@ object Capture {
         return future
     }
 
-    /** Client thread: should the next frame record its GuiGraphics calls? */
-    fun wantsDrawLog(): Boolean = pendingCount != 0 && synchronized(lock) { pending.any { it.options.drawLog } }
+    /**
+     * Client thread: the cursor policy of the next captured frame (the oldest
+     * pending request decides; requests with another policy wait for a later
+     * frame), or null when nothing is pending.
+     */
+    fun nextFrameCursor(): String? = if (pendingCount == 0) null else synchronized(lock) { pending.firstOrNull()?.options?.cursor }
+
+    /** Client thread: should the next frame (with that cursor policy) record its GuiGraphics calls? */
+    fun wantsDrawLog(cursor: String?): Boolean =
+        cursor != null && synchronized(lock) { pending.any { it.options.drawLog && it.options.cursor == cursor } }
 
     /** Called on the client/render thread only, after real rendering and its flush. */
-    fun afterFrame(client: Minecraft, drawLog: JsonObject? = null) {
+    fun afterFrame(client: Minecraft, drawLog: JsonObject? = null, cursor: String = "keep") {
         check(client.isSameThread()) { "Capture.afterFrame must run on the client thread" }
         cleanup()
         val batch = synchronized(lock) {
             if (closed || pending.isEmpty()) return
             // Snapshot first: reentrant requests from future callbacks must wait
             // for another real frame, never piggyback onto this completed one.
-            val requests = pending.toList()
-            pending.clear()
-            pendingCount = 0
+            // Only requests whose cursor policy this frame was rendered with.
+            val requests = pending.filter { it.options.cursor == cursor }
+            if (requests.isEmpty()) return
+            pending.removeAll(requests.toSet())
+            pendingCount = pending.size
             requests.forEach { it.phase = Phase.CAPTURING }
             requests
         }
@@ -648,6 +658,12 @@ data class CaptureOptions(
     /** Include the GuiGraphics draw log of the captured frame. */
     val drawLog: Boolean = false,
     val delayTicks: Int = 1,
+    /**
+     * `keep` (default): the frame shows hover/tooltip/carried stack at the cursor.
+     * `hide`: that one frame is rendered with the cursor parked off-screen — no
+     * hover highlight, tooltip or carried stack — for deterministic goldens.
+     */
+    val cursor: String = "keep",
 ) {
     init {
         require(mode == "window" || mode == "gui") { "unknown mode '$mode' (window/gui)" }
@@ -655,6 +671,7 @@ data class CaptureOptions(
         require(!(annotate && format == "none")) { "annotate needs format png" }
         require(!(inline && format == "none")) { "inline needs format png" }
         require(delayTicks in 0..1200) { "delayTicks must be in 0..1200" }
+        require(cursor == "keep" || cursor == "hide") { "cursor must be keep or hide" }
     }
 
     companion object {
@@ -669,6 +686,7 @@ data class CaptureOptions(
                     annotate = p.bool("annotate", false),
                     drawLog = p.bool("drawLog", false),
                     delayTicks = p.int("delayTicks", defaultDelayTicks),
+                    cursor = (p.string("cursor") ?: "keep").lowercase(),
                 )
             } catch (e: IllegalArgumentException) {
                 throw RpcException(RpcErrors.INVALID_PARAMS, e.message ?: "invalid screenshot parameters")

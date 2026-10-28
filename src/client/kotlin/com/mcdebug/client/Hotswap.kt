@@ -6,6 +6,12 @@ import com.mcdebug.McDebugMod
 import com.mcdebug.rpc.RpcErrors
 import com.mcdebug.rpc.RpcException
 import net.fabricmc.loader.impl.launch.FabricLauncherBase
+import org.objectweb.asm.ClassReader
+import org.objectweb.asm.ClassVisitor
+import org.objectweb.asm.FieldVisitor
+import org.objectweb.asm.MethodVisitor
+import org.objectweb.asm.Opcodes
+import org.objectweb.asm.Type
 import org.spongepowered.asm.mixin.MixinEnvironment
 import org.spongepowered.asm.mixin.transformer.IMixinTransformer
 import java.lang.instrument.ClassDefinition
@@ -40,6 +46,44 @@ object ClassScan {
 }
 
 /**
+ * Pure: the members a redefinition would add or remove. Standard HotSpot rejects any
+ * of these, so they are reported per class *before* trying, instead of as one opaque
+ * batch error. `<clinit>` is ignored on both sides (reflection cannot see it).
+ */
+object SchemaDiff {
+    data class Members(val methods: Set<String>, val fields: Set<String>)
+
+    fun of(classBytes: ByteArray): Members {
+        val methods = HashSet<String>()
+        val fields = HashSet<String>()
+        ClassReader(classBytes).accept(object : ClassVisitor(Opcodes.ASM9) {
+            override fun visitMethod(access: Int, name: String, descriptor: String, signature: String?, exceptions: Array<out String>?): MethodVisitor? {
+                if (name != "<clinit>") methods.add(name + descriptor)
+                return null
+            }
+            override fun visitField(access: Int, name: String, descriptor: String, signature: String?, value: Any?): FieldVisitor? {
+                fields.add(name + ":" + descriptor)
+                return null
+            }
+        }, ClassReader.SKIP_CODE or ClassReader.SKIP_DEBUG or ClassReader.SKIP_FRAMES)
+        return Members(methods, fields)
+    }
+
+    fun of(loaded: Class<*>): Members = Members(
+        loaded.declaredMethods.map { it.name + Type.getMethodDescriptor(it) }.toSet() +
+            loaded.declaredConstructors.map { "<init>" + Type.getConstructorDescriptor(it) },
+        loaded.declaredFields.map { it.name + ":" + Type.getDescriptor(it.type) }.toSet(),
+    )
+
+    /** Human-readable changes, empty when only method bodies differ. */
+    fun changes(old: Members, new: Members): List<String> =
+        (new.methods - old.methods).sorted().map { "added method $it" } +
+            (old.methods - new.methods).sorted().map { "removed method $it" } +
+            (new.fields - old.fields).sorted().map { "added field $it" } +
+            (old.fields - new.fields).sorted().map { "removed field $it" }
+}
+
+/**
  * Redefine already-loaded classes from freshly compiled output directories, so a
  * GUI code change shows up without restarting the client (about 25-30 s).
  *
@@ -50,7 +94,9 @@ object ClassScan {
  * Knot's classpath serves the same file (the Loom dev case), then Mixin.
  *
  * Standard HotSpot only accepts method-body changes; adding/removing fields or
- * methods needs a JetBrains Runtime started with `-XX:+AllowEnhancedClassRedefinition`.
+ * methods (lambdas count: a new lambda is a new synthetic method) needs a JetBrains
+ * Runtime started with `-XX:+AllowEnhancedClassRedefinition`. All or nothing: a
+ * partially applied swap would leave new code calling members that do not exist yet.
  * Not yet loaded classes need nothing: Knot loads them from the new files. Existing
  * objects keep their state, so Screen layout code (init) needs `gui.reinit`.
  */
@@ -89,28 +135,25 @@ object Hotswap {
         val loadedNames = loaded.map { it.name }.toSet()
         val failed = JsonArray()
         val definitions = ArrayList<ClassDefinition>()
+        val enhanced = enhanced()
         for (cls in loaded) {
             try {
-                definitions.add(ClassDefinition(cls, transformedBytes(cls.name, Files.readAllBytes(byName.getValue(cls.name).file))))
+                val bytes = transformedBytes(cls.name, Files.readAllBytes(byName.getValue(cls.name).file))
+                val changes = if (enhanced) emptyList() else SchemaDiff.changes(SchemaDiff.of(cls), SchemaDiff.of(bytes))
+                if (changes.isEmpty()) definitions.add(ClassDefinition(cls, bytes))
+                else failed.add(schemaFailure(cls.name, changes))
             } catch (t: Throwable) {
                 failed.add(failure(cls.name, t))
             }
         }
         val redefined = JsonArray()
-        if (definitions.isNotEmpty()) {
+        // RedefineClasses is atomic per call: either every class of the batch or none.
+        if (failed.isEmpty && definitions.isNotEmpty()) {
             try {
                 inst.redefineClasses(*definitions.toTypedArray())
                 definitions.forEach { redefined.add(it.definitionClass.name) }
             } catch (batch: Throwable) {
-                // One bad class must not hide which others are fine: retry one by one.
-                for (definition in definitions) {
-                    try {
-                        inst.redefineClasses(definition)
-                        redefined.add(definition.definitionClass.name)
-                    } catch (t: Throwable) {
-                        failed.add(failure(definition.definitionClass.name, t))
-                    }
-                }
+                failed.add(failure(definitions.joinToString(",") { it.definitionClass.name }, batch))
             }
         }
         if (failed.isEmpty) lastSwapMillis = scanStarted
@@ -122,7 +165,8 @@ object Hotswap {
             add("redefined", redefined)
             add("notLoaded", stringArray(changed.map { it.name }.filter { it !in loadedNames }))
             add("failed", failed)
-            addProperty("enhancedRedefinition", enhanced())
+            if (!failed.isEmpty) addProperty("applied", "none: nothing was redefined (all or nothing)")
+            addProperty("enhancedRedefinition", enhanced)
             addProperty("since", lastSwapMillis)
         }
     }
@@ -134,6 +178,14 @@ object Hotswap {
         val preMixin = if (raw != null && raw.contentEquals(fileBytes)) launcher.getClassByteArray(name, true) ?: fileBytes else fileBytes
         val transformer = MixinEnvironment.getCurrentEnvironment().activeTransformer as? IMixinTransformer ?: return preMixin
         return transformer.transformClassBytes(name, name, preMixin)
+    }
+
+    private fun schemaFailure(name: String, changes: List<String>): JsonObject = JsonObject().apply {
+        addProperty("class", name)
+        addProperty("error", "schema change")
+        add("changes", stringArray(changes.take(20)))
+        addProperty("hint", "standard HotSpot only redefines method bodies (a new lambda is a new method): for the open Screen's own " +
+            "class use gui.reloadScreen; otherwise restart, or run on a JetBrains Runtime with -XX:+AllowEnhancedClassRedefinition")
     }
 
     private fun failure(name: String, t: Throwable): JsonObject = JsonObject().apply {

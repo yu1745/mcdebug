@@ -57,8 +57,8 @@ mcdebug/
 │       ├── mcdebug.mixins.json   # 服务端 mixin 配置（当前为空占位）
 │       └── modid.mixins.json     # ← Fabric 模板遗留，别删也别用
 └── src/client/                   # 客户端平面（gui.*），由 client entrypoint 加载，见 §14
-    ├── kotlin/com/mcdebug/client/{McDebugClientMod,GuiOps,GuiScreenOps,GuiClickOps,GuiInputOps,GuiDevOps,Capture,ClientTasks,ClientRpc,ClientInfo}.kt
-    │                             # + GuiSettle/ProblemLog/ScreenGuard/DrawRecorder/Annotator/Hotswap（agent 迭代回路，见 §14）
+    ├── kotlin/com/mcdebug/client/{McDebugClientMod,GuiOps,GuiScreenOps,GuiClickOps,GuiPointerOps,GuiInputOps,GuiDevOps,Capture,ClientTasks,ClientRpc,ClientInfo}.kt
+    │                             # + GuiSettle/ProblemLog/ScreenGuard/DrawRecorder/Annotator/Hotswap/ScreenReload（agent 迭代回路，见 §14）
     ├── java/com/mcdebug/client/mixin/{AbstractContainerScreenAccessor,…,GuiGraphicsMixin,ClientPacketListenerMixin,RenderSystemMixin}.java
     └── resources/mcdebug.client.mixins.json
 ```
@@ -238,6 +238,7 @@ node scripts/set-version.mjs X.Y.Z
 - **GUI agent 迭代回路（1.21.1 线，未发版；设计与真机证据见 `docs/plan-gui-agent-loop.md`）**
   - 点击 settle（服务端 barrier + 2 tick 静默）取代固定 20 tick；`gui.act` 一次往返；`gui.settle`/`gui.reinit`/`gui.problems`/`gui.hotswap` 新方法；`gui.click {widget}`；`gui.screen` 递归控件、hover/focus/tooltip；截图 `annotate`/`drawLog`/`format:none`、只读回裁剪区、`pixelHash`；screen guard；轻量模式 RPC 唤醒限帧器；`gui compare --ignore/--report/--accept`；SDK `ScreenshotOptions`/`act`/`ScreenshotRegion`。
   - 同一机器 A/B（llvmpipe、demand、Unix socket 直连）：节流时单跳 37ms→0.8ms，`gui.click --slot` 988ms→102ms，GUI 截图 p50 37→21.5ms；Screen 方法体改动 `classes` 9s + hotswap 1.2s 生效（原需重启 ≈25–30s）。
+  - 第二轮：`gui.hover`（本帧真实 tooltip）、`gui.scroll`、`gui.openScreen`（Screen 夹具）、`gui.reloadScreen`（Screen 类任意结构改动免重启，容器同一 menu）、截图 `cursor:"hide"`、`--text` 回退到本帧画出的文字、hotswap 改为全有或全无 + 逐类列出结构变化。
 
 - **0.6.0 功能批（trace 自动停止 / wait 默认超时 / diff 忽略元数据 / 编码修复 / 批处理 / watch / health / replace-box / repl 增强 / 退出码）**
   - `trace.start` 新增 `maxTicks`：到期自动停止（抓最后一帧，`autoStopped:true`），移入 finished 表（上限 64）供 `trace.get` 继续读；0/缺省 = 不自动停止。
@@ -312,11 +313,12 @@ node scripts/set-version.mjs X.Y.Z
 ### 14.0 怎么用（agent 工作流，先读这段）
 
 1. 摆场景走服务端平面（`world.setBlock` / `inv.setSlot` / `be.setNbt`），写完 `gui settle` 再看 GUI。
-2. 看：`gui screenshot --mode gui --annotate`（`*.annotated.png` 里青色数字=槽位、品红数字=控件序号）+ `gui screen`；要核对 `renderBg` 里画的进度条/能量条/贴图偏移，用 `--draw-log`（每个 blit/fill/文字/物品/tooltip 及其 GUI 单位矩形、贴图与 texel UV）。
-3. 动：`gui click --slot N|--widget N|--text|--png`，加 `--shot gui [--screen]` 一次往返拿"结果+settle+截图+期间日志"（底层 `gui.act`）；点击默认 settle 返回，不再固定睡 20 tick。
+   纯客户端 Screen（配置页/手册/自写 Screen）不用方块：`gui open-screen pkg.Fixtures#myScreen`（dev 源码集里的静态工厂，可带 Screen/Player/Minecraft/Options 参数）或 `gui open-screen inventory`。
+2. 看：`gui screenshot --mode gui --annotate`（`*.annotated.png` 里青色数字=槽位、品红数字=控件序号）+ `gui screen`；要核对 `renderBg` 里画的进度条/能量条/贴图偏移，用 `--draw-log`（每个 blit/fill/文字/物品/tooltip 及其 GUI 单位矩形、贴图与 texel UV）。tooltip 用 `gui hover --slot N|--gui X,Y`（返回那一帧真正画出的 tooltip，含 renderBg 里手画的能量条提示）。
+3. 动：`gui click --slot N|--widget N|--text|--png`，`gui scroll --dy N`，加 `--shot gui [--screen]` 一次往返拿"结果+settle+截图+期间日志"（底层 `gui.act`）；点击默认 settle 返回，不再固定睡 20 tick。`--text` 先匹配控件文字，找不到再匹配本帧画出的字符串（手画按钮/列表项，`mode:"drawnText"`）。
 4. 出问题先看 `gui problems --brief`（全 JVM WARN/ERROR + Screen 渲染异常）；Screen render 抛异常不再崩客户端（screen guard），`gui.status.screenGuard.fault` 有堆栈。
-5. 改代码：`./gradlew classes` → `mcdebug gui hotswap --classes build/classes/kotlin/client`（自动 reinit 当前 Screen）；只改资源用 `gui reload-resources`；加字段/方法要重启（或 JBR `-XX:+AllowEnhancedClassRedefinition`）。
-6. 回归：`gui compare --ignore x,y,w,h --report r.html`；只有显式 `--accept` 写基线。
+5. 改代码：`./gradlew classes` → 方法体改动 `mcdebug gui hotswap --classes build/classes/kotlin/client`（全有或全无，自动 reinit）；当前 Screen 类本身加字段/方法/lambda/按钮 → `mcdebug gui reload-screen --classes ...`（新类加载器重建实例，容器沿用同一 menu）；只改资源用 `gui reload-resources`；其它类的结构改动要重启（或 JBR `-XX:+AllowEnhancedClassRedefinition`）。
+6. 回归：`gui screenshot --hide-cursor`（该帧光标移出屏幕：无悬停高亮/tooltip/手持物）+ `gui compare --ignore x,y,w,h --report r.html`；只有显式 `--accept` 写基线。
 
 下面 14.1 起是**实现不变式**（改 `src/client/**` 时要守的规则）。
 
@@ -348,8 +350,11 @@ node scripts/set-version.mjs X.Y.Z
 - **screen guard（`ScreenGuard`）**：只包 `Screen.renderWithTooltip`，世界/HUD/overlay 异常照旧崩。捕获后该 Screen 实例不再绘制，`gui.reinit`/关屏清除；`clientScreenGuard=false`（JVM 属性/env/`config/mcdebug.json`）恢复原版崩溃。ERROR 日志经 appender 进 ProblemLog，不要再手动 record 一次（只在 appender 不可用时）。
 - **ProblemLog**：log4j root logger 加 WARN 级 appender，环形 500 条、单条截断；`since` 用返回的 `next` 游标。安装失败只 WARN 不阻止启动。
 - **唤醒（`RenderControl.wake`）**：只在我们的限帧器正在节流时 `glfwPostEmptyEvent`。**glfwInit 之前 post 会留下 GLFW 错误，原版 `_initGlfw` 的检查直接崩溃**（RPC 探测可能那么早到，真机冒烟踩过）。连续模式/非节流状态不接管原版 limitDisplayFPS。
-- **hotswap（`Hotswap` + CLI `AgentAttach`）**：Instrumentation 由 CLI 动态 attach 的单类 agent（`cli/src/main/java/com/mcdebug/agent/InstrumentationAgent.java`，纯 JDK，生成单类 jar，**不能**把 CLI fat jar 当 agent 加载——会把 kotlin/clikt 塞进目标 system classpath）放进 `System.getProperties()["mcdebug.instrumentation"]`。字节码：Knot classpath 读到的正是该文件时走 `getClassByteArray(name,true)`（Fabric pre-mixin 变换），再过 Mixin `transformClassBytes`；批量失败逐个重试以报告具体类。只有全部成功才推进 `since`。CLI 端 attach 用反射（没有 jdk.attach 的运行时给明确错误）。
-- **仍未做**：`--repeat`连拍、离屏定尺寸截图、全局游戏键绑定/移动、IME组合输入、连接尚未完成时的独立取消RPC、跨GPU像素确定性/自动基线更新、consumer 注册的 Screen 夹具（`gui.openScreen`）、截图时临时隐藏光标/tooltip 的确定性开关。
+- **hotswap（`Hotswap` + CLI `AgentAttach`）**：Instrumentation 由 CLI 动态 attach 的单类 agent（`cli/src/main/java/com/mcdebug/agent/InstrumentationAgent.java`，纯 JDK，生成单类 jar，**不能**把 CLI fat jar 当 agent 加载——会把 kotlin/clikt 塞进目标 system classpath）放进 `System.getProperties()["mcdebug.instrumentation"]`。字节码：Knot classpath 读到的正是该文件时走 `getClassByteArray(name,true)`（Fabric pre-mixin 变换），再过 Mixin `transformClassBytes`。**全有或全无**：先用 `SchemaDiff`（ASM 读新字节 vs 反射读已加载类）列出每个类增删的方法/字段，有任何结构变化（非 JBR）就一个都不重定义；`redefineClasses` 本身对一批是原子的。**不要恢复"批量失败逐个重试"**——那会部分生效，新代码调用尚不存在的成员即 `NoSuchMethodError`（真机踩过）。只有全部成功才推进 `since`。CLI 端 attach 用反射（没有 jdk.attach 的运行时给明确错误）。
+- **reloadScreen（`ScreenReload` + `ScreenClassLoader`）**：只对当前 Screen 类、其嵌套类和显式 `also` 前缀 child-first，其余（mod 注册表/单例/MC）一律委托 Knot，绝不重复初始化。容器 Screen 用同一 menu 重建（`ScreenArgs` 按参数类型填 menu/Inventory/title/parent/player/Minecraft/Options，取参数最多的可填构造器），**不走 setScreen**：`AbstractContainerScreen.removed()` 会关掉 menu；按 setScreen 顺序 `added()`→`init()`→直接赋 `Minecraft.screen`。init 失败恢复旧 Screen。已知限制：新实例字段从零开始、Java 包私有访问跨加载器失败、Mixin 不作用于副本、之后正常打开 GUI 仍是原类。
+- **hover / drawn text（`GuiPointerOps`/`GuiTargets`）**：hover 移光标后强制渲染一帧（容器用 gui 模式，其余 window 模式，`format:none`+drawLog），tooltip 以该帧 draw log 的 `op:"tooltip"` 为准。`--text` 先匹配控件；没有控件匹配时 `prepare` 渲染一帧取 draw log 的 `op:"text"` 矩形中心，结果 `mode:"drawnText"`。click/hover/scroll 共用 `GuiTargets`。
+- **`cursor:"hide"`**：截图请求的光标策略决定它在哪一帧被采集——`RenderControl.renderFrame` 按队首请求的策略渲染，`afterFrame` 只取策略相同的请求，其余留到下一帧。hide 帧把传给 `renderWithTooltip` 的鼠标坐标换成屏幕外，下一帧恢复；实体预览（背包里的玩家）仍会动。
+- **仍未做**：`--repeat`连拍、离屏定尺寸截图、全局游戏键绑定/移动、IME组合输入、连接尚未完成时的独立取消RPC、跨GPU像素确定性/自动基线更新、reloadScreen 时把旧 Screen 字段状态迁移到新实例、Screen 类以外的结构改动免重启（需 JBR）。
 
 ---
 

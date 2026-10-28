@@ -19,11 +19,13 @@ import java.util.concurrent.CompletionException
  * - `gui.settle`   the same wait on its own (e.g. after a server-plane NBT write);
  * - `gui.reinit`   re-run the open Screen's `init()` (after a hotswap; clears a render fault);
  * - `gui.problems` WARN/ERROR log entries and render faults since a cursor;
- * - `gui.hotswap`  redefine changed classes from compiled output directories.
+ * - `gui.hotswap`  redefine changed classes from compiled output directories;
+ * - `gui.reloadScreen` rebuild the open Screen from freshly compiled classes in a new
+ *                  class loader (any change to that class, same menu).
  */
 object GuiDevOps : ClientRpcGroup {
     /** Actions `gui.act` may run; never act/stop/disconnect (a world exit is not an iteration step). */
-    private val ACTIONS = setOf("click", "key", "type", "drag", "close", "openBlock", "reinit", "none")
+    private val ACTIONS = setOf("click", "hover", "scroll", "key", "type", "drag", "close", "openBlock", "openScreen", "reinit", "reloadScreen", "none")
 
     override fun methods(): Map<String, ClientRpcHandler> = linkedMapOf(
         "act" to ::act,
@@ -31,6 +33,7 @@ object GuiDevOps : ClientRpcGroup {
         "reinit" to ::reinit,
         "problems" to ::problems,
         "hotswap" to ::hotswap,
+        "reloadScreen" to ::reloadScreen,
     )
 
     // ------------------------------------------------------------------ act
@@ -57,8 +60,8 @@ object GuiDevOps : ClientRpcGroup {
                 else -> throw RpcException(RpcErrors.INVALID_PARAMS, "screenshot must be a mode string or an options object")
             }
         }
-        // A click settles on its own (with its waitTicks as the bound) unless told not to.
-        val actionSettles = action == "click" && actionParams.bool("settle", true)
+        // A click/scroll settles on its own (with its waitTicks as the bound) unless told not to.
+        val actionSettles = (action == "click" || action == "scroll") && actionParams.bool("settle", true)
         val cursor = ProblemLog.buffer.cursor()
         val startTick = ClientTasks.currentTick()
 
@@ -66,6 +69,7 @@ object GuiDevOps : ClientRpcGroup {
             when (action) {
                 "none" -> CompletableFuture.completedFuture(JsonObject())
                 "reinit" -> reinit(client, actionParams)
+                "reloadScreen" -> reloadScreen(client, actionParams)
                 else -> GuiOps.methods().getValue(action)(client, actionParams)
             }
         } catch (t: Throwable) {
@@ -155,13 +159,27 @@ object GuiDevOps : ClientRpcGroup {
         )
     }
 
+    // --------------------------------------------------------- reloadScreen
+
+    private fun reloadScreen(client: Minecraft, params: JsonObject?): CompletableFuture<JsonElement> {
+        val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "dirs (class output directories) are required")
+        val dirs = classDirs(p)
+        val also = p.get("also")?.takeIf { it.isJsonArray }?.asJsonArray?.map { it.asString }.orEmpty()
+        return ClientTasks.onClient(client) { ScreenReload.reload(client, dirs, also) }.asElement()
+    }
+
+    private fun classDirs(p: JsonObject): List<Path> {
+        val dirs = p.get("dirs")?.takeIf { it.isJsonArray }?.asJsonArray?.map { Path.of(it.asString).toAbsolutePath().normalize() }
+            ?: throw RpcException(RpcErrors.INVALID_PARAMS, "dirs must be an array of class output directories")
+        if (dirs.isEmpty()) throw RpcException(RpcErrors.INVALID_PARAMS, "dirs must not be empty")
+        return dirs
+    }
+
     // -------------------------------------------------------------- hotswap
 
     private fun hotswap(client: Minecraft, params: JsonObject?): CompletableFuture<JsonElement> {
         val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "dirs (class output directories) are required")
-        val dirs = p.get("dirs")?.takeIf { it.isJsonArray }?.asJsonArray?.map { Path.of(it.asString).toAbsolutePath().normalize() }
-            ?: throw RpcException(RpcErrors.INVALID_PARAMS, "dirs must be an array of class output directories")
-        if (dirs.isEmpty()) throw RpcException(RpcErrors.INVALID_PARAMS, "dirs must not be empty")
+        val dirs = classDirs(p)
         val since = when {
             p.bool("all", false) -> 0L
             else -> p.get("since")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isNumber }?.asLong

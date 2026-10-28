@@ -33,7 +33,7 @@ import java.util.concurrent.CompletableFuture
  * (`status` / `screen` / `screenshot`), act (`openBlock` / `click` / `close`),
  * and iterate without a human at the keyboard. This object holds the lifecycle
  * and world-entry methods; [GuiScreenOps] (inspection), [GuiClickOps],
- * [GuiInputOps] (key/type/drag) and [GuiDevOps] (act/settle/reinit/problems/
+ * [GuiPointerOps] (hover/scroll/openScreen), [GuiInputOps] (key/type/drag) and [GuiDevOps] (act/settle/reinit/problems/
  * hotswap) contribute the rest of the `gui.*` group.
  *
  * Two invariants:
@@ -56,7 +56,7 @@ object GuiOps : ClientRpcGroup {
         "reloadResources" to ::reloadResources,
         "stop" to ::stop,
         "disconnect" to ::disconnect,
-    ) + GuiScreenOps.methods() + GuiClickOps.methods() + GuiInputOps.methods() + GuiDevOps.methods()
+    ) + GuiScreenOps.methods() + GuiClickOps.methods() + GuiPointerOps.methods() + GuiInputOps.methods() + GuiDevOps.methods()
 
     // ---------------------------------------------------------------- status
 

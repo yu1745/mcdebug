@@ -81,6 +81,41 @@
   每项 10–60 个样本，单机、软件 GL，不代表硬件 GPU 或其它 modpack 下的表现。37 ms 这个值与采样脚本 13 ms 的间隔加上 50 ms 帧周期相位锁定有关，可以理解为"等完剩余睡眠"的典型值，不是严格的总体分布。
 - 清理：三个 session 都正常 owned stop，没有残留 MC 进程；自建的 Xvfb :113、临时游戏目录、基线 worktree 已删除；其它会话的 Xvfb :91/:92 没有动。
 
+## 第二轮：看 tooltip、Screen 夹具、免重启改结构
+
+第一轮之后，迭代回路里还剩这几处卡点：
+
+- tooltip 只能靠截图去猜；
+- 客户端独有的 Screen 没有方块就打不开；
+- 滚动列表没有办法操作；
+- 手画的按钮/列表项无法按文字点击；
+- golden 对比会被光标悬停状态干扰；
+- 改 GUI 时最常见的是加按钮、加字段、加 lambda，这些改动 hotswap 应用不了，只能重启客户端。
+
+### 设计
+
+- **`gui.hover`**：移动光标（同点击，并派发 `Screen.mouseMoved`），然后强制渲染一帧（`format:none` + drawLog；容器用 gui 模式，其它用 window 模式），返回该帧 draw log 中 `op:"tooltip"` 的行，以及 hoveredSlot/hoveredTooltip/hoveredWidget。tooltip 以真正画出来的为准，能量条、液位这类在 renderBg 里手画的提示也包括在内。
+- **`gui.scroll`**：在目标位置调用 `Screen.mouseScrolled(x,y,dx,dy)`，然后 settle；`handled` 表示是否有监听者处理了这个事件。
+- **共享目标解析 `GuiTargets`**：click/hover/scroll 用同一套 slot/widget/text/gui/png/x,y 解析。`text` 先匹配控件文字；没有控件匹配时由 `prepare` 渲染一帧，按 draw log 里 `op:"text"` 的矩形中心定位，结果 `mode:"drawnText"`。找不到时，错误里的 `available` 同时列出控件文字和本帧画出的文字。
+- **`gui.openScreen`**：`inventory`（与 E 键相同，创造模式下原版会转交创造背包）、`pkg.Class` 或 `pkg.Class#静态工厂`。参数按类型注入（`ScreenArgs`）：Screen 父界面、Player、Minecraft、Options；构造器取能填满的参数最多的那个，工厂取参数最少的。构造或 init 失败时返回堆栈，并关闭半初始化的界面。
+- **截图 `cursor:"hide"`**：截图请求带上光标策略；`renderFrame` 按队首请求的策略渲染这一帧（mixin 把传给 `renderWithTooltip` 的鼠标坐标换成屏幕外），`afterFrame` 只采集策略相同的请求，其余等下一帧。
+- **hotswap 全有或全无**：真机冒烟发现，旧实现在批量失败后逐个重试，导致 10 个类里 7 个已重定义、3 个失败，客户端处于新旧混合状态，新代码会调用还不存在的成员（`NoSuchMethodError`）。现在先用 `SchemaDiff`（ASM 读新字节 vs 反射读已加载类）列出每个类增删的方法/字段（例如 `added method init$lambda$0(...)`），只要有结构变化就一个都不应用；`redefineClasses` 本身对一批是原子的。
+- **`gui.reloadScreen`**：建一个新的 `ScreenClassLoader`，只对当前 Screen 类、其嵌套类和 `also` 前缀 child-first，其余类一律委托 Knot（mod 注册表、单例不会重复初始化）。用同一套参数注入构造新实例：容器 Screen 拿到同一个 menu、玩家背包和标题，按 `added()` → `init()` → 赋值 `Minecraft.screen` 的顺序切换，**不调用** `removed()`（`AbstractContainerScreen.removed()` 会关掉 menu）；普通 Screen 用旧实例的第一个 Screen 类型字段作为父界面，走 setScreen。init 失败时恢复旧界面。
+
+### 验证（2026-10-28，同一套隔离环境）
+
+- 构建与单测通过（新增：CaptureOptions cursor、SchemaDiff 两侧一致与变化列表、CLI hover/scroll/open-screen 映射与连接前用法错误）。
+- 真机：
+  - `open-screen local.smoke.SmokeScreen#fixture` 打开成功；不存在的类返回 `CLASS_NOT_FOUND`，非 Screen 类返回 `NOT_A_SCREEN`，退出码 2。
+  - `scroll --dy -3`：`handled:true`，settle 2 tick，画面计数 100→97。
+  - `hover --gui 165,40` 返回 `tooltips:[["Energy 1000/4000"]]`（renderBg 手画）；背包里 `hover --slot 36` 返回 `Redstone Dust`。
+  - `--text "scroll 1"` / `"body A"` 走 drawnText；`--text zzz` 返回的 available 含画出的文字。
+  - `--hide-cursor`：tooltip 条目从 1 变 0。背包 gui 模式连续三张 hide 截图互不相同，差异全部在玩家模型（idle 摆臂，1156 像素），另有 4 像素在底边小数裁剪行。
+  - hotswap：加方法后返回 `changes:["added method extra()..."]`、`applied:none`，退出码 2，按钮文字不变；改回纯方法体后 3 个类成功重定义，按钮变为 `Version B`。
+  - reloadScreen（容器，基于 `player.inventoryMenu`）：先拿起 12 个红石；加字段、方法和 lambda 按钮后 hotswap 被拒；`reload-screen` 成功，containerId 仍为 0，carried 仍是红石 ×12，新按钮出现且点击生效；放回槽 36 后 slotAfter 为红石 ×12、carried 为空。普通 Screen：父界面从旧实例字段取得；init 抛异常时返回堆栈，旧界面保留。
+  - 顺带验证了用 mcdebug 自己的 `gui hotswap` 热替换 mcdebug 自身的客户端类：消费端的发布 jar 与 dev 输出都是 Mojang 名，方法体改动直接生效。
+- 清理：session 正常 stop，Xvfb :113 与临时游戏目录已删除。
+
 ## 未做
 
-consumer 注册的 Screen 夹具（`gui.openScreen`）、截图时临时隐藏光标/tooltip 的确定性开关、`--repeat` 连拍、离屏定尺寸截图、IME 组合输入、跨 GPU 像素确定性。启动耗时（MC 加载阶段）本轮没有优化，思路是用 hotswap 和 reinit 把"重启"移出迭代回路。
+reloadScreen 的旧字段状态迁移、Screen 类以外的结构改动免重启（需 JBR）、`--repeat` 连拍、离屏定尺寸截图、IME 组合输入、跨 GPU 像素确定性。启动耗时（MC 加载阶段）本轮没有优化，思路是用 hotswap 和 reinit 把"重启"移出迭代回路。
