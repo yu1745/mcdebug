@@ -82,7 +82,7 @@ every other method uses the server plane.
 ```bash
 mcdebug status                                   # server.status (unix socket)
 mcdebug raw world.getBlock '{"pos":[0,64,0]}'
-mcdebug --tcp 192.168.5.102:25580 status          # cross-machine
+mcdebug --tcp <host>:25580 status                 # cross-machine
 mcdebug -c 'status' -c 'world get-block --x 0 --y 64 --z 0' --batch   # one connection, fail fast
 mcdebug snapshot capture --from 0,64,0 --to 2,66,2 --include block,inventory
 ```
@@ -510,8 +510,6 @@ GRAALVM_HOME=/path/to/graalvm ./scripts/build-native.sh    # -> dist/mdb (~42 MB
 ./dist/mdb --socket <sock> status                          # local unix socket
 ./dist/mdb --tcp <host[:port]> status                      # cross-machine TCP
 ```
-
-Server distribution is described in the server repo's `registry/scripts.yaml`.
 
 ## License
 

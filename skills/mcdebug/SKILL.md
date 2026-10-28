@@ -12,8 +12,8 @@ subcommand.
 
 ## 0. Find or install the CLI
 
-Use the first one that exists: `mcdebug` on `PATH`, `mdb` on `PATH` or the server repo's
-`tools/mdb` (native build, ~11 ms start), or a cached jar under
+Use the first one that exists: `mcdebug` on `PATH`, `mdb` on `PATH` (native build from
+`scripts/build-native.sh`, ~11 ms start), or a cached jar under
 `${XDG_DATA_HOME:-~/.local/share}/mcdebug/<version>/mcdebug-cli.jar`.
 
 If none is there, download the release jar into that cache (one directory per version) and

@@ -129,7 +129,7 @@ java -jar mcdebug-cli.jar gui screenshot --out /tmp/shot.png
 ./gradlew :cli:copyCliJar     # 产出根目录 mcdebug-cli.jar
 java -jar mcdebug-cli.jar --help    # 查看所有 CLI 命令
 java -jar mcdebug-cli.jar status    # 调用 server.status RPC（unix socket，本机）
-java -jar mcdebug-cli.jar --tcp 192.168.5.102:25582 status   # 跨机访问（TCP）
+java -jar mcdebug-cli.jar --tcp <host>:25580 status   # 跨机访问（TCP）
 java -jar mcdebug-cli.jar jar --output ../consumer/run/mods  # 写出内嵌的同版本 mod jar 并删旧版
 ```
 
