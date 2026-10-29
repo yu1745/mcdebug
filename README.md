@@ -110,7 +110,7 @@ Use `mcdebug raw <namespace.method> <json>` for anything without a dedicated com
 | `gui.*` | **client plane**: real GUI screenshots + Screen clicks (see below) |
 | `redstone.*` | read power, set/pulse levers, neighbor updates |
 | `wait.until` | wait for a predicate on natural server ticks (never drives ticks) |
-| `reflect.*` | resolve/get/call/new any class at runtime; Mojang or intermediary names work in dev and production (table generated for this Minecraft version) |
+| `reflect.*` | resolve/get/set/call/new from a root (`server`/`level`/`be`/`entity`/`player`), a ref or a class, along a field/getter `path`; Mojang or intermediary names work in dev and production (table generated for this Minecraft version) |
 
 `storage.*` resolves handles in order: vanilla `Inventory` → Fabric `ItemStorage` → Fabric
 `FluidStorage` → Team Reborn `EnergyStorage`; targets are `{kind:"block"|"entity"|"item", ...}`
@@ -130,6 +130,10 @@ server exception is `-32603` with `data.exception` and `data.at` (top stack fram
 mcdebug raw snapshot.diff '{"before":{"tick":1,"blocks":[]},"after":{"tick":9,"blocks":[]}}'   # equal:true
 mcdebug raw scan.findEntities '{"box":{"from":[0,64,0],"to":[0,64,0]}}'   # entities in that one block
 mcdebug raw reflect.resolve '{"class":"BlockEntity"}'   # runtimeClass + mojangClass
+mcdebug raw reflect.get '{"root":"server","path":"tickCount"}'
+mcdebug raw reflect.get '{"root":"be","pos":[0,64,0],"path":"items[0]"}'
+mcdebug raw reflect.set '{"root":"be","pos":[0,64,0],"field":"litTime","value":200}'
+mcdebug raw reflect.call '{"root":"level","method":"getBlockState","args":[{"new":"BlockPos","args":[0,64,0]}]}'
 ``` The predicate DSL (`be[x,y,z].<path> <op> <value>`, `AND/OR/NOT`, `sum(...)`,
 comparisons) is documented in `mcdebug --help` under `wait-until` and in AGENTS.md §7.
 

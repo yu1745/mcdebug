@@ -65,7 +65,7 @@ object Methods {
     )
     val fixture = setOf("fixture.capture", "fixture.load")
     val reflect = setOf(
-        "reflect.resolve", "reflect.get", "reflect.call", "reflect.new",
+        "reflect.resolve", "reflect.get", "reflect.set", "reflect.call", "reflect.new",
         "reflect.refs", "reflect.release", "reflect.mappings",
     )
 

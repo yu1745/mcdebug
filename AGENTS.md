@@ -226,6 +226,12 @@ node scripts/set-version.mjs X.Y.Z
 
 ## 11b. 已完成变更记录（v2 → 0.6.x）
 
+- **reflect 补齐（未发版）**：`api/ReflectCore.kt`（与平面无关：ref 表、path、重载、参数转换、JSON）+ `ReflectOps`（服务端 root）。
+  - 入口：`root` = `server`/`level`/`be`/`entity`/`player`（原来只能从 static 或 ref 出发，MC 没有拿 server 的静态入口）。
+  - `path`：`a.b[0]["k"]`，段=字段→无参方法→getX/isX，`name()` 仅方法；**无参数、无表达式、无 eval**，要参数用 `reflect.call`。
+  - ref 表：每平面全局 LRU（1024）、同一对象同一 id、停服清空。**刻意不绑连接**：CLI 每条命令一个连接，绑了 ref 跨命令即失效。对象集合整体一个 ref + `size`/`items` 摘要（原来每个元素一个强引用 ref、永不释放）。
+  - 新 `reflect.set`（非 final 字段，数字按字段类型并做范围检查，enum 用常量名，返回 before/after）；重载按匹配度打分（精确 < 装箱/子类 < 拓宽 < 收窄可容纳的整数字面量），平局报错要求 `argTypes`；整数参数保留 long 精度（原来先转 double）；`InvocationTargetException` 展开为目标异常。
+
 - **0.6.3 服务端平面整理**
   - reflect 映射表：删掉打包的 1.20.1 yarn/mojang 表（1.6MB，类名在 1.21.1 已对不上，如 BlockEntity 混淆名 `czn`→`dqh`），`generateReflectMappings` 构建时从 Loom 的 1.21.1 映射生成 intermediary↔Mojang 单表（~620KB）；运行时按 `currentRuntimeNamespace` 决定翻译方向（dev=Mojang、生产=intermediary），成员沿继承链查找，同名重载给出多个候选按参数挑。输出字段 `yarnClass/yarnName` → `mojangClass/mojangName`。顺带修了 `world.useItemHold` 在 dev 里找不到 `updatingUsingItem` 的问题（原来按 yarn 名 `tickActiveItemStack` 找）。
   - 参数与错误：`api/Params.kt` 集中所有参数读取，缺参/类型错一律 `-32602` 并写明参数名（原来 42 处 `getAsJsonArray` 缺参时是 `-32603 ... must not be null`）；意外异常 `RpcErrors.internal` 带异常类与栈顶帧。

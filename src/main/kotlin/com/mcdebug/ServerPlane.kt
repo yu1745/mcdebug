@@ -124,6 +124,7 @@ object ServerPlane {
             TraceOps.uninstall()
             RedstoneOps.uninstall()
             ScreenOps.clear()
+            ReflectOps.clear()
             FakePlayerPool.shutdown()
             rpcServer?.stop()
         } catch (e: Exception) {
