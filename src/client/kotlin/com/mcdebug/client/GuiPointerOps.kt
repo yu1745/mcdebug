@@ -248,6 +248,14 @@ object GuiPointerOps : ClientRpcGroup {
                 add("tooltips", drawnTooltips(drawLog))
                 view.get("hoveredSlot")?.let { add("hoveredSlot", it) }
                 view.get("hoveredTooltip")?.let { add("hoveredTooltip", it) }
+                // Empty tooltips are ambiguous: say when the slot simply holds nothing.
+                view.get("hoveredSlot")?.asInt?.let { index ->
+                    val slot = view.getAsJsonArray("slots")?.firstOrNull { it.asJsonObject.get("index").asInt == index }?.asJsonObject
+                    if (slot != null) {
+                        add("stack", slot.get("stack"))
+                        if (slot.get("count").asInt == 0) addProperty("reason", "EMPTY_SLOT")
+                    }
+                }
                 view.getAsJsonArray("widgets")?.firstOrNull { it.asJsonObject.get("hovered")?.asBoolean == true }
                     ?.let { add("hoveredWidget", it) }
                 addProperty("screen", view.get("type")?.asString ?: "")

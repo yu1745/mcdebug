@@ -54,7 +54,10 @@ Below, `mcdebug` means whichever of these you found.
   a second one falls back to the title screen ("session.lock: already locked").
   Startup to `world_ready` takes ~30 s. If MC or the build dies first, `start` returns `failed`
   at once with the crash line in `lastError`; `session logs dev` has the full output.
-  `--width/--height` lose to `programArgs '--width' ...` in the project's `loom.runs.client`.
+  `--width/--height` lose to `programArgs '--width' ...` in the project's `loom.runs.client`
+  (the session record still shows the requested size; `gui status` shows the real window).
+  After `session stop` the discovery files (`mcdebug/port`, `clientPort`, locks) stay; only the
+  sockets are removed, so an existing `port` file does not mean a live endpoint.
 - **Existing server/client**: `--socket <gameDir>/mcdebug/socket` (server plane),
   `--client-socket <gameDir>/mcdebug/clientSocket` (client plane), or `--tcp host:port` across
   machines. Running inside the gameDir discovers them automatically.
@@ -70,7 +73,11 @@ mcdebug raw be.getNbt      '{"pos":[100,64,100]}'
 mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeoutTicks":400}'
 ```
 
-- Positions are `[x,y,z]`; boxes `{"from":[..],"to":[..]}`, both corners inclusive.
+- Positions are `[x,y,z]`; boxes `{"from":[..],"to":[..]}`, both corners inclusive, passed under
+  a `box` key: `raw scan.findEntities '{"box":{"from":[0,60,0],"to":[10,80,10]}}'`.
+- `inv.*` only reaches block-entity containers. The **player inventory**: `scan.findEntities`
+  (box around the player) for the uuid, then `raw entity.getNbt '{"uuid":"..."}'` -> `Inventory[]`
+  (its `Slot` is the player's own numbering), or `gui screen` while a container GUI is open.
 - `storage.*` is the generic item/fluid/energy API (handles `vanilla:inventory`, `fabric:item`,
   `fabric:fluid`, `teamreborn:energy`); fluids are in droplets (81000 = 1 bucket).
 - **Ticks are never driven**: wait with `wait.until` (predicate DSL: `be[..].<path>`,
@@ -94,6 +101,9 @@ mcdebug gui screenshot --mode gui --draw-log             # every blit/fill/text 
 mcdebug gui problems --brief                             # WARN/ERROR log + caught render faults
 ```
 
+- **`--slot N` is the index in the open menu** (`gui screen` `slots[].index`, the cyan numbers),
+  not a player-inventory number: a 7-slot machine puts the player's `Inventory` Slot 21 at menu
+  index 19. To find an item, filter `gui screen` slots by `item` and use that index.
 - Click targets: `--slot N`, `--widget N` (the `[N]` in `gui screen --brief`), `--text "Label"`
   (substring, case-insensitive; also matches text drawn in renderBg or list rows that are not
   widgets, e.g. world-list entries), `--gui X,Y`, `--png X,Y` (pixels of the previous screenshot).
@@ -112,7 +122,13 @@ mcdebug gui problems --brief                             # WARN/ERROR log + caug
   e.g. an anvil with an empty input slot). Ctrl+A first (`gui key --key A --ctrl`) to replace.
   A key that navigates (Esc, Enter) returns `ok:true reason:CHANGED_BY_INPUT`.
 - `gui drag` with a carried stack over slots is vanilla drag-splitting (QUICK_CRAFT).
-- `gui act` failures come back as JSON `ok:false` + `error` with exit 0: check `ok`.
+- Errors: a plain `gui click/hover/...` that cannot act exits 2 with `error [-320xx]` on stderr
+  (e.g. `-32021 WIDGET_CLIPPED`); inside `gui act` the same failure is JSON `ok:false` + `error`
+  with exit 0, so check `ok` there.
+- `gui hover` returns `tooltips:[]` with `ok:true` when nothing was drawn; `reason:EMPTY_SLOT`
+  (plus `stack`) means the slot holds nothing: you hovered the wrong index, do not retry.
+- `gui scroll --dy` is in wheel notches (an options list moves about one row per notch, negative
+  = down); overshooting is harmless, so `--dy 30` returns to the top.
 - `gui open-screen` fills constructors from Screen/Player/Minecraft/Options only; anything needing
   other arguments (ChatScreen(String), creative inventory) needs a `pkg.Class#factory`.
 - Options/Video Settings clicks change the real `options.txt` of that gameDir.
@@ -136,7 +152,9 @@ mcdebug gui reload-resources                                     # textures / la
 Use the output dirs your build really writes (`build/classes/java/main`, `.../kotlin/client`, ...).
 Hotswap reports `failed[].changes` when a class gained or lost members: then use reload-screen (for
 the Screen class) or restart the session. Neither one reruns constructors of existing objects.
-Measured on ic2 (method body): compile 2.5-3.5 s + hotswap 0.5 s; a restart costs ~35 s.
+Measured on ic2 (method body): the first compile after an edit ~14 s, repeats 2.5-3.5 s;
+hotswap 0.5-0.7 s; a restart costs ~35 s. `attached:true` = this call loaded the hotswap agent
+into the JVM, `false` = it was already loaded (normal, not a failure).
 
 - `changed:0` with a stderr note = no newer class files in that dir: wrong dir or wrong compile task.
 - A Screen shown by reload-screen is a copy in its own class loader. A later hotswap redefines the
@@ -151,7 +169,15 @@ Measured on ic2 (method body): compile 2.5-3.5 s + hotswap 0.5 s; a restart cost
 (exit 1 on mismatch; `--ignore` is in PNG pixels). Only an explicit `--accept` writes the golden.
 `--mode gui` crops to the GUI rectangle, but translucent texture edges still blend with the world
 behind it: if two identical shots differ by 1 per channel, use `--channel-tolerance 2`. `--annotate`
-with `--out x.png` also writes `x.annotated.png`. `--hash-only` is the cheap "did it change?" probe.
+with `--out x.png` also writes `x.annotated.png` (copies: `path` stays under
+`<gameDir>/mcdebug/screenshots/`, `copiedTo` is yours). `--hash-only` is the cheap "did it change?" probe.
+
+`--draw-log` adds `drawLog: {count, truncated, coordinateSpace, entries[]}`; each entry has `op`
+(`blit`/`fill`/`text`/`item`/`tooltip`...), `rect` `[x,y,w,h]` in GUI units, and per op `text`,
+`color` (`#AARRGGBB`), `texture`, `uv`. The same text can be drawn more than once (mods often park
+the vanilla label off-screen and draw their own): keep entries whose `rect` lies inside the GUI.
+`gui problems` covers the whole JVM, startup noise from other mods included: compare `--since`
+cursors around your action rather than reading the full list.
 
 ## Costs
 
