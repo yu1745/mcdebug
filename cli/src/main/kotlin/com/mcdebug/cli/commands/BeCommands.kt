@@ -45,7 +45,7 @@ class BeGetFieldCmd : CliktCommand(name = "get-field", help = "read one NBT path
     }
 }
 
-class BeSetFieldCmd : CliktCommand(name = "set-field", help = "write one NBT path inside a block entity; WARNING: if the JSON value type does not match the field's NBT type, the response is still ok:true but the field is silently NOT written") {
+class BeSetFieldCmd : CliktCommand(name = "set-field", help = "write one NBT path inside a block entity; a plain JSON number takes the existing field's numeric type (use {\"#nbt\":\"long\",\"value\":N} for new fields); the value is read back and ok:false reason NOT_APPLIED means the block entity's load ignored it") {
     private val x by option("--x").int().required()
     private val y by option("--y").int().required()
     private val z by option("--z").int().required()

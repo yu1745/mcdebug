@@ -1,6 +1,7 @@
 package com.mcdebug.api
 
 import com.google.gson.JsonElement
+import com.google.gson.JsonNull
 import com.google.gson.JsonObject
 import com.mcdebug.rpc.RpcContext
 import com.mcdebug.rpc.RpcErrors
@@ -11,7 +12,15 @@ import com.mcdebug.util.NbtJson
 import com.mcdebug.util.ServerContext
 import net.minecraft.world.level.block.entity.BlockEntity
 import net.minecraft.world.level.block.entity.BlockEntityTicker
+import net.minecraft.nbt.ByteTag
 import net.minecraft.nbt.CompoundTag
+import net.minecraft.nbt.DoubleTag
+import net.minecraft.nbt.FloatTag
+import net.minecraft.nbt.IntTag
+import net.minecraft.nbt.LongTag
+import net.minecraft.nbt.NumericTag
+import net.minecraft.nbt.ShortTag
+import net.minecraft.nbt.Tag
 import net.minecraft.server.MinecraftServer
 import net.minecraft.server.level.ServerLevel
 import net.minecraft.core.BlockPos
@@ -70,11 +79,37 @@ object BlockEntityOps : RpcHandlerGroup {
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val be = ServerContext.blockEntity(world, pos)
             val nbt = be.saveWithoutMetadata(world.registryAccess())
-            val newValue = NbtJson.fromJson(valueJson)
+            val oldValue = NbtJson.getByPath(nbt, path)
+            var newValue = NbtJson.fromJson(valueJson)
+            // 未标注 #nbt 的 JSON 数字一律是 NbtInt；字段已存在且是别的数值类型时按原类型写，
+            // 否则很多 BE 的 load 用 getLong/getDouble 读到类型不符就当缺省值，写了等于没写。
+            if (oldValue is NumericTag && newValue is IntTag && oldValue.id != newValue.id) {
+                newValue = coerceNumeric(oldValue, newValue.asLong)
+            }
             NbtJson.setByPath(nbt, path, newValue)
             applyBeNbt(world, pos, be, nbt)
-            JsonObject().apply { addProperty("ok", true) }
+            val after = NbtJson.getByPath(be.saveWithoutMetadata(world.registryAccess()), path)
+            JsonObject().apply {
+                if (after == newValue) {
+                    addProperty("ok", true)
+                } else {
+                    // BE 的 load 没接收这个值（字段名/类型不对，或该字段是派生的）。
+                    addProperty("ok", false)
+                    addProperty("reason", "NOT_APPLIED")
+                    add("written", NbtJson.toJson(newValue))
+                    add("readBack", after?.let { NbtJson.toJson(it) } ?: JsonNull.INSTANCE)
+                }
+            }
         }
+
+    private fun coerceNumeric(like: NumericTag, v: Long): Tag = when (like) {
+        is ByteTag -> ByteTag.valueOf(v.toByte())
+        is ShortTag -> ShortTag.valueOf(v.toShort())
+        is LongTag -> LongTag.valueOf(v)
+        is FloatTag -> FloatTag.valueOf(v.toFloat())
+        is DoubleTag -> DoubleTag.valueOf(v.toDouble())
+        else -> IntTag.valueOf(v.toInt())
+    }
 
     /**
      * Apply a full NBT compound to a block entity and fire all the downstream

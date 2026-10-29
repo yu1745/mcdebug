@@ -50,10 +50,13 @@ Below, `mcdebug` means whichever of these you found.
   mcdebug --session dev status                      # every later call: --session dev
   mcdebug session stop dev                          # owned sessions only; saves the world
   ```
-  Submodule projects need `--task :core:runClient --game-dir core/run`. One client per gameDir:
+  Multi-project builds: `--game-dir core/run` is enough, the task becomes `:core:runClient` (a bare
+  `runClient` there would start every subproject's client at once). One client per gameDir:
   a second one falls back to the title screen ("session.lock: already locked").
   Startup to `world_ready` takes tens of seconds (project-dependent). If MC or the build dies first, `start` returns `failed`
-  at once with the crash line in `lastError`; `session logs dev` has the full output.
+  at once with the crash line in `lastError`; `session logs dev` has the full output. A Fabric
+  loader error (remap, missing dependency) also gives `failed`, but its error window can keep the
+  JVM open: `session stop --force`.
   `--width/--height` lose to `programArgs '--width' ...` in the project's `loom.runs.client`
   (the session record still shows the requested size; `gui status` shows the real window).
   After `session stop` the discovery files (`mcdebug/port`, `clientPort`, locks) stay; only the
@@ -64,6 +67,7 @@ Below, `mcdebug` means whichever of these you found.
   against driving the wrong JVM.
   A unix socket path over the OS limit (~107 bytes, deep gameDirs) or a JVM without AF_UNIX makes
   the mod fall back to loopback TCP; discovery then holds `tcp:127.0.0.1:N` and the CLI follows it.
+  That is normal, not an error.
 - **Existing server/client**: `--socket <gameDir>/mcdebug/socket` (server plane),
   `--client-socket <gameDir>/mcdebug/clientSocket` (client plane), or `--tcp host:port` across
   machines. Running inside the gameDir discovers them automatically.
@@ -84,14 +88,17 @@ mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeo
 - `inv.*` only reaches block-entity containers. The **player inventory**: `scan.findEntities`
   (box around the player) for the uuid, then `raw entity.getNbt '{"uuid":"..."}'` -> `Inventory[]`
   (its `Slot` is the player's own numbering), or `gui screen` while a container GUI is open.
-- `storage.*` is the generic item/fluid/energy API (handles `vanilla:inventory`, `fabric:item`,
+- `storage list` shows which handles a block exposes. `storage.*` is the generic item/fluid/energy API (handles `vanilla:inventory`, `fabric:item`,
   `fabric:fluid`, `teamreborn:energy`); fluids are in droplets (81000 = 1 bucket).
   `inserted`/`extracted` can be far below `amount`: the block's own transfer limit applies, and
   it is usually **per tick**, so repeating the call within the same tick (a tight loop, `--batch`)
   gets 0. `remaining` is about this call only; read the result back with `storage get`. To fill
   quickly, write the block entity's NBT instead of looping.
 - `be.setNbt` loads the given tag into the block entity; what happens to keys you leave out is
-  up to that block entity's load code. Write only the keys you mean to change. One value may be
+  up to that block entity's load code. Write only the keys you mean to change. `be set-field`
+  writes one path, reads it back and answers `ok:false reason:NOT_APPLIED` when the load code
+  ignored it (unknown key, derived value); a plain number takes the existing field's numeric type.
+  A field can still change right after (the block's own tick): it was applied, the game moved on. One value may be
   stored in several fields (a mirror, a split long): verify through the API that matters
   (`storage get`, `inv.getSlot`, the GUI), not by reading the NBT back.
 - Slot numbers of a block are its own: find input/output slots with `gui screen` (GUI open) or
@@ -107,12 +114,15 @@ mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeo
   not the game, is wrong.
   The one exception, `be.tick` (`ticks` 0..12000), runs a single block entity's ticker
   synchronously: it is fast, but world time does not advance and neighbours do not tick, so
-  anything another block does to this one (pushing energy/items, redstone) does not happen.
+  anything another block does to this one (pushing energy/items, redstone) does not happen. It
+  is the real ticker, so it consumes what a real tick consumes (energy, fuel, inputs).
+  `wait.until` answers with `ranTicks`: how long the condition actually took.
 - `trace start` records snapshots every `--interval-ticks` (`--max-ticks` auto-stops); it shares
   snapshot's `--include` (`block`, `inventory`, `entity`, ...): machine slots need `inventory`.
 - `snapshot capture` + `snapshot diff` compare state (metadata `/tick` `/time` ignored by default);
   diff paths are JSON pointers into the capture (`/blocks/13/...` is an array index, not a
-  coordinate), and one stack can show up once per storage handle that exposes it;
+  coordinate), and one stack can show up once per storage handle that exposes it; entities and
+  their bookkeeping NBT change on their own, so narrow `--include` to what the test is about;
   `fixture` saves/loads block regions as JSON; `reflect.*` reaches anything else (Mojang or
   intermediary names both work).
 - `screen.*` is a **server-side fake-player menu** (slot JSON, no pixels). Pixels only come from `gui.*`.
@@ -202,7 +212,7 @@ into the JVM, `false` = it was already loaded (normal, not a failure).
 
 `mcdebug gui screenshot --mode gui --hide-cursor --out new.png`, then
 `mcdebug gui compare --expected golden.png --actual new.png --ignore x,y,w,h --report r.html`
-(exit 1 on mismatch; `--ignore` is in PNG pixels; read `$?` without a pipe or with
+(exit 1 on mismatch; `--ignore` is in PNG pixels, w and h > 0; read `$?` without a pipe or with
 `set -o pipefail`, `| head` hides it). Only an explicit `--accept` writes the golden.
 `--mode gui` crops to the GUI rectangle, but translucent texture edges still blend with the world
 behind it: if two identical shots differ by 1 per channel, use `--channel-tolerance 2`. `--annotate`
@@ -221,7 +231,9 @@ cursors around your action rather than reading the full list.
 With `java -jar`, JVM start-up dominates a single call; the RPC itself is usually a fraction of
 it (screenshots and settles cost a few frames/ticks more). Many steps in a row: one JVM with
 `mcdebug --session dev --batch -c "..." -c "..."`, one round trip with `gui act` (action + settle +
-screenshot + screen), or the native `mdb`. `reload-resources` reloads every pack: seconds, not ms.
+screenshot + screen), or the native `mdb`. Inside `-c` a JSON argument may be written bare
+(`-c 'raw be.getNbt {"pos":[0,64,0]}'`); large params go in a file: `raw method @params.json`.
+`reload-resources` reloads every pack: seconds, not ms.
 
 ## Exit codes and errors
 

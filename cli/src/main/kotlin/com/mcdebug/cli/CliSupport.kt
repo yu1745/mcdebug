@@ -109,6 +109,11 @@ fun tokenizeCommandLine(s: String): List<String> {
                     cur.append(c)
                 }
             }
+            // 以 { / [ 开头的 token 按括号配平原样保留（含引号），-c 里可以直接写 JSON。
+            cur.isEmpty() && (c == '{' || c == '[') -> {
+                val end = jsonTokenEnd(s, i)
+                cur.append(s, i, end); i = end - 1
+            }
             c == '\'' || c == '"' -> quote = c
             c == '\\' && i + 1 < s.length -> { cur.append(s[i + 1]); i++ }
             c.isWhitespace() -> { if (cur.isNotEmpty()) { out.add(cur.toString()); cur.clear() } }
@@ -119,6 +124,25 @@ fun tokenizeCommandLine(s: String): List<String> {
     if (quote != null) throw IllegalArgumentException("unbalanced quote in command: $s")
     if (cur.isNotEmpty()) out.add(cur.toString())
     return out
+}
+
+/** 从 start（{ 或 [）起找配平的结束位置（exclusive），跳过字符串内的括号；不配平时到行尾。 */
+private fun jsonTokenEnd(s: String, start: Int): Int {
+    var depth = 0
+    var inStr = false
+    var i = start
+    while (i < s.length) {
+        val c = s[i]
+        if (inStr) {
+            if (c == '\\') i++ else if (c == '"') inStr = false
+        } else when (c) {
+            '"' -> inStr = true
+            '{', '[' -> depth++
+            '}', ']' -> if (--depth == 0) return i + 1
+        }
+        i++
+    }
+    return s.length
 }
 
 /**

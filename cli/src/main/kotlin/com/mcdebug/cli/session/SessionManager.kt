@@ -242,6 +242,7 @@ class SessionManager(
         require(Files.isDirectory(project)) { "project is not a directory" }
         require(Files.isRegularFile(project.resolve("gradlew"))) { "target project has no Gradle wrapper" }
         val game = canonicalPath(request.gameDir ?: project.resolve("run"))
+        val task = qualifyTask(request.task, project, game)
         request.world?.let { world ->
             require(world.isNotBlank() && world !in setOf(".", "..") && world.none { it == '/' || it == '\\' || it.code < 32 }) {
                 "world must be a saves directory name, not a path"
@@ -253,10 +254,26 @@ class SessionManager(
         }
         val token = UUID.randomUUID().toString()
         return SessionRecord(name = request.name, registryDir = registry.directory.toString(), owned = true,
-            sessionToken = token, gameDir = game.toString(), project = project.toString(), task = request.task,
+            sessionToken = token, gameDir = game.toString(), project = project.toString(), task = task,
             world = request.world, render = request.render, display = request.display ?: System.getenv("DISPLAY"),
             width = request.width, height = request.height, launcher = runtime.currentProcess(),
             logPath = registry.directory.resolve("${request.name}-$token.log").toString())
+    }
+
+    /**
+     * In a multi-project build an unqualified `runClient` runs every subproject's client at once
+     * (they then fight over remapping). When gameDir lies inside a subproject, run only that one.
+     */
+    private fun qualifyTask(task: String, project: Path, game: Path): String {
+        if (task != "runClient" || !game.startsWith(project)) return task
+        var dir = game.parent
+        while (dir != null && dir != project && dir.startsWith(project)) {
+            if (listOf("build.gradle", "build.gradle.kts").any { Files.isRegularFile(dir.resolve(it)) }) {
+                return ":" + project.relativize(dir).joinToString(":") + ":runClient"
+            }
+            dir = dir.parent
+        }
+        return task
     }
 
     private fun launchSpec(record: SessionRecord): SessionLaunch {
@@ -317,6 +334,16 @@ class SessionManager(
             it.copy(state = "failed", lastError = "client exited before becoming ready" +
                 (crashHint(it.logPath)?.let { hint -> ": $hint" } ?: "") + "; see session logs")
         }
+        // Fabric loader fatal errors (remap/resolution) open an error window and keep the JVM
+        // alive, so the wrapper never exits: recognise the loader's own fatal marker instead.
+        if (record.process == null && record.state in setOf("starting", "start_timeout")) {
+            loaderFatal(record.logPath)?.let { fatal ->
+                return update(record, setOf("starting", "start_timeout")) {
+                    it.copy(state = "failed", lastError = "Fabric loader failed: $fatal; the game may stay open on " +
+                        "its error window (close it, or session stop --force); see session logs")
+                }
+            }
+        }
         try {
             val found = discovery(Path.of(record.gameDir))
             if (found == null || !alive(found.process)) return if (wrapperDead) startFailed() else record
@@ -334,14 +361,28 @@ class SessionManager(
         return record
     }
 
-    /** Last crash/failure line of the launch log (bounded tail), for lastError. */
-    private fun crashHint(logPath: String?): String? {
+    private fun logTail(logPath: String?): String? {
         val path = logPath?.let(Path::of)?.takeIf(Files::isRegularFile) ?: return null
-        val tail = RandomAccessFile(path.toFile(), "r").use { file ->
+        return RandomAccessFile(path.toFile(), "r").use { file ->
             val start = maxOf(0L, file.length() - 256 * 1024)
             file.seek(start)
             ByteArray((file.length() - start).toInt()).also(file::readFully).toString(Charsets.UTF_8)
         }
+    }
+
+    /** The loader's fatal "(FabricLoader) ..." line plus the FormattedException cause, if any. */
+    private fun loaderFatal(logPath: String?): String? {
+        val lines = logTail(logPath)?.lines() ?: return null
+        val i = lines.indexOfFirst { "net.fabricmc.loader.impl.FormattedException" in it }
+        if (i < 0) return null
+        val headline = lines.getOrNull(i - 1)?.substringAfter("(FabricLoader) ", "")?.trim().orEmpty()
+        val cause = lines[i].substringAfter("FormattedException:").trim()
+        return listOf(headline, cause).filter(String::isNotEmpty).joinToString(" — ")
+    }
+
+    /** Last crash/failure line of the launch log (bounded tail), for lastError. */
+    private fun crashHint(logPath: String?): String? {
+        val tail = logTail(logPath) ?: return null
         val markers = listOf("Minecraft has crashed", "Caused by:", "BUILD FAILED", "FAILURE:", "Exception")
         return tail.lineSequence().map(String::trim).filter { line -> markers.any(line::contains) }
             .lastOrNull { "Caused by:" in it }

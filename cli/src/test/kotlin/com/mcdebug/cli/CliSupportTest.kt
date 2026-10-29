@@ -29,6 +29,14 @@ class CliSupportTest {
     }
 
     @Test
+    fun `tokenizer keeps unquoted JSON verbatim`() {
+        assertEquals(
+            listOf("raw", "m", """{"b":"minecraft:stone", "a":[1, "x:]"]}""", "--brief"),
+            tokenizeCommandLine("""raw m {"b":"minecraft:stone", "a":[1, "x:]"]} --brief"""),
+        )
+    }
+
+    @Test
     fun `tokenizer supports escaped chars outside quotes`() {
         assertEquals(listOf("a b"), tokenizeCommandLine("""a\ b"""))
     }

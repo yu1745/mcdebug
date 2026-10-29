@@ -1,5 +1,6 @@
 package com.mcdebug.cli
 
+import com.github.ajalt.clikt.core.context
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.UsageError
 import com.github.ajalt.clikt.core.subcommands
@@ -36,8 +37,14 @@ fun main(args: Array<String>) {
 }
 
 /** 构造完整命令树（批处理每条 -c 命令各自用一棵新树，避免 clikt 选项状态残留）。 */
-fun buildCli(): McDebugCli =
-    McDebugCli()
+fun buildCli(): McDebugCli = buildTree().also(::disableArgFiles)
+
+private fun disableArgFiles(cmd: CliktCommand) {
+    // "@file" 是本 CLI 的 JSON 参数约定（raw/set-nbt/storage…），不能让 clikt 当 argfile 展开。
+    cmd.context { expandArgumentFiles = false }
+    cmd.registeredSubcommands().forEach(::disableArgFiles)
+}
+private fun buildTree(): McDebugCli = McDebugCli()
         .subcommands(
             StatusCmd(), RawCmd(), ReplCmd(),
             WorldCommands().subcommands(*worldSubcommands().toTypedArray()),
