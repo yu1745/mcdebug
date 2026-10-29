@@ -86,9 +86,10 @@ mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeo
   (its `Slot` is the player's own numbering), or `gui screen` while a container GUI is open.
 - `storage.*` is the generic item/fluid/energy API (handles `vanilla:inventory`, `fabric:item`,
   `fabric:fluid`, `teamreborn:energy`); fluids are in droplets (81000 = 1 bucket).
-  `inserted`/`extracted` can be far below `amount`: the block's own transfer limits apply per
-  call, and `remaining` is about this call only. Read the result back with `storage get`; to
-  fill quickly, repeat the call or write the block entity's NBT.
+  `inserted`/`extracted` can be far below `amount`: the block's own transfer limit applies, and
+  it is usually **per tick**, so repeating the call within the same tick (a tight loop, `--batch`)
+  gets 0. `remaining` is about this call only; read the result back with `storage get`. To fill
+  quickly, write the block entity's NBT instead of looping.
 - `be.setNbt` loads the given tag into the block entity; what happens to keys you leave out is
   up to that block entity's load code. Write only the keys you mean to change. One value may be
   stored in several fields (a mirror, a split long): verify through the API that matters
