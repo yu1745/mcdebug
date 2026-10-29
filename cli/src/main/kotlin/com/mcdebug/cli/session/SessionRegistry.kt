@@ -31,6 +31,10 @@ internal class SessionRegistry(directory: Path) {
         validateName(record.name)
         atomicWrite(directory.resolve("${record.name}.json"), sessionGson.toJson(record.toJson()))
     }
+    fun delete(name: String) {
+        validateName(name)
+        Files.deleteIfExists(directory.resolve("$name.json"))
+    }
     fun cas(name: String, token: String, transform: (SessionRecord) -> SessionRecord): SessionRecord? = locked {
         val old = read(name) ?: return@locked null
         if (old.recordId != token) return@locked null

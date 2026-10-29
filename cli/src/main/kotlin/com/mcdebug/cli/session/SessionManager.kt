@@ -30,7 +30,9 @@ class SessionManager(
                         return@locked old
                     }
                 }
-                check(records().none { it.gameDir == config.gameDir && occupied(it) }) { "gameDir already has a live session" }
+                records().firstOrNull { it.gameDir == config.gameDir && occupied(it) }?.let { live ->
+                    error("gameDir already has a live session: ${live.name} (${live.state}); see `session status ${live.name}`")
+                }
                 val owner = readRecord(ownerPath(game))
                 check(owner == null || !occupied(owner)) { "gameDir is owned by session ${owner?.name} (${owner?.registryDir})" }
                 val discovery = discovery(game)
@@ -96,6 +98,27 @@ class SessionManager(
     }
 
     fun status(name: String): JsonObject = refresh(requireRecord(name)).toJson()
+
+    /**
+     * Forget a registry record. Never touches a game: attached records may always go (the
+     * client keeps running); owned ones only once nothing of that launch can still be live.
+     */
+    fun remove(name: String): JsonObject {
+        val record = refresh(requireRecord(name))
+        check(!record.owned || (record.state in setOf("stopped", "failed", "dead") && !occupied(record))) {
+            "session $name is owned and ${record.state}; stop it first (`session stop $name`)"
+        }
+        return gameLocked(Path.of(record.gameDir), false) {
+            registry.locked {
+                val current = read(name) ?: return@locked record.toJson()
+                check(current.recordId == record.recordId) { "session $name changed during remove" }
+                delete(name)
+                val owner = ownerPath(Path.of(current.gameDir))
+                if (current.owned && readRecord(owner)?.sessionToken == current.sessionToken) Files.deleteIfExists(owner)
+                current.toJson().apply { addProperty("removed", true) }
+            }
+        }
+    }
 
     fun resolve(name: String, plane: String, timeoutMs: Int = 5000, requestTimeoutMs: Long? = null): RpcClientOptions {
         require(plane == "client" || plane == "server") { "unknown plane: $plane" }
@@ -271,6 +294,14 @@ class SessionManager(
                     it.copy(process = late.process, clientSocket = late.socket,
                         state = if (alive(late.process)) "stopping" else "stopped")
                 }
+                // Every client JVM holds mcdebug/client.lock from its first bootstrap step until
+                // exit. Dead wrapper + free lock = no JVM of this launch exists; a later bootstrap
+                // still finds this token in session-stop.json and exits. Without this the record
+                // occupied its gameDir forever.
+                if (record.wrapper?.let(runtime::isAlive) != true && !clientLockHeld(Path.of(record.gameDir))) {
+                    return update(record, setOf("stopping")) { it.copy(state = "stopped",
+                        lastError = "no client JVM ever bootstrapped (wrapper exited, client.lock free)") }
+                }
             }
             return record
         }
@@ -337,16 +368,35 @@ class SessionManager(
         val process = RpcProcessIdentity.fromJson(json.getAsJsonObject("process"))
         check(process.gameDir == game.toString()) { "client.json gameDir mismatch" }
         val socket = json.get("clientSocket").asString
-        check(socket.isNotBlank() && Path.of(socket).isAbsolute) { "clientSocket must be an absolute path" }
+        check(socket.startsWith(com.mcdebug.cli.TCP_ENDPOINT_PREFIX) || (socket.isNotBlank() && Path.of(socket).isAbsolute)) {
+            "clientSocket must be an absolute path or a tcp: endpoint"
+        }
         return Discovery(process, socket)
     }
     private fun serverSocket(game: Path): String? {
         val path = game.resolve("mcdebug/port")
         if (!Files.isRegularFile(path)) return null
         return Files.readString(path).trim().takeIf { it.isNotEmpty() }?.also {
-            check(Path.of(it).isAbsolute) { "integrated server socket must be absolute" }
+            check(it.startsWith(com.mcdebug.cli.TCP_ENDPOINT_PREFIX) || Path.of(it).isAbsolute) { "integrated server socket must be absolute" }
         }
     }
+    /** True while some JVM holds `<gameDir>/mcdebug/client.lock` (probe only, released at once). */
+    private fun clientLockHeld(game: Path): Boolean {
+        val path = game.resolve("mcdebug/client.lock")
+        if (!Files.exists(path)) return false
+        return try {
+            java.nio.channels.FileChannel.open(path, java.nio.file.StandardOpenOption.WRITE).use { channel ->
+                val lock = channel.tryLock() ?: return true
+                lock.release()
+                false
+            }
+        } catch (_: java.nio.channels.OverlappingFileLockException) {
+            true // this JVM holds it (tests / an in-process client)
+        } catch (_: Exception) {
+            true // unknown: stay conservative
+        }
+    }
+
     private fun ownerPath(game: Path) = game.resolve("mcdebug/mdb-owner.json")
     private fun writeOwner(record: SessionRecord) = atomicWrite(ownerPath(Path.of(record.gameDir)), sessionGson.toJson(record.toJson()))
     private fun <T> gameLocked(game: Path, failIfBusy: Boolean, action: () -> T): T =

@@ -104,26 +104,46 @@ class RpcServerBindTest {
         }
     }
 
+    /** Unix bind fails and configured TCP fails too: serve on loopback TCP, publish "tcp:" endpoint. */
     @Test
-    fun bothListenersFailThrows() {
+    fun unixAndTcpFailFallBackToLoopback() {
         val (blocker, busyPort) = occupyTcpPort()
         try {
             // unix socket 绑定必然失败：父目录是一个普通文件
             val parentFile = tmp.resolve("not-a-dir")
             Files.writeString(parentFile, "x")
-            val sock = parentFile.resolve("sock")
-            System.setProperty("mcdebug.socket", sock.toString())
+            System.setProperty("mcdebug.socket", parentFile.resolve("sock").toString())
             System.setProperty("mcdebug.tcpPort", busyPort.toString())
-
-            val server = RpcServer(RpcDispatcher(), { tmp.resolve("port") }, { tmp.resolve("tcpPort") })
-            try {
-                val e = assertThrows(IllegalStateException::class.java) { server.start(null) }
-                assertTrue(e.message!!.contains("both"), "两边都失败时应报错: ${e.message}")
-            } finally {
-                server.stop()
-            }
+            assertServesOnLoopbackFallback()
         } finally {
             blocker.close()
+        }
+    }
+
+    /** The managed-session case: TCP disabled, socket path over the OS limit (~107 bytes). */
+    @Test
+    fun overlongSocketPathWithTcpDisabledFallsBackToLoopback() {
+        System.setProperty("mcdebug.socket", tmp.resolve("x".repeat(120)).resolve("socket").toString())
+        System.setProperty("mcdebug.tcpEnabled", "false")
+        assertServesOnLoopbackFallback()
+    }
+
+    private fun assertServesOnLoopbackFallback() {
+        val portFile = tmp.resolve("port")
+        Files.writeString(portFile, "/stale/previous.sock")
+        val server = RpcServer(RpcDispatcher(), { portFile }, { tmp.resolve("tcpPort") })
+        try {
+            assertNull(server.start(null), "no unix socket was bound")
+            assertTrue(server.loopbackFallback)
+            val endpoint = Files.readString(portFile).trim()
+            assertEquals("tcp:127.0.0.1:${server.tcpPort}", endpoint)
+            assertEquals(endpoint, server.endpoint)
+            val client = SocketChannel.open()
+            client.connect(InetSocketAddress("127.0.0.1", server.tcpPort!!))
+            assertTrue(readLine(client).contains("\"server.ready\""))
+            client.close()
+        } finally {
+            server.stop()
         }
     }
 

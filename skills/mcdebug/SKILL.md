@@ -58,6 +58,12 @@ Below, `mcdebug` means whichever of these you found.
   (the session record still shows the requested size; `gui status` shows the real window).
   After `session stop` the discovery files (`mcdebug/port`, `clientPort`, locks) stay; only the
   sockets are removed, so an existing `port` file does not mean a live endpoint.
+  Records live in `$XDG_STATE_HOME/mcdebug/sessions/<name>.json` (`--sessions-dir` to change);
+  `session remove NAME` forgets an attached record any time (the game keeps running) and an owned
+  one once it is stopped/failed/dead. Never delete lock or discovery files by hand: they guard
+  against driving the wrong JVM.
+  A unix socket path over the OS limit (~107 bytes, deep gameDirs) or a JVM without AF_UNIX makes
+  the mod fall back to loopback TCP; discovery then holds `tcp:127.0.0.1:N` and the CLI follows it.
 - **Existing server/client**: `--socket <gameDir>/mcdebug/socket` (server plane),
   `--client-socket <gameDir>/mcdebug/clientSocket` (client plane), or `--tcp host:port` across
   machines. Running inside the gameDir discovers them automatically.
@@ -101,6 +107,8 @@ mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeo
   The one exception, `be.tick` (`ticks` 0..12000), runs a single block entity's ticker
   synchronously: it is fast, but world time does not advance and neighbours do not tick, so
   anything another block does to this one (pushing energy/items, redstone) does not happen.
+- `trace start` records snapshots every `--interval-ticks` (`--max-ticks` auto-stops); it shares
+  snapshot's `--include` (`block`, `inventory`, `entity`, ...): machine slots need `inventory`.
 - `snapshot capture` + `snapshot diff` compare state (metadata `/tick` `/time` ignored by default);
   diff paths are JSON pointers into the capture (`/blocks/13/...` is an array index, not a
   coordinate), and one stack can show up once per storage handle that exposes it;
@@ -138,8 +146,12 @@ mcdebug gui problems --brief                             # WARN/ERROR log + caug
 - `gui close` = Esc: a sub-screen returns to its parent (Video Settings -> Options), so closing to
   the world may take several. Closing a container with a carried stack hands it back to vanilla.
 - `gui key`/`type` go to the current Screen only (no Screen: `-32020`). `type` appends to the
-  focused EditBox; `handled:false` means nothing took the characters (no focus, or a disabled box,
-  e.g. an anvil with an empty input slot). Ctrl+A first (`gui key --key A --ctrl`) to replace.
+  focused EditBox, and boxes often start pre-filled (an anvil shows the item's name): use
+  `gui type --text X --clear` to replace. `handled:false` means nothing took the characters (no
+  focus, or a disabled box, e.g. an anvil with an empty input slot).
+- `--text` matches substrings across the whole Screen: a label also inside a button ("New World"
+  in "Create New World") hits the first widget. Narrow the screen first (a search box), pass
+  `--index`, or click the row's `--gui X,Y` from `gui screen`/a screenshot.
   A key that navigates (Esc, Enter) returns `ok:true reason:CHANGED_BY_INPUT`.
 - `gui drag` with a carried stack over slots is vanilla drag-splitting (QUICK_CRAFT).
 - Errors: a plain `gui click/hover/...` that cannot act exits 2 with `error [-320xx]` on stderr
@@ -177,6 +189,8 @@ next ones); the swap itself is well under a second, versus a full client restart
 into the JVM, `false` = it was already loaded (normal, not a failure).
 
 - `changed:0` with a stderr note = no newer class files in that dir: wrong dir or wrong compile task.
+  Relative `--classes` resolve against the CLI's current directory, not the game's: pass absolute
+  paths when the shell is elsewhere.
 - A Screen shown by reload-screen is a copy in its own class loader. A later hotswap redefines the
   real class (`skippedReloadCopies` lists the copies) but not that open copy: the `hint` says so;
   run reload-screen again, or close and reopen the GUI to get the real (hotswapped) class.

@@ -184,6 +184,10 @@ class RpcClient(private val opts: RpcClientOptions) : AutoCloseable {
         val raw = opts.tcp ?: return (opts.host ?: return null).let { h ->
             InetSocketAddress(h, opts.port ?: opts.defaultTcpPort)
         }
+        return parseTcp(raw)
+    }
+
+    private fun parseTcp(raw: String): InetSocketAddress {
         val host: String
         val port: Int
         if (raw.startsWith("[")) {
@@ -251,6 +255,9 @@ class RpcClient(private val opts: RpcClientOptions) : AutoCloseable {
     /** unix socket 连接（本机访问，0.5.x 主通道）。 */
     private fun connectUnix() {
         val path = discoverSocket()
+        // A discovered endpoint may be the mod's loopback fallback ("tcp:127.0.0.1:N"), written
+        // when its unix socket could not bind (path over the OS limit, no AF_UNIX).
+        if (path.startsWith(TCP_ENDPOINT_PREFIX)) return connectTcp(parseTcp(path.removePrefix(TCP_ENDPOINT_PREFIX)))
         val ch = SocketChannel.open(StandardProtocolFamily.UNIX)
         try {
             ch.connect(UnixDomainSocketAddress.of(path))
@@ -421,3 +428,6 @@ class RpcClient(private val opts: RpcClientOptions) : AutoCloseable {
         }.apply { removeOnCancelPolicy = true }
     }
 }
+
+/** Endpoint strings in discovery files / session records: a socket path, or this prefix + host:port. */
+const val TCP_ENDPOINT_PREFIX = "tcp:"

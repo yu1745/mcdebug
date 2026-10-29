@@ -112,7 +112,7 @@ object GuiOps : ClientRpcGroup {
                 addProperty("jarPath", ClientInfo.jarPath())
                 addProperty("modVersion", ClientInfo.modVersion())
                 addProperty("protocolVersion", ClientInfo.PROTOCOL_VERSION)
-                addProperty("clientSocket", ClientInfo.socketPath()?.toString() ?: "")
+                addProperty("clientSocket", ClientInfo.endpoint() ?: "")
                 addProperty("clientSocketBound", ClientInfo.socketBound())
                 addProperty("clientTcpPort", ClientInfo.tcpPort() ?: -1)
                 addProperty("clientTcpListening", ClientInfo.tcpPort() != null)

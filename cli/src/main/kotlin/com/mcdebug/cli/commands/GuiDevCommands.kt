@@ -160,7 +160,7 @@ class GuiHotswapCmd : CliktCommand(
             printJson(JsonObject().apply { addProperty("ok", true); addProperty("attached", attached) })
             return@withGuiApi
         }
-        val dirs = classes.map { Path.of(it).toAbsolutePath().normalize().toString() }
+        val dirs = classDirs(classes)
         val r = api.gui.hotswap(dirs, since, if (all) true else null, if (noReinit) false else null).asJsonObject
         r.addProperty("attached", attached)
         printJson(r)
@@ -201,9 +201,19 @@ class GuiReloadScreenCmd : CliktCommand(
 
     override fun run() {
         follow.validate()
-        val params = mapOf("dirs" to classes.map { Path.of(it).toAbsolutePath().normalize().toString() }, "also" to also.ifEmpty { null })
+        val params = mapOf("dirs" to classDirs(classes), "also" to also.ifEmpty { null })
         withGuiApi { api ->
             printJson(follow.run(api, "reloadScreen", params) ?: api.gui.reloadScreen(params["dirs"] as List<String>, also))
         }
     }
+}
+
+/** Relative --classes resolve against this CLI's working directory, not the game's: say so up front. */
+private fun classDirs(classes: List<String>): List<String> = classes.map { raw ->
+    val dir = Path.of(raw).toAbsolutePath().normalize()
+    if (!java.nio.file.Files.isDirectory(dir)) throw UsageError(
+        "--classes $raw: no such directory $dir" +
+            (if (Path.of(raw).isAbsolute) "" else " (relative to the current directory ${Path.of("").toAbsolutePath()}; pass an absolute path)"),
+    )
+    dir.toString()
 }

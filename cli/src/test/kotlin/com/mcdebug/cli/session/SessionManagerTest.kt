@@ -200,6 +200,38 @@ class SessionManagerTest {
         }
     }
 
+    @Test fun `startup stop resolves to stopped once no client JVM holds client lock`() {
+        manager.start(request())
+        Files.createDirectories(game.resolve("mcdebug"))
+        val lockFile = game.resolve("mcdebug/client.lock")
+        Files.writeString(lockFile, "")
+        manager.stop("test", force = true, waitSeconds = 0) // cancels the wrapper
+        val held = java.nio.channels.FileChannel.open(lockFile, java.nio.file.StandardOpenOption.WRITE)
+        val lock = held.lock() // a bootstrapping client JVM still owns the gameDir
+        try {
+            assertEquals("stopping", state(manager.status("test")))
+        } finally {
+            lock.release(); held.close()
+        }
+        assertEquals("stopped", state(manager.status("test")))
+        assertEquals("start_timeout", state(manager.start(request().copy(name = "again", waitSeconds = 0)))) // launched, not refused
+    }
+
+    @Test fun `remove forgets attached records any time and owned ones only when not live`() {
+        val req = request()
+        manager.start(req)
+        assertThrows(IllegalStateException::class.java) { manager.remove("test") } // owned and live
+        val identity = publish(token = "")
+        runtime.observation = SessionObservation(identity, status(true, true))
+        runtime.live.remove(runtime.wrapper.pid)
+        // an attached record of some other client can always be forgotten
+        val other = temp.resolve("other/run").also { Files.createDirectories(it) }
+        publish(token = "", pid = 77, instance = "other", gameDir = other)
+        SessionManager(registryDir, runtime).attach("att", other)
+        assertTrue(manager.remove("att").get("removed").asBoolean)
+        assertThrows(IllegalStateException::class.java) { manager.status("att") }
+    }
+
     @Test fun `startup stop never cancels reused wrapper PID`() {
         manager.start(request())
         runtime.live[runtime.wrapper.pid] = "2026-01-02T00:00:00Z"

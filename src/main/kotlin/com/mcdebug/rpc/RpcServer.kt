@@ -11,6 +11,7 @@ import java.io.BufferedReader
 import java.io.BufferedWriter
 import java.io.InputStreamReader
 import java.io.OutputStreamWriter
+import java.net.InetAddress
 import java.net.InetSocketAddress
 import java.net.StandardProtocolFamily
 import java.net.UnixDomainSocketAddress
@@ -111,6 +112,15 @@ class RpcServer(
     var socketPath: Path? = null
         private set
 
+    /** True when TCP was bound only as the loopback fallback for a failed unix socket. */
+    var loopbackFallback = false
+        private set
+
+    /** What discovery publishes: the socket path, or `tcp:127.0.0.1:N` for the loopback fallback. */
+    val endpoint: String?
+        get() = socketPath?.toAbsolutePath()?.toString()
+            ?: tcpPort?.takeIf { loopbackFallback }?.let { "tcp:127.0.0.1:$it" }
+
     /** Actually bound TCP port, or null if TCP is disabled or failed to bind. */
     @Volatile
     var tcpPort: Int? = null
@@ -166,6 +176,8 @@ class RpcServer(
             writeDiscoveryFile(socketFilePath, path.toString(), "socket")
         } catch (e: Exception) {
             log.warn("mcdebug RPC failed to bind unix socket {}: {} — continuing without it", path, e.message)
+            // Never leave a previous run's socket path in the discovery file.
+            socketFilePath()?.let { runCatching { Files.deleteIfExists(it) } }
         }
 
         // --- TCP (secondary channel, cross-machine) ---
@@ -197,6 +209,30 @@ class RpcServer(
         }
 
         if (!unixOk && !tcpOk) {
+            // Unix sockets fail for paths over the OS limit (~107 bytes) or without AF_UNIX
+            // (old Windows). Stay reachable locally: loopback-only ephemeral TCP, published as
+            // the "tcp:" endpoint in the socket discovery file. Clients still verify identity.
+            try {
+                val ch = ServerSocketChannel.open()
+                try {
+                    ch.bind(InetSocketAddress(InetAddress.getLoopbackAddress(), 0), BACKLOG)
+                } catch (e: Exception) {
+                    ch.close()
+                    throw e
+                }
+                val actualPort = (ch.localAddress as InetSocketAddress).port
+                tcpChannel = ch
+                tcpPort = actualPort
+                loopbackFallback = true
+                tcpOk = true
+                log.warn("mcdebug RPC fell back to loopback TCP 127.0.0.1:{} (unix socket unavailable)", actualPort)
+                writeDiscoveryFile(socketFilePath, endpoint!!, "socket")
+                writeDiscoveryFile(tcpPortFilePath, actualPort.toString(), "tcp port")
+            } catch (e: Exception) {
+                log.warn("mcdebug RPC loopback fallback failed: {}", e.message)
+            }
+        }
+        if (!unixOk && !tcpOk) {
             error("mcdebug RPC could not start: both unix socket and TCP listeners failed to bind")
         }
 
@@ -222,6 +258,7 @@ class RpcServer(
         socketPath?.let { p -> runCatching { Files.deleteIfExists(p) } }
         socketPath = null
         tcpPort = null
+        loopbackFallback = false
     }
 
     private fun acceptLoop(ch: ServerSocketChannel, via: String) {

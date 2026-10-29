@@ -60,7 +60,8 @@ object ServerPlane {
     val running: Boolean get() = rpcServer != null
 
     /** Local (unix) socket path of the server plane, or null when not listening. */
-    val socketPath: String? get() = rpcServer?.socketPath?.toString()
+    /** Published endpoint: socket path, or `tcp:127.0.0.1:N` for the loopback fallback. */
+    val socketPath: String? get() = rpcServer?.endpoint
 
     /** TCP port of the server plane, or null when TCP is disabled/unbound. */
     val tcpPort: Int? get() = rpcServer?.tcpPort

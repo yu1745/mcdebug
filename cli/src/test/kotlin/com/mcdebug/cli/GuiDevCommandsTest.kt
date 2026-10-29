@@ -77,11 +77,12 @@ class GuiDevCommandsTest {
             assertEquals("inventory", p.getAsJsonObject("params")["screen"].asString)
         }
         expectCall(listOf("screenshot", "--hide-cursor"), "gui.screenshot") { p -> assertEquals("hide", p["cursor"].asString) }
-        expectCall(listOf("reload-screen", "--classes", "out", "--also", "com.example.Widget"), "gui.reloadScreen") { p ->
+        val out = java.nio.file.Files.createDirectories(temp.resolve("out")).toString()
+        expectCall(listOf("reload-screen", "--classes", out, "--also", "com.example.Widget"), "gui.reloadScreen") { p ->
             assertTrue(p.getAsJsonArray("dirs")[0].asString.endsWith("out"))
             assertEquals("com.example.Widget", p.getAsJsonArray("also")[0].asString)
         }
-        expectCall(listOf("reload-screen", "--classes", "out", "--shot", "gui"), "gui.act") { p ->
+        expectCall(listOf("reload-screen", "--classes", out, "--shot", "gui"), "gui.act") { p ->
             assertEquals("reloadScreen", p["action"].asString)
             assertFalse(p.getAsJsonObject("params").has("also"))
         }

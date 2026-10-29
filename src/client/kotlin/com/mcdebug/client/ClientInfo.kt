@@ -72,7 +72,7 @@ object ClientInfo {
         Files.createDirectories(dir)
         val discovery = JsonObject().apply {
             add("process", RpcEnv.processInfo())
-            addProperty("clientSocket", server?.socketPath?.toAbsolutePath()?.toString() ?: "")
+            addProperty("clientSocket", server?.endpoint ?: "")
         }
         val temporary = Files.createTempFile(dir, ".client-", ".json.part")
         try {
@@ -131,6 +131,9 @@ object ClientInfo {
     fun socketPath(): Path? = server?.socketPath ?: intendedSocket
 
     fun socketBound(): Boolean = server?.socketPath != null
+
+    /** Published endpoint: socket path, or `tcp:127.0.0.1:N` when the socket fell back to loopback TCP. */
+    fun endpoint(): String? = server?.endpoint ?: intendedSocket?.toString()
 
     /** Actually bound TCP port, or null when TCP is disabled or failed to bind. */
     fun tcpPort(): Int? = server?.tcpPort

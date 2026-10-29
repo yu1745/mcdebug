@@ -115,6 +115,15 @@ internal class SessionStopCmd(
     }
 }
 
+internal class SessionRemoveCmd : CliktCommand(
+    name = "remove", help = "forget a registry record: attached ones any time (the game keeps running), owned ones once stopped/failed/dead",
+    epilog = "Example: mcdebug session remove old-attach",
+) {
+    private val name by argument("NAME", help = "local session name")
+    override fun run() = printJson(rootCli().sessionManager().remove(name))
+}
+
 fun sessionSubcommands(): List<CliktCommand> = listOf(
     SessionStartCmd(), SessionAttachCmd(), SessionListCmd(), SessionStatusCmd(), SessionLogsCmd(), SessionStopCmd(),
+    SessionRemoveCmd(),
 )
