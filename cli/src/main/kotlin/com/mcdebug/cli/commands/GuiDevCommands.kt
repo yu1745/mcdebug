@@ -165,6 +165,9 @@ class GuiHotswapCmd : CliktCommand(
         r.addProperty("attached", attached)
         printJson(r)
         if (r.get("ok")?.asBoolean == false) throw CliExit(2, "some classes could not be redefined (see failed)")
+        if (r.get("changed")?.asInt == 0) System.err.println(
+            "note: no class file in ${dirs.joinToString()} is newer than the last swap; did the build write there? " +
+                "(split source sets compile client code with clientClasses, not classes)")
     }
 }
 

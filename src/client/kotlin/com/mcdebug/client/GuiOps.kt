@@ -21,6 +21,7 @@ import net.minecraft.client.multiplayer.ServerData
 import net.minecraft.client.multiplayer.resolver.ServerAddress
 import net.minecraft.client.player.LocalPlayer
 import net.minecraft.core.Direction
+import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.network.protocol.game.ServerboundSetCarriedItemPacket
 import net.minecraft.world.InteractionHand
 import net.minecraft.world.inventory.AbstractContainerMenu
@@ -241,7 +242,9 @@ object GuiOps : ClientRpcGroup {
             } finally {
                 if (restore != null) restoreHotbarSlot(client, player, restore)
             }
-            OpenAttempt(face, result.toString(), screenBefore, menuBefore)
+            // What the CLIENT sees there: a just-placed block may not have arrived yet, gravity blocks fall.
+            val block = BuiltInRegistries.BLOCK.getKey(player.level().getBlockState(pos).block).toString()
+            OpenAttempt(face, result.toString(), screenBefore, menuBefore, block)
         }
         return ClientTasks.thenOnClient(client, attempt) { done ->
             ClientTasks.until(waitTicks) {
@@ -258,7 +261,12 @@ object GuiOps : ClientRpcGroup {
                     addProperty("ok", changedNow)
                     addProperty("changed", changedNow)
                     addProperty("result", done.result)
-                    addProperty("reason", if (changedNow) "" else "NO_GUI_CHANGED")
+                    addProperty("reason", when {
+                        changedNow -> ""
+                        done.block == "minecraft:air" -> "NO_BLOCK"
+                        else -> "NO_GUI_CHANGED"
+                    })
+                    addProperty("block", done.block)
                     addProperty("screen", screen?.javaClass?.name ?: "")
                     addProperty("screenType", screenType(screen))
                     addProperty("screenTitle", screen?.let { it.getTitle().string } ?: "")
@@ -283,6 +291,7 @@ object GuiOps : ClientRpcGroup {
         val result: String,
         val screenBefore: Screen?,
         val menuBefore: AbstractContainerMenu?,
+        val block: String,
     )
 
     // ------------------------------------------------------------ screenshot

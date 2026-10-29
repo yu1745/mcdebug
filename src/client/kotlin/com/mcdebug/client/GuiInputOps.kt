@@ -307,8 +307,12 @@ object GuiInputOps : ClientRpcGroup {
                     if (closed) throw problem("CLIENT_STOPPING", "client is stopping")
                     if (System.nanoTime() - deadline >= 0) throw problem("INPUT_TIMEOUT", "input exceeded 30s wall deadline")
                     val changed = changed()
-                    report.addProperty("ok", !changed)
+                    // A key/type that itself navigates (Esc, Enter on a button) succeeded; only an
+                    // interrupted drag gesture, or a change before our input landed, is a failure.
+                    val causedByInput = kind != "drag" && report.get("handled").asBoolean
+                    report.addProperty("ok", !changed || causedByInput)
                     report.addProperty("reason", when {
+                        causedByInput && changed -> "CHANGED_BY_INPUT"
                         report.get("screenChanged").asBoolean -> "SCREEN_CHANGED"
                         report.get("sizeChanged").asBoolean -> "SCREEN_SIZE_CHANGED"
                         else -> ""

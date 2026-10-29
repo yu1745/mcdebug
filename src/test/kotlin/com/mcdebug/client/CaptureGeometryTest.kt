@@ -32,6 +32,13 @@ class CaptureGeometryTest {
         assertEquals(CaptureGeometry.Crop(80, 60, 20, 20), crop)
     }
 
+    @Test fun `float noise in the ortho scale does not add a pixel column`() {
+        // 2560x1440 @ guiScale 6: the real scale is 6.0000001, a 176-unit GUI at 125 is 1056 px.
+        val scale = CaptureGeometry.renderScale(2560, 1440, 2560, 1440, 6.0)
+        val crop = CaptureGeometry.clipGuiRect(2560, 1440, scale.x, scale.y, 125.0, 37.0, 176.0, 166.0)
+        assertEquals(CaptureGeometry.Crop(750, 222, 1056, 996), crop)
+    }
+
     @Test fun `fractional crop edges round outwards`() {
         val crop = CaptureGeometry.clipGuiRect(100, 100, 2.5, 3.0, 1.1, 2.2, 3.3, 4.4)
         assertEquals(CaptureGeometry.Crop(2, 6, 9, 14), crop)

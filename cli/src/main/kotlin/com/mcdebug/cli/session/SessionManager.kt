@@ -275,9 +275,17 @@ class SessionManager(
             return record
         }
         if (record.process != null && !alive(record.process)) return update(record, setOf("starting", "start_timeout", "client_ready", "world_ready")) { it.copy(state = "dead", lastError = "client PID/startTime is no longer live") }
+        // The wrapper waits for runClient, so while starting its exit means the build
+        // failed or MC exited/crashed before publishing an identity: fail now, not at the deadline.
+        val wrapperDead = record.process == null && record.state in setOf("starting", "start_timeout") &&
+            record.wrapper?.let(runtime::isAlive) == false
+        fun startFailed() = update(record, setOf("starting", "start_timeout")) {
+            it.copy(state = "failed", lastError = "client exited before becoming ready" +
+                (crashHint(it.logPath)?.let { hint -> ": $hint" } ?: "") + "; see session logs")
+        }
         try {
-            val found = discovery(Path.of(record.gameDir)) ?: return record
-            if (!alive(found.process)) return record
+            val found = discovery(Path.of(record.gameDir))
+            if (found == null || !alive(found.process)) return if (wrapperDead) startFailed() else record
             check(matches(record, found.process)) { "client.json identity does not match this session" }
             val observed = runtime.inspect(options(found.socket, "client", found.process))
             check(observed.process == found.process && alive(found.process)) { "client identity changed during probe" }
@@ -286,9 +294,24 @@ class SessionManager(
                     state = readyState(observed.status), lastError = null)
             }
         } catch (e: Exception) {
+            if (wrapperDead) return startFailed()
             record = update(record, setOf("starting", "start_timeout", "client_ready", "world_ready")) { it.copy(lastError = "probe: ${e.message}") }
         }
         return record
+    }
+
+    /** Last crash/failure line of the launch log (bounded tail), for lastError. */
+    private fun crashHint(logPath: String?): String? {
+        val path = logPath?.let(Path::of)?.takeIf(Files::isRegularFile) ?: return null
+        val tail = RandomAccessFile(path.toFile(), "r").use { file ->
+            val start = maxOf(0L, file.length() - 256 * 1024)
+            file.seek(start)
+            ByteArray((file.length() - start).toInt()).also(file::readFully).toString(Charsets.UTF_8)
+        }
+        val markers = listOf("Minecraft has crashed", "Caused by:", "BUILD FAILED", "FAILURE:", "Exception")
+        return tail.lineSequence().map(String::trim).filter { line -> markers.any(line::contains) }
+            .lastOrNull { "Caused by:" in it }
+            ?: tail.lineSequence().map(String::trim).lastOrNull { line -> markers.any(line::contains) }
     }
 
     private fun readyState(status: JsonObject?): String = if (status?.get("inWorld")?.asBoolean == true &&

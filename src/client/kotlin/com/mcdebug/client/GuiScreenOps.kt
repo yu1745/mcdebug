@@ -21,7 +21,11 @@ object GuiScreenOps : ClientRpcGroup {
     override fun methods(): Map<String, ClientRpcHandler> = linkedMapOf("screen" to ::screen)
 
     private fun screen(client: Minecraft, params: JsonObject?): CompletableFuture<JsonElement> =
-        ClientTasks.onClient(client) { snapshot(client) }
+        ClientTasks.onClient(client) { client.screen?.let(WidgetFrames::hasScrollList) == true }.thenCompose { lists ->
+            // Scroll-list entry positions are refreshed only while drawn (see WidgetFrames).
+            if (lists) ClientTasks.thenOnClient(client, GuiTargets.drawFrame(client)) { snapshot(client) }
+            else ClientTasks.onClient(client) { snapshot(client) }
+        }
 
     /** Client thread only; shared with `gui.act`. */
     fun snapshot(client: Minecraft): JsonObject {
@@ -66,8 +70,11 @@ object GuiScreenOps : ClientRpcGroup {
             }
             val widgets = GuiWidgets.collect(current)
             val focused = current.getFocused()
+            val clipped = WidgetFrames.clipped(current)
             add("widgets", JsonArray().apply {
-                widgets.forEachIndexed { i, widget -> add(widgetJson(client, i, widget, focused)) }
+                widgets.forEachIndexed { i, widget ->
+                    add(widgetJson(client, i, widget, focused).apply { if (widget in clipped) addProperty("clipped", true) })
+                }
             })
         }
     }

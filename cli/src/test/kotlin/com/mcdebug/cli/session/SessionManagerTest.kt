@@ -115,6 +115,17 @@ class SessionManagerTest {
         assertEquals("start_timeout", state(manager.status("test")))
     }
 
+    @Test fun `client crash before discovery fails start immediately with the crash line`() {
+        runtime.onLaunch = { spec ->
+            Files.createDirectories(spec.logPath.parent); Files.writeString(spec.logPath, "> Task :runClient\nCaused by: java.lang.ClassCastException: boom\nBUILD FAILED in 29s\n")
+            runtime.live.remove(runtime.wrapper.pid)
+        }
+        val result = manager.start(request().copy(waitSeconds = 600))
+        assertEquals("failed", state(result))
+        assertTrue(result.get("lastError").asString.contains("ClassCastException: boom"))
+        assertEquals(0L, runtime.nanoTime(), "must not wait for the deadline")
+    }
+
     @Test fun `launcher failure is persisted without deleting game data`() {
         val req = request()
         Files.createDirectories(game.resolve("saves/Keep"))

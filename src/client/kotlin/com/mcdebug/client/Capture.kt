@@ -624,12 +624,21 @@ object CaptureGeometry {
         require(scaleX.isFinite() && scaleY.isFinite() && scaleX > 0 && scaleY > 0)
         require(x.isFinite() && y.isFinite() && width.isFinite() && height.isFinite())
         if (width <= 0 || height <= 0) return null
-        val left = floor(x * scaleX).coerceIn(0.0, framebufferWidth.toDouble()).toInt()
-        val top = floor(y * scaleY).coerceIn(0.0, framebufferHeight.toDouble()).toInt()
-        val right = ceil((x + width) * scaleX).coerceIn(0.0, framebufferWidth.toDouble()).toInt()
-        val bottom = ceil((y + height) * scaleY).coerceIn(0.0, framebufferHeight.toDouble()).toInt()
+        val left = floor(snap(x * scaleX)).coerceIn(0.0, framebufferWidth.toDouble()).toInt()
+        val top = floor(snap(y * scaleY)).coerceIn(0.0, framebufferHeight.toDouble()).toInt()
+        val right = ceil(snap((x + width) * scaleX)).coerceIn(0.0, framebufferWidth.toDouble()).toInt()
+        val bottom = ceil(snap((y + height) * scaleY)).coerceIn(0.0, framebufferHeight.toDouble()).toInt()
         if (right <= left || bottom <= top) return null
         return Crop(left, top, right - left, bottom - top)
+    }
+
+    /**
+     * The float ortho bounds make the scale 6.0000001-ish; without snapping, ceil turns
+     * 1056.0001 into an extra column of world pixels behind the GUI (unstable goldens).
+     */
+    private fun snap(pixel: Double): Double {
+        val nearest = Math.rint(pixel)
+        return if (kotlin.math.abs(pixel - nearest) < 1e-3) nearest else pixel
     }
 
     fun pngToGui(x: Double, y: Double, cropX: Double, cropY: Double,

@@ -10,14 +10,14 @@ import net.minecraft.client.gui.screens.Screen;
 import net.minecraft.client.renderer.GameRenderer;
 import org.spongepowered.asm.mixin.Mixin;
 import org.spongepowered.asm.mixin.injection.At;
-import org.spongepowered.asm.mixin.injection.Redirect;
 
 @Mixin(GameRenderer.class)
 public abstract class GameRendererMixin {
-    @Redirect(method = "render", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/Minecraft;isWindowActive()Z"))
-    private boolean mcdebug$backgroundFocus(Minecraft client) {
+    // WrapOperation, not Redirect: remapJar writes `at` as an array, which Redirect rejects.
+    @WrapOperation(method = "render", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/Minecraft;isWindowActive()Z"))
+    private boolean mcdebug$backgroundFocus(Minecraft client, Operation<Boolean> original) {
         // Only suppress automatic lost-focus pausing, not explicit pause screens.
-        return RenderControl.keepRunningUnfocused() || client.isWindowActive();
+        return RenderControl.keepRunningUnfocused() || original.call(client);
     }
 
     /**

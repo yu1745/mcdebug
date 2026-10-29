@@ -45,10 +45,23 @@ internal object GuiTargets {
     /** Any thread. Resolves a `text` target that no widget carries against drawn strings. */
     fun prepare(client: Minecraft, p: JsonObject): CompletableFuture<JsonObject> {
         val text = p.string("text")
+        // Scroll-list entries only have current x/y in a frame that drew them: draw one first.
+        if (p.get("widget")?.isJsonNull == false || (text != null && p.get("slot")?.isJsonNull != false)) {
+            val fresh = ClientTasks.onClient(client) { client.screen?.let(WidgetFrames::hasScrollList) == true }
+            return fresh.thenCompose { needed ->
+                if (needed) drawFrame(client).thenApply { textPrepare(client, p, text) }.thenCompose { it }
+                else textPrepare(client, p, text)
+            }
+        }
+        return textPrepare(client, p, text)
+    }
+
+    private fun textPrepare(client: Minecraft, p: JsonObject, text: String?): CompletableFuture<JsonObject> {
         if (text == null || listOf("slot", "widget").any { p.get(it)?.isJsonNull == false }) return CompletableFuture.completedFuture(p)
         val widgetMatches = ClientTasks.onClient(client) {
             val screen = client.screen ?: throw noScreen()
-            GuiWidgets.collect(screen).any { it.message.string.contains(text, ignoreCase = true) }
+            val clipped = WidgetFrames.clipped(screen)
+            GuiWidgets.collect(screen).any { it !in clipped && it.message.string.contains(text, ignoreCase = true) }
         }
         return widgetMatches.thenCompose { found ->
             if (found) CompletableFuture.completedFuture(p)
@@ -69,16 +82,23 @@ internal object GuiTargets {
         val drawn = log?.getAsJsonArray("entries")?.map { it.asJsonObject }?.filter { it.get("op")?.asString == "text" }.orEmpty()
         val matches = drawn.filter { it.get("text").asString.contains(text, ignoreCase = true) }
         val index = p.int("index", 0)
+        val clipped = WidgetFrames.clipped(screen)
+        val clippedMatches = clipped.count { it.message.string.contains(text, ignoreCase = true) }
         val hit = matches.getOrNull(index)
             ?: throw RpcException(
                 RpcErrors.GUI_ELEMENT_NOT_FOUND,
-                if (matches.isEmpty()) "no widget or drawn text contains \"$text\" on ${screen.javaClass.simpleName}"
-                else "no drawn text at index $index contains \"$text\" (${matches.size} match(es))",
-                reason("GUI_ELEMENT_NOT_FOUND").apply {
+                when {
+                    matches.isEmpty() && clippedMatches > 0 ->
+                        "\"$text\" only matches $clippedMatches widget(s) scrolled out of their list; gui scroll it into view first"
+                    matches.isEmpty() -> "no widget or drawn text contains \"$text\" on ${screen.javaClass.simpleName}"
+                    else -> "no drawn text at index $index contains \"$text\" (${matches.size} match(es))"
+                },
+                reason(if (matches.isEmpty() && clippedMatches > 0) "WIDGET_CLIPPED" else "GUI_ELEMENT_NOT_FOUND").apply {
                     addProperty("query", text)
                     addProperty("matchCount", matches.size)
+                    if (clippedMatches > 0) addProperty("clippedMatchCount", clippedMatches)
                     add("available", stringArray(
-                        (GuiWidgets.collect(screen).filter { it.visible }.map { it.message.string } + drawn.map { it.get("text").asString })
+                        (GuiWidgets.collect(screen).filter { it.visible && it !in clipped }.map { it.message.string } + drawn.map { it.get("text").asString })
                             .filter { it.isNotBlank() }.distinct().take(60),
                     ))
                 },
@@ -138,11 +158,17 @@ internal object GuiTargets {
                 "no widget $index on ${screen.javaClass.simpleName} (${widgets.size} widgets; indices from gui.screen)",
                 reason("GUI_ELEMENT_NOT_FOUND").apply { addProperty("widgetCount", widgets.size) },
             )
+        if (widget in WidgetFrames.clipped(screen)) throw RpcException(
+            RpcErrors.GUI_ELEMENT_NOT_FOUND,
+            "widget $index (\"${widget.message.string}\") is scrolled out of its list; gui scroll it into view first",
+            reason("WIDGET_CLIPPED").apply { addProperty("widgetCount", widgets.size) },
+        )
         return GuiTarget(widget.x + widget.width / 2.0, widget.y + widget.height / 2.0, "widget", index to widget, "widget=$index")
     }
 
     fun textTarget(screen: Screen, text: String, index: Int): GuiTarget {
-        val all = GuiWidgets.collect(screen).withIndex().toList()
+        val clipped = WidgetFrames.clipped(screen)
+        val all = GuiWidgets.collect(screen).withIndex().filter { it.value !in clipped }
         val matches = all.filter { it.value.message.string.contains(text, ignoreCase = true) }
         val clickable = matches.filter { it.value.isActive && it.value.visible }
         val pool = clickable.ifEmpty { matches }

@@ -68,12 +68,14 @@ object RenderControl {
         if (recordDraws) DrawRecorder.begin()
         hideCursor = frameCursor == "hide"
         var drawLog: com.google.gson.JsonObject? = null
+        WidgetFrames.beginFrame()
         try {
             renderer.render(delta, renderWorld && mode != RenderMode.GUI_ONLY)
         } finally {
             hideCursor = false
             if (recordDraws) drawLog = DrawRecorder.end()
         }
+        if (client.screen === screenBefore) WidgetFrames.endFrame(screenBefore)
         frames++
         // LoadingOverlay and mod render callbacks may switch/init screens. Do not
         // pair the old frame's pixels with a new Screen's bounds; keep requests

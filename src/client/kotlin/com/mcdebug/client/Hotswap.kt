@@ -6,6 +6,7 @@ import com.mcdebug.McDebugMod
 import com.mcdebug.rpc.RpcErrors
 import com.mcdebug.rpc.RpcException
 import net.fabricmc.loader.impl.launch.FabricLauncherBase
+import net.minecraft.client.Minecraft
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.ClassVisitor
 import org.objectweb.asm.FieldVisitor
@@ -131,7 +132,10 @@ object Hotswap {
             throw RpcException(RpcErrors.INVALID_PARAMS, e.message ?: "invalid class directories")
         }
         val byName = changed.associateBy { it.name }
-        val loaded = inst.allLoadedClasses.filter { it.classLoader != null && it.name in byName }
+        val matching = inst.allLoadedClasses.filter { it.classLoader != null && it.name in byName }
+        // gui.reloadScreen copies are frozen snapshots in their own loaders; diffing against a
+        // stale copy (e.g. one with a since-reverted field) would veto the whole batch forever.
+        val (copies, loaded) = matching.partition { it.classLoader is ScreenClassLoader }
         val loadedNames = loaded.map { it.name }.toSet()
         val failed = JsonArray()
         val definitions = ArrayList<ClassDefinition>()
@@ -165,6 +169,9 @@ object Hotswap {
             add("redefined", redefined)
             add("notLoaded", stringArray(changed.map { it.name }.filter { it !in loadedNames }))
             add("failed", failed)
+            add("skippedReloadCopies", stringArray(copies.map { it.name }.distinct()))
+            if (copies.any { Minecraft.getInstance().screen?.javaClass == it }) addProperty("hint",
+                "the open Screen is a gui.reloadScreen copy and is not redefined; run gui.reloadScreen to see this change")
             if (!failed.isEmpty) addProperty("applied", "none: nothing was redefined (all or nothing)")
             addProperty("enhancedRedefinition", enhanced)
             addProperty("since", lastSwapMillis)

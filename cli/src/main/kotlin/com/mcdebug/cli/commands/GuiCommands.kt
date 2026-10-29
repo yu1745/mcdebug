@@ -183,11 +183,15 @@ class GuiScreenCmd : CliktCommand(
                 val wo = w.asJsonObject
                 val text = wo.get("text")?.asString ?: ""
                 val value = wo.get("value")?.asString
+                fun flag(key: String) = wo.get(key)?.asBoolean == true
                 println(
-                    "  ${wo.get("class")?.asString}: \"$text\"" +
+                    "  [${wo.get("index")}] ${wo.get("class")?.asString}: \"$text\"" +
                         (value?.let { " value=\"$it\"" } ?: "") +
                         " at (${wo.get("x")},${wo.get("y")}) ${wo.get("width")}x${wo.get("height")}" +
-                        if (wo.get("active")?.asBoolean == true) "" else " [inactive]",
+                        (if (flag("active")) "" else " [inactive]") +
+                        (if (wo.get("visible")?.asBoolean == false) " [hidden]" else "") +
+                        (if (flag("clipped")) " [clipped]" else "") +
+                        (if (flag("focused")) " [focused]" else ""),
                 )
             }
         }
@@ -262,6 +266,16 @@ class GuiScreenshotCmd : CliktCommand(
                 throw UsageError("cannot copy $from to $to: ${e.message}")
             }
             o.addProperty("copiedTo", to.toString())
+            // The annotated twin follows the same naming rule next to the copy: x.png -> x.annotated.png.
+            o.get("annotatedPath")?.asString?.let { annotated ->
+                val twin = to.resolveSibling(to.fileName.toString().removeSuffix(".png") + ".annotated.png")
+                try {
+                    Files.copy(Path.of(annotated), twin, java.nio.file.StandardCopyOption.REPLACE_EXISTING)
+                } catch (e: Exception) {
+                    throw UsageError("cannot copy $annotated to $twin: ${e.message}")
+                }
+                o.addProperty("annotatedCopiedTo", twin.toString())
+            }
             printed = to.toString()
         }
         if (pathOnly) {
