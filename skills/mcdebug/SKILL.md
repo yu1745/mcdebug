@@ -52,6 +52,9 @@ Below, `mcdebug` means whichever of these you found.
   ```
   Submodule projects need `--task :core:runClient --game-dir core/run`. One client per gameDir:
   a second one falls back to the title screen ("session.lock: already locked").
+  Startup to `world_ready` takes ~30 s. If MC or the build dies first, `start` returns `failed`
+  at once with the crash line in `lastError`; `session logs dev` has the full output.
+  `--width/--height` lose to `programArgs '--width' ...` in the project's `loom.runs.client`.
 - **Existing server/client**: `--socket <gameDir>/mcdebug/socket` (server plane),
   `--client-socket <gameDir>/mcdebug/clientSocket` (client plane), or `--tcp host:port` across
   machines. Running inside the gameDir discovers them automatically.
@@ -91,8 +94,31 @@ mcdebug gui screenshot --mode gui --draw-log             # every blit/fill/text 
 mcdebug gui problems --brief                             # WARN/ERROR log + caught render faults
 ```
 
-- Click targets: `--slot N`, `--widget N`, `--text "Label"` (also matches text drawn in renderBg),
-  `--gui X,Y`, `--png X,Y` (pixels of the previous screenshot).
+- Click targets: `--slot N`, `--widget N` (the `[N]` in `gui screen --brief`), `--text "Label"`
+  (substring, case-insensitive; also matches text drawn in renderBg or list rows that are not
+  widgets, e.g. world-list entries), `--gui X,Y`, `--png X,Y` (pixels of the previous screenshot).
+- Scroll lists: an entry scrolled out of view is `[clipped]` in `gui screen`; clicking it fails with
+  `WIDGET_CLIPPED`. `gui scroll --dy -N --gui X,Y` (over the list) first. Only rendered rows have
+  current coordinates, so mdb renders a frame before `gui screen`/targets on such Screens.
+- `open-block` walks the real client use path: the player must be in reach, the hand empty (the
+  default) and the block present **on the client**. `reason:NO_BLOCK` + `block` show what the
+  client saw (e.g. a gravity block like an anvil fell off the air you placed it on).
+- Slot clicks obey the menu's rules: a slot whose `mayPlace` rejects the item leaves it on the
+  cursor (`changed:false`, `carried` still set). Check `slotAfter`/`carried`, not `ok`.
+- `gui close` = Esc: a sub-screen returns to its parent (Video Settings -> Options), so closing to
+  the world may take several. Closing a container with a carried stack hands it back to vanilla.
+- `gui key`/`type` go to the current Screen only (no Screen: `-32020`). `type` appends to the
+  focused EditBox; `handled:false` means nothing took the characters (no focus, or a disabled box,
+  e.g. an anvil with an empty input slot). Ctrl+A first (`gui key --key A --ctrl`) to replace.
+  A key that navigates (Esc, Enter) returns `ok:true reason:CHANGED_BY_INPUT`.
+- `gui drag` with a carried stack over slots is vanilla drag-splitting (QUICK_CRAFT).
+- `gui act` failures come back as JSON `ok:false` + `error` with exit 0: check `ok`.
+- `gui open-screen` fills constructors from Screen/Player/Minecraft/Options only; anything needing
+  other arguments (ChatScreen(String), creative inventory) needs a `pkg.Class#factory`.
+- Options/Video Settings clicks change the real `options.txt` of that gameDir.
+- `gui disconnect` keeps the client on the title screen and removes the server-plane socket; get
+  back in with `gui click --text Singleplayer`, `gui type --text <save>` (search box),
+  `gui click --text <save>`, `gui click --text "Play Selected World"` (~5 s).
 - After server-plane writes run `mcdebug gui settle` before looking; clicks settle themselves.
 - Read results from data (`gui screen`, the click report, `be.getNbt`), not from pixels alone.
 - A Screen that throws while rendering no longer crashes the client: it stops drawing and
@@ -101,7 +127,7 @@ mcdebug gui problems --brief                             # WARN/ERROR log + caug
 ## 4. Change code without restarting
 
 ```bash
-./gradlew classes
+./gradlew classes                                                # split source sets: clientClasses for client code
 mcdebug gui hotswap --classes build/classes/kotlin/client        # method bodies only; all or nothing; re-inits the Screen
 mcdebug gui reload-screen --classes build/classes/kotlin/client  # open Screen's own class: any change, same menu
 mcdebug gui reload-resources                                     # textures / lang / models
@@ -110,12 +136,29 @@ mcdebug gui reload-resources                                     # textures / la
 Use the output dirs your build really writes (`build/classes/java/main`, `.../kotlin/client`, ...).
 Hotswap reports `failed[].changes` when a class gained or lost members: then use reload-screen (for
 the Screen class) or restart the session. Neither one reruns constructors of existing objects.
+Measured on ic2 (method body): compile 2.5-3.5 s + hotswap 0.5 s; a restart costs ~35 s.
+
+- `changed:0` with a stderr note = no newer class files in that dir: wrong dir or wrong compile task.
+- A Screen shown by reload-screen is a copy in its own class loader. A later hotswap redefines the
+  real class (`skippedReloadCopies` lists the copies) but not that open copy: the `hint` says so;
+  run reload-screen again, or close and reopen the GUI to get the real (hotswapped) class.
+- Failure exits 2 and redefines nothing (all or nothing).
 
 ## 5. Regression
 
 `mcdebug gui screenshot --mode gui --hide-cursor --out new.png`, then
 `mcdebug gui compare --expected golden.png --actual new.png --ignore x,y,w,h --report r.html`
 (exit 1 on mismatch; `--ignore` is in PNG pixels). Only an explicit `--accept` writes the golden.
+`--mode gui` crops to the GUI rectangle, but translucent texture edges still blend with the world
+behind it: if two identical shots differ by 1 per channel, use `--channel-tolerance 2`. `--annotate`
+with `--out x.png` also writes `x.annotated.png`. `--hash-only` is the cheap "did it change?" probe.
+
+## Costs
+
+Each `java -jar` call pays ~330 ms of JVM start: most gui commands take 0.4-0.7 s in total, of
+which 40-300 ms is the RPC. Many steps in a row: `mcdebug --session dev --batch -c "..." -c "..."`
+(one JVM, ~75 ms per command), `gui act` (action + settle + screenshot + screen in one call), or the
+native `mdb`. `reload-resources` takes ~4 s.
 
 ## Exit codes and errors
 
