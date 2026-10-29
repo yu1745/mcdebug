@@ -139,7 +139,8 @@ object ClientInfo {
     fun tcpPort(): Int? = server?.tcpPort
 
     fun endpointDescription(): String {
-        val socket = socketPath()?.toString()
+        // Only a bound socket counts; the intended path of a failed bind is not an endpoint.
+        val socket = server?.socketPath?.toString()
         val tcp = tcpPort()
         return when {
             socket != null && tcp != null -> "unix=$socket tcp=127.0.0.1:$tcp"

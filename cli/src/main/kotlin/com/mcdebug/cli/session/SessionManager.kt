@@ -105,8 +105,11 @@ class SessionManager(
      */
     fun remove(name: String): JsonObject {
         val record = refresh(requireRecord(name))
-        check(!record.owned || (record.state in setOf("stopped", "failed", "dead") && !occupied(record))) {
-            "session $name is owned and ${record.state}; stop it first (`session stop $name`)"
+        if (record.owned) {
+            check(record.state in setOf("stopped", "failed", "dead")) {
+                "session $name is owned and ${record.state}; stop it first (`session stop $name`)"
+            }
+            check(!occupied(record)) { "session $name is ${record.state} but its launcher/wrapper is still exiting; retry shortly" }
         }
         return gameLocked(Path.of(record.gameDir), false) {
             registry.locked {
