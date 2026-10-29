@@ -11,6 +11,7 @@ import com.mcdebug.rpc.RpcHandlerGroup
 import com.mcdebug.util.NbtJson
 import com.mcdebug.util.ServerContext
 import net.minecraft.world.level.block.Block
+import net.minecraft.world.level.block.state.BlockState
 import net.minecraft.server.MinecraftServer
 import net.minecraft.server.level.ServerLevel
 import net.minecraft.world.level.levelgen.structure.BoundingBox
@@ -69,9 +70,9 @@ object WorldOps : RpcHandlerGroup {
             val pos = p.requirePos("pos")
             val blockId = p.requireString("block")
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
-            val stateProps = p.getStringMapOrNull("stateProps")
+            val stateProps = p.stateMap()
             val flags = p.getIntOr("flags", DEFAULT_FLAGS)
-            val state = ServerContext.blockState(server, blockId, stateProps)
+            val state = shaped(world, pos, ServerContext.blockState(server, blockId, stateProps), stateProps)
             val previous = world.getBlockState(pos)
             val ok = world.setBlock(pos, state, flags)
             JsonObject().apply {
@@ -80,6 +81,14 @@ object WorldOps : RpcHandlerGroup {
                 add("previous", ServerContext.blockStateToJson(previous))
             }
         }
+
+    /**
+     * Like /setblock: a block placed without explicit properties takes the shape its
+     * neighbours imply (redstone wire connections, fences, stairs); otherwise wire stays
+     * an unconnected dot and does not power the block beside it. Explicit properties win.
+     */
+    private fun shaped(world: ServerLevel, pos: BlockPos, state: BlockState, props: Map<String, String>?): BlockState =
+        if (props.isNullOrEmpty()) Block.updateFromNeighbourShapes(state, world, pos) else state
 
     private fun setBlocks(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
         RpcContext.onServer(server) {
@@ -91,7 +100,8 @@ object WorldOps : RpcHandlerGroup {
             ops.forEach { el ->
                 val op = el.asJsonObject
                 val pos = op.requirePos("pos")
-                val block = ServerContext.blockState(server, op.requireString("block"), op.getStringMapOrNull("stateProps"))
+                val props = op.stateMap()
+                val block = shaped(world, pos, ServerContext.blockState(server, op.requireString("block"), props), props)
                 if (world.setBlock(pos, block, flags)) count++
             }
             JsonObject().apply { addProperty("count", count) }
@@ -100,7 +110,7 @@ object WorldOps : RpcHandlerGroup {
     private fun fillBox(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
         RpcContext.onServer(server) {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
-            fillBoxNow(server, p, p.requireString("block"), p.getStringMapOrNull("stateProps"))
+            fillBoxNow(server, p, p.requireString("block"), p.stateMap())
         }
 
     private fun clearBox(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =

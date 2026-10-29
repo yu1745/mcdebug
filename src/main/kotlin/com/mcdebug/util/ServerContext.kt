@@ -117,8 +117,13 @@ object ServerContext {
         // Find a state where all parsed values match. This avoids the generic-bound gymnastics
         // that would be required to call State.with<T extends Comparable<T>, V extends T>(Property<T>, V)
         // when T is only known at runtime (Property<*>).
+        // Properties not given keep their default value (the first matching state could have
+        // any value there, e.g. a lever placed with only `face` came out powered).
+        val default = block.defaultBlockState()
+        val given = parsed.map { it.first }.toSet()
         return block.stateDefinition.possibleStates.firstOrNull { candidate ->
-            parsed.all { (prop, value) -> candidate.getValue(prop) == value }
+            parsed.all { (prop, value) -> candidate.getValue(prop) == value } &&
+                candidate.properties.all { it in given || candidate.getValue(it) == default.getValue(it) }
         } ?: throw RpcException(
             RpcErrors.INVALID_BLOCK_STATE, "no state of $blockId matches properties $stateProps"
         )

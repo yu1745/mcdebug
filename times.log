@@ -1,0 +1,1 @@
+T6 8s ok lever->wire->lamp; bug found: wait.until block[..].prop.lit == true (unquoted bool) compares string prop to boolean and never matches; must quote: == "true"; ranTicks=1; also redstone get-power NPEs on redstone wire positions (RedStoneWireBlock.getSignal direction=null)

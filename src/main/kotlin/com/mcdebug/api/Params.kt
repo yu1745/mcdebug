@@ -141,3 +141,6 @@ internal fun JsonObject.getDirectionOrNull(name: String): Direction? {
     val s = getString(name) ?: return null
     return DIRECTION_NAMES[s.lowercase()]
 }
+
+/** Block-state properties: `stateProps`, or `state` (the name the responses use). */
+internal fun JsonObject.stateMap(): Map<String, String>? = getStringMapOrNull("stateProps") ?: getStringMapOrNull("state")

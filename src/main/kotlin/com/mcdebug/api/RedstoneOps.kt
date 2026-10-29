@@ -58,7 +58,8 @@ object RedstoneOps : RpcHandlerGroup {
                 add("pos", ServerContext.posAsJson(pos))
                 addProperty("dim", world.dimension().location().toString())
                 addProperty("powered", world.hasNeighborSignal(pos))
-                addProperty("received", world.getSignal(pos, null))
+                // getSignal(pos, null) NPEs on redstone wire: use the strongest signal any neighbour sends in
+            addProperty("received", world.getBestNeighborSignal(pos))
             }
         }
 
@@ -146,7 +147,8 @@ object RedstoneOps : RpcHandlerGroup {
             add("pos", ServerContext.posAsJson(pos))
             addProperty("dim", world.dimension().location().toString())
             addProperty("powered", world.hasNeighborSignal(pos))
-            addProperty("received", world.getSignal(pos, null))
+            // getSignal(pos, null) NPEs on redstone wire: use the strongest signal any neighbour sends in
+            addProperty("received", world.getBestNeighborSignal(pos))
             add("state", ServerContext.blockStateToJson(world.getBlockState(pos)))
             add("inputs", JsonObject().apply {
                 Direction.entries.forEach { dir ->

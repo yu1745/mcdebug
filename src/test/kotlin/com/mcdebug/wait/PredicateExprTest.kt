@@ -355,6 +355,14 @@ class PredicateExprTest {
     }
 
     @Test
+    fun `block-state strings compare with bool and number literals`() {
+        assertTrue { MockWorld().leaf("block", pos, "prop.lit", "true").eval("""block[0,64,0].prop.lit == true""") }
+        assertFalse { MockWorld().leaf("block", pos, "prop.lit", "false").eval("""block[0,64,0].prop.lit == true""") }
+        assertTrue { MockWorld().leaf("block", pos, "prop.power", "15").eval("""block[0,64,0].prop.power >= 8""") }
+        assertFalse { MockWorld().leaf("block", pos, "prop.facing", "north").eval("""block[0,64,0].prop.facing == 1""") }
+    }
+
+    @Test
     fun `eval tick numeric`() {
         assertTrue { MockWorld().leaf("tick", "", 500).eval("""tick > 100""") }
     }

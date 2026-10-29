@@ -83,11 +83,18 @@ mcdebug raw be.getNbt      '{"pos":[100,64,100]}'
 mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeoutTicks":400}'
 ```
 
+- Block state: `"stateProps":{"facing":"east"}` (or `"state"`; CLI `--state k=v`, repeatable);
+  properties you leave out keep their default. Without properties the block takes the shape its
+  neighbours imply, like `/setblock` (wire connects, fences join); placement logic does not run
+  otherwise (no facing toward a player, no item-placement side effects). Put things on a solid
+  floor: wire, levers, gravity blocks and the player all drop off air.
 - Positions are `[x,y,z]`; boxes `{"from":[..],"to":[..]}`, both corners inclusive, passed under
   a `box` key: `raw scan.findEntities '{"box":{"from":[0,60,0],"to":[10,80,10]}}'`.
 - `inv.*` only reaches block-entity containers. The **player inventory**: `scan.findEntities`
   (box around the player) for the uuid, then `raw entity.getNbt '{"uuid":"..."}'` -> `Inventory[]`
   (its `Slot` is the player's own numbering), or `gui screen` while a container GUI is open.
+  To give the player an item: `raw server.runCommand '{"command":"give @p minecraft:diamond 4"}'`
+  (any server command works this way; it is also how to clear, teleport, set time).
 - `storage list` shows which handles a block exposes. `storage.*` is the generic item/fluid/energy API (handles `vanilla:inventory`, `fabric:item`,
   `fabric:fluid`, `teamreborn:energy`); fluids are in droplets (81000 = 1 bucket).
   `inserted`/`extracted` can be far below `amount`: the block's own transfer limit applies, and
@@ -105,7 +112,7 @@ mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeo
   `inv get-size` + `inv get-slot`, never by guessing. `inv extract` needs `--item` (it is a
   storage-style extract); for a whole slot use `inv set-slot` with an empty item.
 - **Ticks are never driven**: wait with `wait.until` (predicate DSL: `be[..].<path>`,
-  `inv[..].<slot>.count`, `block[..].id`, `AND/OR/NOT`, `sum(inv[..].*.count)`; see `wait --help`).
+  `inv[..].<slot>.count`, `block[..].id`, `block[..].prop.lit == true`, `AND/OR/NOT`, `sum(inv[..].*.count)`; see `wait --help`).
   **Prefer short waits** (a few seconds of ticks) and wait again if the condition is merely slow:
   a timeout costs nothing and the next wait resumes, but a long wait on a wrong predicate (typo
   in a path, wrong slot, machine without power) burns its full timeout for nothing. Before a
@@ -117,14 +124,28 @@ mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeo
   anything another block does to this one (pushing energy/items, redstone) does not happen. It
   is the real ticker, so it consumes what a real tick consumes (energy, fuel, inputs).
   `wait.until` answers with `ranTicks`: how long the condition actually took.
-- `trace start` records snapshots every `--interval-ticks` (`--max-ticks` auto-stops); it shares
-  snapshot's `--include` (`block`, `inventory`, `entity`, ...): machine slots need `inventory`.
+- `trace start` records snapshots every `--interval-ticks` (`--max-ticks` auto-stops) and prints a
+  `traceId` for `trace get`/`trace stop`; it shares snapshot's `--include` (`block`, `inventory`,
+  `entity`, ...): machine slots need `inventory`. `trace get` returns every frame: pipe it through
+  a filter rather than reading it whole.
 - `snapshot capture` + `snapshot diff` compare state (metadata `/tick` `/time` ignored by default);
   diff paths are JSON pointers into the capture (`/blocks/13/...` is an array index, not a
   coordinate), and one stack can show up once per storage handle that exposes it; entities and
   their bookkeeping NBT change on their own, so narrow `--include` to what the test is about;
-  `fixture` saves/loads block regions as JSON; `reflect.*` reaches anything else (Mojang or
-  intermediary names both work).
+  captures hold absolute positions, so the same build at another origin is all "changed".
+- `fixture capture` saves a block region as JSON; block-entity contents (chest items, machine
+  NBT) only with `--include-nbt`. `fixture load --origin` places it anywhere.
+- `redstone`: `set-lever --powered|--unpowered`, `pulse`, `get-power` (`received`, per-side
+  `inputs`/`outputs`), `notify-neighbors` after edits that skipped updates.
+- `reflect` reaches anything else. Start from `--root server|level|be|entity|player` (`--pos`,
+  `--uuid`, `--name`, `--dim`), then `--path a.b[0].c`: a segment is a field, else a no-arg
+  method, else `getX`/`isX`; there are no arguments or expressions (use `reflect call`). Mojang
+  and intermediary names both work; `reflect resolve --root ... --path ... --members` lists what
+  is there. Objects come back as `{"$ref":N}`, usable by later commands (bounded, gone when the
+  server stops); prefer one `--path` over hopping ref to ref. `reflect set` writes a non-final
+  field (numbers take the field's type) and prints before/after; an ambiguous overload in
+  `reflect call` asks for `--arg-types int,long`. It bypasses the block's own logic: no sync,
+  no `setChanged`; prefer the normal APIs when they exist.
 - `screen.*` is a **server-side fake-player menu** (slot JSON, no pixels). Pixels only come from `gui.*`.
 
 ## 3. Client plane: the GUI loop
@@ -151,7 +172,8 @@ mcdebug gui problems --brief                             # WARN/ERROR log + caug
   current coordinates, so mdb renders a frame before `gui screen`/targets on such Screens.
 - `open-block` walks the real client use path: the player must be in reach, the hand empty (the
   default) and the block present **on the client**. `reason:NO_BLOCK` + `block` show what the
-  client saw (e.g. a gravity block like an anvil fell off the air you placed it on).
+  client saw (e.g. a gravity block like an anvil fell off the air you placed it on);
+  `reason:OUT_OF_REACH` + `distance`/`reach`: teleport the player next to it first.
 - Slot clicks obey the menu's rules: a slot whose `mayPlace` rejects the item leaves it on the
   cursor (`changed:false`, `carried` still set). Check `slotAfter`/`carried`, not `ok`.
 - `gui close` = Esc: a sub-screen returns to its parent (Video Settings -> Options), so closing to

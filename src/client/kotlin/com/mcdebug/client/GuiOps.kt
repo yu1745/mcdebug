@@ -244,7 +244,10 @@ object GuiOps : ClientRpcGroup {
             }
             // What the CLIENT sees there: a just-placed block may not have arrived yet, gravity blocks fall.
             val block = BuiltInRegistries.BLOCK.getKey(player.level().getBlockState(pos).block).toString()
-            OpenAttempt(face, result.toString(), screenBefore, menuBefore, block)
+            // The server refuses clicks beyond the interaction range without a word, which
+            // otherwise reads as "the block has no GUI" (typical: player fell off after set-block).
+            val distance = player.eyePosition.distanceTo(Vec3.atCenterOf(pos))
+            OpenAttempt(face, result.toString(), screenBefore, menuBefore, block, distance, player.blockInteractionRange())
         }
         return ClientTasks.thenOnClient(client, attempt) { done ->
             ClientTasks.until(waitTicks) {
@@ -264,9 +267,12 @@ object GuiOps : ClientRpcGroup {
                     addProperty("reason", when {
                         changedNow -> ""
                         done.block == "minecraft:air" -> "NO_BLOCK"
+                        done.distance > done.reach + 1.0 -> "OUT_OF_REACH"
                         else -> "NO_GUI_CHANGED"
                     })
                     addProperty("block", done.block)
+                    addProperty("distance", Math.round(done.distance * 10) / 10.0)
+                    addProperty("reach", done.reach)
                     addProperty("screen", screen?.javaClass?.name ?: "")
                     addProperty("screenType", screenType(screen))
                     addProperty("screenTitle", screen?.let { it.getTitle().string } ?: "")
@@ -292,6 +298,8 @@ object GuiOps : ClientRpcGroup {
         val screenBefore: Screen?,
         val menuBefore: AbstractContainerMenu?,
         val block: String,
+        val distance: Double,
+        val reach: Double,
     )
 
     // ------------------------------------------------------------ screenshot

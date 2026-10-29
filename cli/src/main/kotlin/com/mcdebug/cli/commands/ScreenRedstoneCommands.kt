@@ -104,7 +104,7 @@ class RedstoneSetLeverCmd : CliktCommand(name = "set-lever", help = "set a lever
     private val x by option("--x").int().required()
     private val y by option("--y").int().required()
     private val z by option("--z").int().required()
-    private val powered by option("--powered").flag()
+    private val powered by option("--powered", help = "--powered = on, --unpowered (or neither) = off").flag("--unpowered")
     private val dim by option("--dim")
 
     override fun run() = withApi { api ->

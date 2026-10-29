@@ -517,6 +517,27 @@ internal object PredicateExpr {
                 val a = l.asString; val b = r.asString
                 return when (op) { "==" -> a == b; "!=" -> a != b; else -> false }
             }
+            // A string against a number/boolean: block-state properties are strings
+            // ("lit" -> "true", "power" -> "15"), so `prop.lit == true` / `prop.power >= 8`
+            // compare the string's value instead of being a silent type mismatch.
+            if (l.isJsonPrimitive && r.isJsonPrimitive) {
+                val (str, other, strLeft) = when {
+                    l.asJsonPrimitive.isString -> Triple(l.asString, r.asJsonPrimitive, true)
+                    r.asJsonPrimitive.isString -> Triple(r.asString, l.asJsonPrimitive, false)
+                    else -> Triple(null, null, false)
+                }
+                if (str != null && other != null) {
+                    if (other.isBoolean && (str == "true" || str == "false")) {
+                        val a = str.toBoolean(); val b = other.asBoolean
+                        return when (op) { "==" -> a == b; "!=" -> a != b; else -> false }
+                    }
+                    val n = str.toDoubleOrNull()
+                    if (other.isNumber && n != null) {
+                        val a = if (strLeft) n else other.asDouble; val b = if (strLeft) other.asDouble else n
+                        return when (op) { "==" -> a == b; "!=" -> a != b; "<" -> a < b; "<=" -> a <= b; ">" -> a > b; ">=" -> a >= b; else -> false }
+                    }
+                }
+            }
             // Type mismatch
             return when (op) { "!=" -> true; else -> false }
         }
