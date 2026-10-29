@@ -80,6 +80,16 @@ mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeo
   (its `Slot` is the player's own numbering), or `gui screen` while a container GUI is open.
 - `storage.*` is the generic item/fluid/energy API (handles `vanilla:inventory`, `fabric:item`,
   `fabric:fluid`, `teamreborn:energy`); fluids are in droplets (81000 = 1 bucket).
+  `inserted`/`extracted` can be far below `amount`: the block's own transfer limits apply per
+  call, and `remaining` is about this call only. Read the result back with `storage get`; to
+  fill quickly, repeat the call or write the block entity's NBT.
+- `be.setNbt` loads the given tag into the block entity; what happens to keys you leave out is
+  up to that block entity's load code. Write only the keys you mean to change. One value may be
+  stored in several fields (a mirror, a split long): verify through the API that matters
+  (`storage get`, `inv.getSlot`, the GUI), not by reading the NBT back.
+- Slot numbers of a block are its own: find input/output slots with `gui screen` (GUI open) or
+  `inv get-size` + `inv get-slot`, never by guessing. `inv extract` needs `--item` (it is a
+  storage-style extract); for a whole slot use `inv set-slot` with an empty item.
 - **Ticks are never driven**: wait with `wait.until` (predicate DSL: `be[..].<path>`,
   `inv[..].<slot>.count`, `block[..].id`, `AND/OR/NOT`, `sum(inv[..].*.count)`; see `wait --help`).
   **Prefer short waits** (a few seconds of ticks) and wait again if the condition is merely slow:
@@ -89,8 +99,11 @@ mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeo
   `timeoutTicks` 1-20 and look at `lastValue`: a `null`/unexpected value means the predicate,
   not the game, is wrong.
   The one exception, `be.tick` (`ticks` 0..12000), runs a single block entity's ticker
-  synchronously: it is fast, but world time does not advance and neighbours do not tick.
+  synchronously: it is fast, but world time does not advance and neighbours do not tick, so
+  anything another block does to this one (pushing energy/items, redstone) does not happen.
 - `snapshot capture` + `snapshot diff` compare state (metadata `/tick` `/time` ignored by default);
+  diff paths are JSON pointers into the capture (`/blocks/13/...` is an array index, not a
+  coordinate), and one stack can show up once per storage handle that exposes it;
   `fixture` saves/loads block regions as JSON; `reflect.*` reaches anything else (Mojang or
   intermediary names both work).
 - `screen.*` is a **server-side fake-player menu** (slot JSON, no pixels). Pixels only come from `gui.*`.
@@ -168,12 +181,14 @@ into the JVM, `false` = it was already loaded (normal, not a failure).
   real class (`skippedReloadCopies` lists the copies) but not that open copy: the `hint` says so;
   run reload-screen again, or close and reopen the GUI to get the real (hotswapped) class.
 - Failure exits 2 and redefines nothing (all or nothing).
+- `reload-screen`'s `reloads` counts reloads of this Screen so far; `classes` lists what was loaded.
 
 ## 5. Regression
 
 `mcdebug gui screenshot --mode gui --hide-cursor --out new.png`, then
 `mcdebug gui compare --expected golden.png --actual new.png --ignore x,y,w,h --report r.html`
-(exit 1 on mismatch; `--ignore` is in PNG pixels). Only an explicit `--accept` writes the golden.
+(exit 1 on mismatch; `--ignore` is in PNG pixels; read `$?` without a pipe or with
+`set -o pipefail`, `| head` hides it). Only an explicit `--accept` writes the golden.
 `--mode gui` crops to the GUI rectangle, but translucent texture edges still blend with the world
 behind it: if two identical shots differ by 1 per channel, use `--channel-tolerance 2`. `--annotate`
 with `--out x.png` also writes `x.annotated.png` (copies: `path` stays under

@@ -14,8 +14,18 @@ fun parseBlockTarget(x: Int?, y: Int?, z: Int?, dim: String?, what: String): Jso
     return gson.toJsonTree(mapOf("kind" to "block", "pos" to listOf(x, y, z), "dim" to dim))
 }
 
-fun parseTargetArg(target: String?, x: Int?, y: Int?, z: Int?, dim: String?, what: String): JsonElement =
-    if (target != null) parseJsonArg(target) else parseBlockTarget(x, y, z, dim, what)
+/** `--target` is target JSON / @file, or just the kind `block` combined with --x/--y/--z. */
+fun parseTargetArg(target: String?, x: Int?, y: Int?, z: Int?, dim: String?, what: String): JsonElement {
+    val t = target?.trim()
+    return when {
+        t == null || t == "block" -> parseBlockTarget(x, y, z, dim, what)
+        t.startsWith("{") || t.startsWith("@") -> parseJsonArg(t)
+        else -> throw IllegalArgumentException(
+            "$what: --target must be target JSON ('{\"kind\":\"block\",\"pos\":[x,y,z]}'), @file, or 'block' with --x/--y/--z")
+    }
+}
+
+private const val TARGET_HELP = "target JSON '{\"kind\":\"block\",\"pos\":[x,y,z]}' or @file; or omit it (or 'block') and give --x/--y/--z"
 
 fun parseResourceArg(resource: String?, item: String?, fluid: String?, energy: Boolean, nbt: String?): JsonElement {
     if (resource != null) return parseJsonArg(resource)
@@ -43,7 +53,7 @@ class StorageCommands : CliktCommand(name = "storage", help = "generic item/flui
 }
 
 class StorageListCmd : CliktCommand(name = "list", help = "list storage handles at a target") {
-    private val target by option("--target", help = "Target JSON or @file")
+    private val target by option("--target", help = TARGET_HELP)
     private val x by option("--x").int()
     private val y by option("--y").int()
     private val z by option("--z").int()
@@ -57,7 +67,7 @@ class StorageListCmd : CliktCommand(name = "list", help = "list storage handles 
 
 class StorageGetCmd : CliktCommand(name = "get", help = "read one storage handle") {
     private val handle by option("--handle").required()
-    private val target by option("--target")
+    private val target by option("--target", help = TARGET_HELP)
     private val x by option("--x").int()
     private val y by option("--y").int()
     private val z by option("--z").int()
@@ -72,7 +82,7 @@ class StorageGetCmd : CliktCommand(name = "get", help = "read one storage handle
 class StorageInsertCmd : CliktCommand(name = "insert", help = "insert item/fluid/energy into a target") {
     private val handle by option("--handle")
     private val amount by option("--amount").int().required()
-    private val target by option("--target")
+    private val target by option("--target", help = TARGET_HELP)
     private val x by option("--x").int()
     private val y by option("--y").int()
     private val z by option("--z").int()
@@ -97,7 +107,7 @@ class StorageInsertCmd : CliktCommand(name = "insert", help = "insert item/fluid
 class StorageExtractCmd : CliktCommand(name = "extract", help = "extract item/fluid/energy from a target") {
     private val handle by option("--handle")
     private val amount by option("--amount").int().required()
-    private val target by option("--target")
+    private val target by option("--target", help = TARGET_HELP)
     private val x by option("--x").int()
     private val y by option("--y").int()
     private val z by option("--z").int()
