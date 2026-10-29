@@ -82,6 +82,12 @@ mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeo
   `fabric:fluid`, `teamreborn:energy`); fluids are in droplets (81000 = 1 bucket).
 - **Ticks are never driven**: wait with `wait.until` (predicate DSL: `be[..].<path>`,
   `inv[..].<slot>.count`, `block[..].id`, `AND/OR/NOT`, `sum(inv[..].*.count)`; see `wait --help`).
+  **Prefer short waits** (a few seconds of ticks) and wait again if the condition is merely slow:
+  a timeout costs nothing and the next wait resumes, but a long wait on a wrong predicate (typo
+  in a path, wrong slot, machine without power) burns its full timeout for nothing. Before a
+  real wait, read the values the predicate uses (`be.getNbt`, `inv.getSlot`) or run it once with
+  `timeoutTicks` 1-20 and look at `lastValue`: a `null`/unexpected value means the predicate,
+  not the game, is wrong.
   The one exception, `be.tick` (`ticks` 0..12000), runs a single block entity's ticker
   synchronously: it is fast, but world time does not advance and neighbours do not tick.
 - `snapshot capture` + `snapshot diff` compare state (metadata `/tick` `/time` ignored by default);
