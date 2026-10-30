@@ -25,8 +25,7 @@ public abstract class GameRendererMixin {
      * mouse arguments, and {@link ScreenGuard} turns a render exception of the
      * open Screen into a recorded fault instead of a crash (unless disabled).
      */
-    @WrapOperation(method = "render", at = @At(value = "INVOKE",
-        target = "Lnet/minecraft/client/gui/screens/Screen;renderWithTooltip(Lnet/minecraft/client/gui/GuiGraphics;IIF)V"))
+    @WrapOperation(method = "render", at = @At(value = "INVOKE", target = MixinTargets.SCREEN_DRAW))
     private void mcdebug$renderScreen(Screen screen, GuiGraphics graphics, int mouseX, int mouseY, float partialTick,
                                       Operation<Void> original) {
         if (ScreenGuard.shouldSkip(screen)) return;

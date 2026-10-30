@@ -8,7 +8,6 @@ import com.mcdebug.rpc.RpcErrors
 import com.mcdebug.rpc.RpcException
 import com.mcdebug.util.NbtJson
 import com.mcdebug.util.ServerContext
-import net.fabricmc.fabric.api.event.player.UseEntityCallback
 import net.minecraft.world.level.block.state.BlockState
 import net.minecraft.world.entity.Entity
 import net.minecraft.world.entity.EquipmentSlot
@@ -37,6 +36,7 @@ import net.minecraft.world.phys.Vec3
 import kotlin.math.ceil
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
+import com.mcdebug.loader.Loader
 
 /**
  * `world.*` handlers that act as a (fake) player: place, use items, break/attack blocks,
@@ -331,7 +331,7 @@ internal object WorldPlayerActions {
                     // Position + aim. With a target we look at its eyes so the
                     // weapon's shot vector (derived from yaw/pitch) points at it.
                     if (target != null) {
-                        val eye = target!!.getEyePosition()
+                        val eye = target.getEyePosition()
                         if (playerPos != null) {
                             fakePlayer.moveTo(
                                 playerPos.x + 0.5, playerPos.y.toDouble(), playerPos.z + 0.5,
@@ -861,7 +861,7 @@ internal object WorldPlayerActions {
      * Returns:
      *   success         boolean
      *   action          string
-     *   eventConsumed   boolean  Fabric UseEntityCallback consumed
+     *   eventConsumed   boolean  the loader's use-entity event consumed it
      *   entityConsumed  boolean  entity.interact consumed
      *   itemConsumed    boolean  item.useOnEntity consumed
      *   entityType      string   type of the target entity
@@ -916,12 +916,13 @@ internal object WorldPlayerActions {
                 val hitResult = EntityHitResult(entity, eyePos)
                 val itemBeforeSnapshot = fakePlayer.getItemInHand(InteractionHand.MAIN_HAND).copy()
 
-                // UseEntityCallback is fired by the fabric mixin on the PACKET handler
-                // (ServerGamePacketListenerImpl.onPlayerInteractEntity), not by
-                // Player.interact — fire it here at the same position (before the
-                // real interact call, mirroring the mixin's order).
-                eventResult = UseEntityCallback.EVENT.invoker()
-                    .interact(fakePlayer, world, InteractionHand.MAIN_HAND, entity, hitResult)
+                // The loader's "player uses entity" event is fired by the loader's own
+                // packet handler (Fabric: a mixin on ServerGamePacketListenerImpl;
+                // NeoForge: PlayerInteractEvent.EntityInteract), not by Player.interact —
+                // fire it here at the same position (before the real interact call).
+                eventResult = Loader.api.fireUseEntity(
+                    fakePlayer, world, InteractionHand.MAIN_HAND, entity, hitResult
+                )
 
                 if (eventResult.consumesAction() || eventResult == InteractionResult.FAIL) {
                     entityResult = InteractionResult.PASS
@@ -1154,7 +1155,10 @@ internal object WorldPlayerActions {
         old.forEach { (slot, stack) -> player.setItemSlot(slot, stack) }
     }
 
-    //1.21: ItemStack#getAttributeModifiers(EquipmentSlot) is gone; the attribute component lives on the item
+    //1.21: ItemStack#getAttributeModifiers(EquipmentSlot) is gone; the attribute component lives on the item.
+    // `Item#getDefaultAttributeModifiers` is @Deprecated in 1.21.1 but is still what vanilla's own
+    // ItemStack#forEachModifier uses, so keep the identical source of modifiers on purpose.
+    @Suppress("DEPRECATION")
     private fun mainHandModifierMultimap(stack: ItemStack): com.google.common.collect.Multimap<Holder<Attribute>, AttributeModifier> {
         val multimap = LinkedHashMultimap.create<Holder<Attribute>, AttributeModifier>()
         stack.item.getDefaultAttributeModifiers().forEach(EquipmentSlot.MAINHAND) { attribute, modifier ->

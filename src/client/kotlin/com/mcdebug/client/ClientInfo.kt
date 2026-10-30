@@ -2,12 +2,11 @@ package com.mcdebug.client
 
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
-import com.mcdebug.McDebugMod
+import com.mcdebug.McDebug
 import com.mcdebug.ServerPlane
 import com.mcdebug.rpc.RpcServer
 import com.mcdebug.rpc.RpcEnv
 import com.mcdebug.rpc.TransportConfig
-import net.fabricmc.loader.api.FabricLoader
 import java.nio.file.Path
 import java.nio.file.Files
 import java.nio.file.StandardCopyOption
@@ -96,7 +95,7 @@ object ClientInfo {
             val owner = token(dir.resolve("mdb-owner.json"))
             (owner != null && owner != RpcEnv.sessionToken) || token(dir.resolve("session-stop.json")) == RpcEnv.sessionToken
         } catch (e: Exception) {
-            McDebugMod.LOGGER.warn("Cannot read session bootstrap markers in {}: {}", dir, e.message)
+            McDebug.LOGGER.warn("Cannot read session bootstrap markers in {}: {}", dir, e.message)
             false
         }
     }
@@ -122,7 +121,7 @@ object ClientInfo {
     fun contractMismatch(): List<String> = mismatch
 
     fun modVersion(): String = try {
-        McDebugMod.MOD_VERSION
+        McDebug.MOD_VERSION
     } catch (t: Throwable) {
         "unknown"
     }
@@ -155,13 +154,13 @@ object ClientInfo {
      * stale copy is sitting in `mods/`.
      */
     fun jarPath(): String = try {
-        ClientInfo::class.java.protectionDomain?.codeSource?.location?.toURI()?.let { Path.of(it).toString() } ?: ""
+        com.mcdebug.loader.Loader.api.modJarPath() ?: ""
     } catch (t: Throwable) {
         ""
     }
 
     fun gameDirString(): String = try {
-        FabricLoader.getInstance().gameDir.toAbsolutePath().toString()
+        com.mcdebug.loader.Loader.api.gameDir.toAbsolutePath().toString()
     } catch (t: Throwable) {
         ""
     }

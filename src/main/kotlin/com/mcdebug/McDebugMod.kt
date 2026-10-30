@@ -1,15 +1,12 @@
 package com.mcdebug
 
-import com.mcdebug.rpc.RpcDispatcher
+import com.mcdebug.loader.Loader
+import com.mcdebug.loader.fabric.FabricLoaderApi
 import com.mcdebug.rpc.RpcEnv
 import net.fabricmc.api.DedicatedServerModInitializer
-import net.fabricmc.loader.api.FabricLoader
-import net.minecraft.server.MinecraftServer
-import org.slf4j.Logger
-import org.slf4j.LoggerFactory
 
 /**
- * mcdebug — JSON-RPC debug agent for mod development automation.
+ * Fabric `server` entrypoint — installs the loader seam and the server plane.
  *
  * One jar, two planes:
  *  - **server plane** ([ServerPlane]): `world.*` / `be.*` / `inv.*` / `wait.*` … over a
@@ -26,23 +23,16 @@ import org.slf4j.LoggerFactory
  * client. A single-player client gets the server plane from the client entrypoint
  * instead ([ServerPlane.installLifecycleHooks] hooks the integrated server), which
  * yields both planes in one process.
+ *
+ * The NeoForge build excludes this file and uses
+ * `com.mcdebug.loader.neoforge.McDebugNeoForge` instead; every other file in this source
+ * tree is shared between the loaders (see [Loader]).
  */
 object McDebugMod : DedicatedServerModInitializer {
-    const val MOD_ID = "mcdebug"
-    val LOGGER: Logger = LoggerFactory.getLogger(MOD_ID)
-    val MOD_VERSION: String = FabricLoader.getInstance().getModContainer(MOD_ID)
-        .map { it.metadata.version.friendlyString }
-        .orElse("0.0.0")
-
-    /** Live JSON-RPC dispatcher of the server plane (null when not running). */
-    val dispatcher: RpcDispatcher? get() = ServerPlane.dispatcher
-
-    /** The MinecraftServer instance backing the current server-plane session. */
-    val currentServer: MinecraftServer? get() = ServerPlane.currentServer
-
     override fun onInitializeServer() {
-        RpcEnv.gameDir = { FabricLoader.getInstance().gameDir }
-        LOGGER.info("mcdebug {} initializing (dedicated server)", MOD_VERSION)
+        Loader.install(FabricLoaderApi())
+        RpcEnv.gameDir = { Loader.api.gameDir }
+        McDebug.LOGGER.info("mcdebug {} initializing (fabric dedicated server)", McDebug.MOD_VERSION)
         ServerPlane.installLifecycleHooks()
     }
 }

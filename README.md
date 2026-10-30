@@ -6,9 +6,15 @@ server, the **client plane** (`gui.*`) drives a real game client — screenshots
 coordinates and real Screen clicks, so an agent can close the loop on GUI work. The Kotlin
 CLI (`mcdebug-cli.jar` / `mdb`) is the zero-install entry point.
 
+Builds exist for **Fabric 1.21.1** and **NeoForge 21.1.x** (MC 1.21.1) from one source tree; the
+same CLI and the same RPC method set drive both. Differences that a client can observe (fluid
+units, `fluid.*` tank indexing, `reflect.*` class names) are listed in
+`docs/plan-neoforge-port.md` §11.4 and reported where possible (`server.status.modLoader`,
+`server.status.fluidUnit`; energy amounts in `server.status.energyUnit`, i.e. `E` on Fabric and `FE` on NeoForge).
+
 ```
 ┌─────────────────┐  JSON-RPC 2.0   ┌───────────────────────────────┐
-│  mcdebug (Kotlin│  NDJSON over    │  mcdebug mod (Kotlin/Fabric)  │
+│  mcdebug (Kotlin│  NDJSON over    │  mcdebug mod (Kotlin)         │
 │  CLI / runner)  │  unix socket    │  server plane + client plane  │
 │                 │  <gameDir>/     │      ▲                        │
 │                 │   mcdebug/*     │      │ TCP 25580 / 25581      │
@@ -24,11 +30,15 @@ methods, verification, container manual). This README covers consumer-facing usa
 ## Setup
 
 ```bash
-./gradlew build              # mod + contract + self-contained jar check
-./gradlew :cli:copyCliJar    # CLI fat jar -> ./mcdebug-cli.jar (repo root, not in git)
+./gradlew build              # Fabric mod + contract + self-contained jar check
+./gradlew :cli:copyCliJar    # CLI fat jar -> ./mcdebug-cli.jar (repo root, not in git); embeds both loader jars
 
 java -jar mcdebug-cli.jar --help
 ```
+
+NeoForge 21.1.x is built by an independent nested build over the **same sources**
+(`./gradlew :neoforge:build|:neoforge:runServer|:neoforge:runClient`); smoke:
+`scripts/neoforge-smoke.sh`. See `docs/plan-neoforge-port.md` for the architecture, verified results and loader differences.
 
 For coding agents there is a Claude Code skill (workflow and pitfalls; the CLI's own `--help`
 stays the command reference). The CLI carries the one matching its version:
@@ -41,6 +51,7 @@ Below, `mcdebug` stands for `java -jar mcdebug-cli.jar` or the native binary (`m
 own build (`mcdebug jar`).
 
 Fabric project setup itself: <https://docs.fabricmc.net/develop/getting-started/creating-a-project#setting-up>.
+NeoForge project setup: <https://docs.neoforged.net/docs/gettingstarted/>.
 
 ## Deploy
 
@@ -51,8 +62,13 @@ Remove the old jar first — two mcdebug jars in one `mods/` fail to load. The C
 mod jar of its own build, so this does both (same version as the CLI, no download):
 
 ```bash
-mcdebug jar --output path/to/consumer/run/mods   # writes mcdebug-<version>.jar, removes older mcdebug-*.jar
+mcdebug jar --output path/to/consumer/run/mods                  # Fabric: mcdebug-<version>.jar
+mcdebug jar --loader neoforge --output .../run/mods             # NeoForge: mcdebug-neoforge-<version>.jar
 ```
+
+Either mode also deletes the *other* loader's jar from that directory (same `modId`, so two
+copies abort mod loading). Kotlin runtime: the Fabric jar needs **fabric-language-kotlin**, the
+NeoForge jar needs **KotlinForForge 5.12.x** — neither ships inside the mcdebug jar.
 
 A single-player client runs both planes in one process, so `world.*`/`be.*`/`inv.*` and
 `gui.*` are both available against the same integrated server.
@@ -113,11 +129,15 @@ Use `mcdebug raw <namespace.method> <json>` for anything without a dedicated com
 | `reflect.*` | resolve/get/set/call/new from a root (`server`/`level`/`be`/`entity`/`player`), a ref or a class, along a field/getter `path`; Mojang or intermediary names work in dev and production (table generated for this Minecraft version) |
 | `gui.reflect.*` | the same reflection core in the **client** JVM: roots `minecraft`/`screen`/`player`/`level`/`server` — open Screen, widgets, client caches. CLI: `reflect ... --client` |
 
-`storage.*` resolves handles in order: vanilla `Inventory` → Fabric `ItemStorage` → Fabric
-`FluidStorage` → Team Reborn `EnergyStorage`; targets are `{kind:"block"|"entity"|"item", ...}`
-and results carry ids like `vanilla:inventory`, `fabric:item`, `fabric:fluid`,
-`teamreborn:energy`. Prefer these generic APIs (and `be.tick` for machine progress) over
-mod-specific NBT pokes.
+`storage.*` resolves handles in order: vanilla `Inventory` → the loader's item storage →
+fluid storage → energy storage (Fabric: Transfer API; NeoForge: `ItemHandler`/`FluidHandler`/
+`EnergyStorage` capabilities); targets are `{kind:"block"|"entity"|"item", ...}` and results
+carry ids like `vanilla:inventory`, `fabric:item`, `fabric:fluid`, `teamreborn:energy` (the
+handle ids are part of the protocol and stay the same on both loaders). Prefer these generic
+APIs (and `be.tick` for machine progress) over mod-specific NBT pokes.
+
+Fluid amounts are in each loader's native unit (`server.status.fluidUnit`): `droplet` on Fabric
+(1 bucket = 81000) and `mb` on NeoForge (1 bucket = 1000).
 
 The server never exposes `tick.run`/`tick.runUntil`: `trace.*` and `wait.until` observe natural
 ticks only (`be.tick` is the one bounded exception: it runs a single block entity's ticker).

@@ -27,7 +27,7 @@ class ReflectCommands : CliktCommand(
 class ReflectTarget : OptionGroup("Target (one of --root/--ref/--class, then --path)") {
     val root by option("--root", help = "server | level | be | entity | player (server plane); minecraft | screen | player | level | server (--client)")
     val ref by option("--ref", help = "object ref from an earlier result").long()
-    val className by option("--class", help = "class for static members (Mojang, intermediary or mod name)")
+    val className by option("--class", help = "class for static members: an FQN like net.minecraft.world.level.block.Blocks; on Fabric a short/intermediary name also resolves (NeoForge has no mapping table, so it needs the FQN)")
     val path by option("--path", help = "e.g. 'overworld.dayTime' or 'items[0]'")
     val pos by option("--pos", help = "x,y,z for --root be")
     val dim by option("--dim", help = "dimension for --root level/be (default overworld)")
@@ -85,17 +85,43 @@ class ReflectGetCmd : CliktCommand(name = "get", help = "read the value at --pat
     }
 }
 
-class ReflectSetCmd : CliktCommand(name = "set", help = "write a non-final field of the target; numbers take the field's type (range-checked), enum fields take the constant name; prints before/after") {
+class ReflectSetCmd : CliktCommand(name = "set", help = "write a non-final field of the target (--field, or --path whose last segment is the field); numbers take the field's type (range-checked), enum fields take the constant name; prints before/after") {
     private val target by ReflectTarget()
-    private val field by option("--field").required()
+    private val field by option("--field", help = "field to write on the target; optional when --path ends in a field name")
     private val value by option("--value", help = "JSON value: 5, true, \"text\", {\"ref\":N}, or {\"enum\":..,\"name\":..}").required()
 
     override fun run() {
         val obj = target.params()
-        obj["field"] = field
+        val path = obj["path"] as? String
+        val (prefix, tail) = splitSetterPath(path)
+        val target_field = field ?: tail
+            ?: throw UsageError("give --field, or --path ending in a field name (e.g. --path overworld.dayTime)")
+        if (path != null) {
+            if (prefix == null) obj.remove("path") else obj["path"] = prefix
+        }
+        obj["field"] = target_field
         obj["value"] = parseJsonArg(value)
         reflectCall(target, "set", obj)
     }
+}
+
+/**
+ * `set` writes one field, so a path is split into "the object to write on" + "the field name":
+ * `overworld.dayTime` -> (`overworld`, `dayTime`), `items[0].count` -> (`items[0]`, `count`),
+ * a bare `dayTime` -> (null, `dayTime`) meaning "the target itself". A path ending in a method
+ * call or an index cannot be a setter target.
+ */
+private fun splitSetterPath(path: String?): Pair<String?, String?> {
+    if (path == null) return null to null
+    val trimmed = path.trim()
+    val cut = trimmed.lastIndexOf('.')
+    val prefix = if (cut < 0) null else trimmed.substring(0, cut)
+    val tail = if (cut < 0) trimmed else trimmed.substring(cut + 1)
+    if (tail.isEmpty()) throw UsageError("--path must not end with '.'")
+    if (tail.contains('[') || tail.contains('(')) {
+        throw UsageError("--path must end in a field name (got '$tail'): setting array elements or methods is not supported")
+    }
+    return prefix?.ifBlank { null } to tail
 }
 
 class ReflectCallCmd : CliktCommand(name = "call", help = "invoke a method on the target; the best-fitting overload is chosen, ties need --arg-types") {

@@ -6,7 +6,7 @@ import com.google.gson.JsonElement
 import com.google.gson.JsonNull
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
-import com.mcdebug.McDebugMod
+import com.mcdebug.McDebug
 import net.minecraft.server.MinecraftServer
 import java.util.concurrent.CompletableFuture
 
@@ -116,7 +116,7 @@ object RpcContext {
                 } catch (e: RpcException) {
                     f.completeExceptionally(e)
                 } catch (e: Exception) {
-                    McDebugMod.LOGGER.error("handler error", e)
+                    McDebug.LOGGER.error("handler error", e)
                     f.completeExceptionally(RpcErrors.internal(e))
                 }
             }

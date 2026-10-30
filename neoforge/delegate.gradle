@@ -1,0 +1,11 @@
+// 根构建视角下的 NeoForge 移植：本目录是独立 Gradle 构建（ModDevGradle），这里只把同名任务
+// 转发过去，例如 `./gradlew :neoforge:build`、`./gradlew :neoforge:runServer`。
+['build', 'assemble', 'clean', 'compileKotlin', 'runServer', 'runClient', 'test'].each { taskName ->
+	tasks.register(taskName, Exec) {
+		group = 'neoforge'
+		description = "Runs './gradlew ${taskName}' in neoforge/ (independent ModDevGradle build)"
+		workingDir = projectDir
+		commandLine './gradlew', taskName, '--console=plain'
+		standardInput = System.in
+	}
+}

@@ -2,10 +2,10 @@ package com.mcdebug.client
 
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
-import com.mcdebug.McDebugMod
+import com.mcdebug.McDebug
 import com.mcdebug.rpc.RpcErrors
 import com.mcdebug.rpc.RpcException
-import net.fabricmc.loader.impl.launch.FabricLauncherBase
+import com.mcdebug.client.loader.ClientLoader
 import net.minecraft.client.Minecraft
 import org.objectweb.asm.ClassReader
 import org.objectweb.asm.ClassVisitor
@@ -162,7 +162,7 @@ object Hotswap {
         }
         if (failed.isEmpty) lastSwapMillis = scanStarted
         if (redefined.size() > 0) swaps++
-        McDebugMod.LOGGER.info("mcdebug hotswap: {} changed, {} redefined, {} failed", changed.size, redefined.size(), failed.size())
+        McDebug.LOGGER.info("mcdebug hotswap: {} changed, {} redefined, {} failed", changed.size, redefined.size(), failed.size())
         return JsonObject().apply {
             addProperty("ok", failed.isEmpty)
             addProperty("changed", changed.size)
@@ -179,10 +179,10 @@ object Hotswap {
     }
 
     private fun transformedBytes(name: String, fileBytes: ByteArray): ByteArray {
-        val launcher = FabricLauncherBase.getLauncher()
-        // Only trust Knot's pre-mixin pipeline when it reads this very file (dev classpath).
-        val raw = try { launcher.getClassByteArray(name, false) } catch (_: Throwable) { null }
-        val preMixin = if (raw != null && raw.contentEquals(fileBytes)) launcher.getClassByteArray(name, true) ?: fileBytes else fileBytes
+        val seam = ClientLoader.api
+        // Only trust the loader's pre-mixin pipeline when it reads this very file (dev classpath).
+        val raw = seam.classBytes(name, false)
+        val preMixin = if (raw != null && raw.contentEquals(fileBytes)) seam.classBytes(name, true) ?: fileBytes else fileBytes
         val transformer = MixinEnvironment.getCurrentEnvironment().activeTransformer as? IMixinTransformer ?: return preMixin
         return transformer.transformClassBytes(name, name, preMixin)
     }

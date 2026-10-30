@@ -8,14 +8,12 @@ import com.mcdebug.rpc.RpcErrors
 import com.mcdebug.rpc.RpcException
 import com.mcdebug.rpc.RpcHandler
 import com.mcdebug.rpc.RpcHandlerGroup
+import com.mcdebug.loader.FluidStorage
+import com.mcdebug.loader.Loader
+import com.mcdebug.loader.StorageView
 import com.mcdebug.util.ServerContext
-import net.fabricmc.fabric.api.transfer.v1.fluid.FluidStorage
-import net.fabricmc.fabric.api.transfer.v1.fluid.FluidVariant
-import net.fabricmc.fabric.api.transfer.v1.storage.Storage
-import net.fabricmc.fabric.api.transfer.v1.storage.base.CombinedStorage
-import net.fabricmc.fabric.api.transfer.v1.storage.base.SingleVariantStorage
-import net.fabricmc.fabric.api.transfer.v1.transaction.Transaction
 import net.minecraft.world.level.material.Fluid
+import net.minecraft.world.level.material.Fluids
 import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.server.MinecraftServer
 import net.minecraft.resources.ResourceLocation
@@ -30,10 +28,10 @@ import java.util.concurrent.CompletableFuture
  * specific face; omit --side (null) to use the "complete inventory" path per the
  * FluidStorage.SIDED contract.
  *
- * Indexing: a `Storage<FluidVariant>` is treated as a list of tanks (`parts`).
- *  - SingleVariantStorage       → 1 part (always shown, even if empty)
- *  - CombinedStorage<*,*>       → N parts (one per sub-storage)
- *  - Other (rare)               → non-blank StorageViews from iterator()
+ * Indexing: the loader's fluid storage is treated as a list of tanks (`parts`), which the
+ * storage seam reports in the loader's own terms (Fabric: SingleVariantStorage → 1 part even
+ * when empty, CombinedStorage → one part per sub-storage; NeoForge: one part per `IFluidHandler`
+ * tank).
  *
  * For insert/extract, --index targets a specific part. If --index is omitted:
  *  - 1 part  → defaults to 0
@@ -58,12 +56,12 @@ object FluidOps : RpcHandlerGroup {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
             val (world, pos, side) = resolve(server, p)
             val storage = findStorage(world, pos, side)
-            val parts = enumerateParts(storage)
+            val parts = partsOf(storage)
             JsonObject().apply {
                 addProperty("side", side?.getSerializedName() ?: "null")
-                addProperty("type", typeNameOf(storage))
-                addProperty("supportsInsertion", storage.supportsInsertion())
-                addProperty("supportsExtraction", storage.supportsExtraction())
+                addProperty("type", storage.typeName)
+                addProperty("supportsInsertion", storage.supportsInsertion)
+                addProperty("supportsExtraction", storage.supportsExtraction)
                 add("parts", JsonArray().apply { parts.forEach { add(tankInfoToJson(it)) } })
             }
         }
@@ -72,7 +70,7 @@ object FluidOps : RpcHandlerGroup {
         RpcContext.onServer(server) {
             val (world, pos, side) = resolve(server, params)
             val storage = findStorage(world, pos, side)
-            val parts = enumerateParts(storage)
+            val parts = partsOf(storage)
             val idx = resolveIndex(params, parts)
             val tank = parts[idx]
             JsonObject().apply {
@@ -88,24 +86,20 @@ object FluidOps : RpcHandlerGroup {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
             val (world, pos, side) = resolve(server, p)
             val storage = findStorage(world, pos, side)
-            val parts = enumerateParts(storage)
+            val parts = partsOf(storage)
             val idx = resolveIndex(p, parts)
             val fluidId = p.requireString("fluid")
             val amount = p.requireLong("amount")
             val fluid = resolveFluid(server, fluidId)
-            val variant = FluidVariant.of(fluid)
-
-            val target = pickTarget(storage, idx)
-            Transaction.openOuter().use { tx ->
-                val inserted = target.insert(variant, amount, tx)
-                if (inserted > 0) tx.commit()
-                else tx.abort()
-                JsonObject().apply {
-                    addProperty("index", idx)
-                    addProperty("requested", amount)
-                    addProperty("inserted", inserted)
-                    addProperty("remaining", amount - inserted)
-                }
+            val target = storage.partAt(idx) ?: throw RpcException(
+                RpcErrors.FLUID_INDEX_OUT_OF_RANGE, "index $idx out of range [0, ${parts.size})"
+            )
+            val inserted = target.insert(fluid, amount, simulate = false)
+            JsonObject().apply {
+                addProperty("index", idx)
+                addProperty("requested", amount)
+                addProperty("inserted", inserted)
+                addProperty("remaining", amount - inserted)
             }
         }
 
@@ -114,42 +108,29 @@ object FluidOps : RpcHandlerGroup {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
             val (world, pos, side) = resolve(server, p)
             val storage = findStorage(world, pos, side)
-            val parts = enumerateParts(storage)
+            val parts = partsOf(storage)
             val idx = resolveIndex(p, parts)
             val amount = p.requireLong("amount")
-            // Extract any fluid currently in the tank: use the part's current variant.
-            val currentFluid = currentFluidOf(parts[idx])
+            // Extract whatever the tank currently holds (component patch included).
+            val currentFluid = parts[idx].fluidId
                 ?: throw RpcException(
                     RpcErrors.INVALID_PARAMS,
                     "tank $idx is empty or contains a non-extractable fluid variant"
                 )
-
-            val target = pickTarget(storage, idx)
-            Transaction.openOuter().use { tx ->
-                val extracted = target.extract(currentFluid, amount, tx)
-                if (extracted > 0) tx.commit()
-                else tx.abort()
-                JsonObject().apply {
-                    addProperty("index", idx)
-                    addProperty("fluid", BuiltInRegistries.FLUID.getKey(currentFluid.fluid).toString())
-                    addProperty("requested", amount)
-                    addProperty("extracted", extracted)
-                    addProperty("remaining", amount - extracted)
-                }
+            val target = storage.partAt(idx) ?: throw RpcException(
+                RpcErrors.FLUID_INDEX_OUT_OF_RANGE, "index $idx out of range [0, ${parts.size})"
+            )
+            val extracted = target.extractCurrent(amount, simulate = false)
+            JsonObject().apply {
+                addProperty("index", idx)
+                addProperty("fluid", currentFluid)
+                addProperty("requested", amount)
+                addProperty("extracted", extracted)
+                addProperty("remaining", amount - extracted)
             }
         }
 
     // ---- helpers ----
-
-    private data class TankInfo(
-        val storage: Storage<FluidVariant>,
-        val variant: FluidVariant,
-        val amount: Long,
-        val capacity: Long,
-    ) {
-        val fluidId: String?
-            get() = if (variant.isBlank) null else BuiltInRegistries.FLUID.getKey(variant.fluid).toString()
-    }
 
     private fun resolve(server: MinecraftServer, params: JsonObject?): Triple<net.minecraft.server.level.ServerLevel, BlockPos, Direction?> {
         val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
@@ -159,60 +140,17 @@ object FluidOps : RpcHandlerGroup {
         return Triple(world, pos, side)
     }
 
-    private fun findStorage(world: net.minecraft.server.level.ServerLevel, pos: BlockPos, side: Direction?): Storage<FluidVariant> =
-        FluidStorage.SIDED.find(world, pos, side)
+    private fun findStorage(world: net.minecraft.server.level.ServerLevel, pos: BlockPos, side: Direction?): FluidStorage =
+        Loader.api.storage.fluidStorage(world, pos, side)
             ?: throw RpcException(
                 RpcErrors.FLUID_NOT_FOUND,
                 "no fluid storage at $pos${if (side != null) " on side=$side" else ""}"
             )
 
-    /**
-     * Enumerate the parts of a storage. SingleVariantStorage is special-cased so an
-     * empty tank still shows up as 1 part (iterator() would hide it).
-     */
-    @Suppress("UNCHECKED_CAST")
-    private fun enumerateParts(storage: Storage<FluidVariant>): List<TankInfo> {
-        if (storage is SingleVariantStorage<*>) {
-            val s = storage as SingleVariantStorage<FluidVariant>
-            val v = s.variant
-            val cap = s.getCapacity()
-            return listOf(TankInfo(storage, v, s.amount, cap))
-        }
-        if (storage is CombinedStorage<*, *>) {
-            // parts: public List<S extends Storage<T>>; cast each element to Storage<FluidVariant>
-            val rawParts: List<*> = storage.parts
-            return rawParts.mapIndexedNotNull { i, part ->
-                val p = part as? Storage<FluidVariant> ?: return@mapIndexedNotNull null
-                if (p is SingleVariantStorage<*>) {
-                    val s = p as SingleVariantStorage<FluidVariant>
-                    val v = s.variant
-                    val cap = s.getCapacity()
-                    TankInfo(p, v, s.amount, cap)
-                } else {
-                    val view = p.iterator().asSequence().firstOrNull { !it.isResourceBlank }
-                    if (view == null) {
-                        TankInfo(p, FluidVariant.blank(), 0L, 0L)
-                    } else {
-                        TankInfo(p, view.resource, view.amount, view.capacity)
-                    }
-                }
-            }
-        }
-        // Fallback: enumerate non-blank views.
-        return storage.iterator().asSequence()
-            .filter { !it.isResourceBlank }
-            .map { view ->
-                TankInfo(storage, view.resource, view.amount, view.capacity)
-            }
-            .toList()
-    }
+    /** Tanks as `fluid.*` indexes them. */
+    private fun partsOf(storage: FluidStorage): List<StorageView> = storage.parts()
 
-    private fun readTank(tank: TankInfo, idx: Int): TankInfo = tank
-
-    private fun currentFluidOf(tank: TankInfo): FluidVariant? =
-        if (tank.variant.isBlank) null else tank.variant
-
-    private fun resolveIndex(params: JsonObject?, parts: List<TankInfo>): Int {
+    private fun resolveIndex(params: JsonObject?, parts: List<StorageView>): Int {
         val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
         return if (p.has("index") && !p.get("index").isJsonNull) {
             val idx = p.get("index").asInt
@@ -238,39 +176,7 @@ object FluidOps : RpcHandlerGroup {
         }
     }
 
-    /**
-     * Pick the actual Storage<FluidVariant> to operate on. For SingleVariantStorage,
-     * the storage itself is the part. For CombinedStorage, parts[idx] is the target.
-     * For "Other" storages, --index 0 is treated as the whole storage.
-     */
-    @Suppress("UNCHECKED_CAST")
-    private fun pickTarget(storage: Storage<FluidVariant>, idx: Int): Storage<FluidVariant> {
-        if (storage is CombinedStorage<*, *>) {
-            val rawParts: List<*> = storage.parts
-            val target = rawParts.getOrNull(idx) as? Storage<FluidVariant>
-                ?: throw RpcException(
-                    RpcErrors.FLUID_INDEX_OUT_OF_RANGE,
-                    "index $idx out of range [0, ${rawParts.size})"
-                )
-            return target
-        }
-        // SingleVariantStorage and "Other" (rare): only index 0 makes sense.
-        if (idx != 0) {
-            throw RpcException(
-                RpcErrors.FLUID_INDEX_OUT_OF_RANGE,
-                "non-composite storage only supports --index 0"
-            )
-        }
-        return storage
-    }
-
-    private fun typeNameOf(storage: Storage<FluidVariant>): String = when (storage) {
-        is SingleVariantStorage<*> -> "SingleVariantStorage"
-        is CombinedStorage<*, *> -> "CombinedStorage"
-        else -> "Other"
-    }
-
-    private fun tankInfoToJson(t: TankInfo): JsonElement = JsonObject().apply {
+    private fun tankInfoToJson(t: StorageView): JsonElement = JsonObject().apply {
         addProperty("fluid", t.fluidId)
         addProperty("amount", t.amount)
         addProperty("capacity", t.capacity)

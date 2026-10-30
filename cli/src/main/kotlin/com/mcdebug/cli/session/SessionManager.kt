@@ -276,19 +276,85 @@ class SessionManager(
         return task
     }
 
+    /**
+     * Which build plugin owns the `runClient` task. It decides how the game directory, the window
+     * size and `--quickPlaySingleplayer` reach the game:
+     *
+     *  - Loom (Fabric) runs `net.fabricmc.devlaunchinjector.Main`, which parses Gradle's `--args`;
+     *  - ModDevGradle (NeoForge) runs `net.neoforged.devlaunch.Main`, which takes **its own**
+     *    generated argument file as the first program argument — Gradle's `--args` then *replaces*
+     *    that file, so devlaunch reads the first flag as the main class and dies with
+     *    `ClassNotFoundException: --gameDir`. Its run task extends `JavaExec` and exposes a writable
+     *    `gameDirectory`, so the values are injected with an init script instead (verified on a real
+     *    NeoForge consumer project).
+     */
+    private enum class RunFlavor { LOOM, MODDEVGRADLE }
+
+    private fun detectFlavor(project: Path, task: String): RunFlavor {
+        var dir = project
+        if (task.startsWith(":")) {
+            val parts = task.removePrefix(":").split(":").dropLast(1)
+            if (parts.isNotEmpty()) dir = project.resolve(parts.joinToString("/"))
+        }
+        val text = listOf("build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "gradle.properties")
+            .mapNotNull { runCatching { Files.readString(dir.resolve(it)) }.getOrNull() }
+            .joinToString("\n")
+        return if (text.contains("net.neoforged.moddev")) RunFlavor.MODDEVGRADLE else RunFlavor.LOOM
+    }
+
+    /** Init script for the ModDevGradle path: same knobs `--args` gives a Loom run. */
+    private fun writeInitScript(record: SessionRecord): Path {
+        val file = Path.of(record.registryDir).resolve("${record.name}-${record.sessionToken}.init.gradle")
+        val gameDir = Path.of(record.gameDir).toAbsolutePath().toString()
+        val gameArgList = mutableListOf("'--width'", "'${record.width}'", "'--height'", "'${record.height}'")
+        record.world?.let { gameArgList.addAll(listOf("'--quickPlaySingleplayer'", quoteGradle(it))) }
+        val script = """
+            // Written by `mcdebug session start` for a ModDevGradle (NeoForge) project.
+            gradle.projectsEvaluated {
+                rootProject.allprojects { p ->
+                    p.tasks.matching { it.name == 'runClient' }.configureEach { t ->
+                        if (t instanceof org.gradle.api.tasks.JavaExec) {
+                            if (t.hasProperty('gameDirectory')) { t.gameDirectory.set(new File(${quoteGradle(gameDir)})) }
+                            t.args(${gameArgList.joinToString(", ")})
+                        }
+                    }
+                }
+            }
+        """.trimIndent() + "\n"
+        Files.writeString(file, script)
+        return file
+    }
+
+    /** A single-quoted Groovy string literal (paths and save names can contain spaces/quotes). */
+    private fun quoteGradle(value: String) = "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"
+
     private fun launchSpec(record: SessionRecord): SessionLaunch {
         check(System.getProperty("os.name").lowercase().contains("linux")) { "session launch currently requires Linux setsid" }
-        val args = mutableListOf("--gameDir", record.gameDir, "--width", record.width.toString(), "--height", record.height.toString())
-        record.world?.let { args.addAll(listOf("--quickPlaySingleplayer", it)) }
-        fun quote(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
-        val command = listOf("setsid", "--wait", "/bin/sh", Path.of(record.project!!).resolve("gradlew").toString(),
-            record.task!!, "--console=plain", "--args=" + args.joinToString(" ", transform = ::quote))
+        val project = Path.of(record.project!!)
+        val task = record.task!!
+        val gradlew = project.resolve("gradlew").toString()
+        val flavor = detectFlavor(project, task)
+        val command = when (flavor) {
+            RunFlavor.LOOM -> {
+                val args = mutableListOf("--gameDir", record.gameDir, "--width", record.width.toString(), "--height", record.height.toString())
+                record.world?.let { args.addAll(listOf("--quickPlaySingleplayer", it)) }
+                fun quote(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
+                listOf("setsid", "--wait", "/bin/sh", gradlew, task, "--console=plain",
+                    "--args=" + args.joinToString(" ", transform = ::quote))
+            }
+            RunFlavor.MODDEVGRADLE -> listOf("setsid", "--wait", "/bin/sh", gradlew, task, "--console=plain",
+                "--init-script", writeInitScript(record).toString())
+        }
+        if (flavor == RunFlavor.MODDEVGRADLE) {
+            System.err.println("session launch: ModDevGradle project detected — game dir/window args go " +
+                "through an init script (Gradle --args would break NeoForge's dev launcher)")
+        }
         val env = mutableMapOf("MCDEBUG_SESSION_TOKEN" to record.sessionToken,
             "MCDEBUG_CLIENT_RENDER_MODE" to record.render!!, "MCDEBUG_TCP_PORT" to "0", "MCDEBUG_TCP_ENABLED" to "false",
             "MCDEBUG_CLIENT_TCP_ENABLED" to "false", "MCDEBUG_SOCKET" to Path.of(record.gameDir).resolve("mcdebug/socket").toString(),
             "MCDEBUG_CLIENT_SOCKET" to Path.of(record.gameDir).resolve("mcdebug/clientSocket").toString())
         record.display?.let { env["DISPLAY"] = it }
-        return SessionLaunch(command, Path.of(record.project), env, Path.of(record.logPath!!))
+        return SessionLaunch(command, project, env, Path.of(record.logPath!!))
     }
 
     private fun sameConfig(a: SessionRecord, b: SessionRecord): Boolean =

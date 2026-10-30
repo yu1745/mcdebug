@@ -1,0 +1,737 @@
+[
+  {
+    "name": "status",
+    "method": "server.status",
+    "params": null,
+    "ignore": [
+      "fluidUnit",
+      "energyUnit",
+      "modLoader"
+    ]
+  },
+  {
+    "name": "ready",
+    "method": "server.ready",
+    "params": null
+  },
+  {
+    "name": "runCommand",
+    "method": "server.runCommand",
+    "params": {
+      "command": "/time set day"
+    }
+  },
+  {
+    "_comment": "--- 复位：两个实例从同一夹具状态开始（否则历史残留会造成假差异）---",
+    "name": "reset: forceload fixture chunk",
+    "method": "world.forceloadChunk",
+    "params": {
+      "chunk": [
+        2,
+        2
+      ]
+    },
+    "reset": true
+  },
+  {
+    "name": "reset: kill pigs",
+    "method": "server.runCommand",
+    "params": {
+      "command": "/kill @e[type=minecraft:pig]"
+    },
+    "reset": true
+  },
+  {
+    "name": "reset: kill armor stands",
+    "method": "server.runCommand",
+    "params": {
+      "command": "/kill @e[type=minecraft:armor_stand]"
+    },
+    "reset": true
+  },
+  {
+    "name": "reset: kill dropped items",
+    "method": "server.runCommand",
+    "params": {
+      "command": "/kill @e[type=minecraft:item]"
+    },
+    "reset": true
+  },
+  {
+    "name": "reset: clear block fixtures",
+    "method": "world.clearBox",
+    "params": {
+      "box": {
+        "from": [
+          40,
+          149,
+          39
+        ],
+        "to": [
+          52,
+          153,
+          41
+        ]
+      }
+    },
+    "reset": true
+  },
+  {
+    "name": "setBlock chest",
+    "method": "world.setBlock",
+    "params": {
+      "pos": [
+        40,
+        150,
+        40
+      ],
+      "block": "minecraft:chest"
+    }
+  },
+  {
+    "name": "getBlock chest",
+    "method": "world.getBlock",
+    "params": {
+      "pos": [
+        40,
+        150,
+        40
+      ]
+    }
+  },
+  {
+    "name": "setBlock support",
+    "method": "world.setBlock",
+    "params": {
+      "pos": [
+        41,
+        149,
+        40
+      ],
+      "block": "minecraft:stone"
+    }
+  },
+  {
+    "name": "setBlock lever",
+    "method": "world.setBlock",
+    "params": {
+      "pos": [
+        41,
+        150,
+        40
+      ],
+      "block": "minecraft:lever",
+      "state": {
+        "face": "floor",
+        "facing": "north"
+      }
+    }
+  },
+  {
+    "name": "getBlock lever (state echo)",
+    "method": "world.getBlock",
+    "params": {
+      "pos": [
+        41,
+        150,
+        40
+      ]
+    }
+  },
+  {
+    "name": "fillBox",
+    "method": "world.fillBox",
+    "params": {
+      "from": [
+        50,
+        150,
+        40
+      ],
+      "to": [
+        52,
+        150,
+        40
+      ],
+      "block": "minecraft:stone"
+    }
+  },
+  {
+    "name": "countByBlock",
+    "method": "scan.countByBlock",
+    "params": {
+      "box": {
+        "from": [
+          50,
+          149,
+          39
+        ],
+        "to": [
+          52,
+          151,
+          41
+        ]
+      },
+      "block": "minecraft:stone"
+    }
+  },
+  {
+    "name": "world.breakBlock",
+    "method": "world.breakBlock",
+    "params": {
+      "pos": [
+        52,
+        150,
+        40
+      ]
+    }
+  },
+  {
+    "name": "inv.setSlot",
+    "method": "inv.setSlot",
+    "params": {
+      "pos": [
+        40,
+        150,
+        40
+      ],
+      "slot": 0,
+      "item": "minecraft:redstone",
+      "count": 7
+    }
+  },
+  {
+    "name": "inv.getSlot",
+    "method": "inv.getSlot",
+    "params": {
+      "pos": [
+        40,
+        150,
+        40
+      ],
+      "slot": 0
+    }
+  },
+  {
+    "name": "inv.setSlot nbt",
+    "method": "inv.setSlot",
+    "params": {
+      "pos": [
+        40,
+        150,
+        40
+      ],
+      "slot": 1,
+      "item": "minecraft:stone",
+      "count": 3,
+      "nbt": {
+        "display": {
+          "Name": "{\"text\":\"héllo\"}"
+        }
+      }
+    }
+  },
+  {
+    "name": "inv.getSlot nbt",
+    "method": "inv.getSlot",
+    "params": {
+      "pos": [
+        40,
+        150,
+        40
+      ],
+      "slot": 1
+    }
+  },
+  {
+    "name": "be.getNbt chest",
+    "method": "be.getNbt",
+    "params": {
+      "pos": [
+        40,
+        150,
+        40
+      ]
+    }
+  },
+  {
+    "name": "storage.list block",
+    "method": "storage.list",
+    "params": {
+      "target": {
+        "kind": "block",
+        "pos": [
+          40,
+          150,
+          40
+        ]
+      }
+    }
+  },
+  {
+    "name": "storage.list side north",
+    "method": "storage.list",
+    "params": {
+      "target": {
+        "kind": "block",
+        "pos": [
+          40,
+          150,
+          40
+        ]
+      },
+      "side": "north"
+    }
+  },
+  {
+    "name": "storage.get item",
+    "method": "storage.get",
+    "params": {
+      "target": {
+        "kind": "block",
+        "pos": [
+          40,
+          150,
+          40
+        ]
+      },
+      "handle": "fabric:item"
+    }
+  },
+  {
+    "name": "storage.insert simulate",
+    "method": "storage.insert",
+    "params": {
+      "target": {
+        "kind": "block",
+        "pos": [
+          40,
+          150,
+          40
+        ]
+      },
+      "handle": "fabric:item",
+      "resource": {
+        "kind": "item",
+        "item": "minecraft:coal"
+      },
+      "amount": 5,
+      "simulate": true
+    }
+  },
+  {
+    "name": "storage.insert real",
+    "method": "storage.insert",
+    "params": {
+      "target": {
+        "kind": "block",
+        "pos": [
+          40,
+          150,
+          40
+        ]
+      },
+      "handle": "fabric:item",
+      "resource": {
+        "kind": "item",
+        "item": "minecraft:coal"
+      },
+      "amount": 5
+    }
+  },
+  {
+    "name": "storage.extract item",
+    "method": "storage.extract",
+    "params": {
+      "target": {
+        "kind": "block",
+        "pos": [
+          40,
+          150,
+          40
+        ]
+      },
+      "handle": "fabric:item",
+      "resource": {
+        "kind": "item",
+        "item": "minecraft:coal"
+      },
+      "amount": 2
+    }
+  },
+  {
+    "name": "storage.unavailable handle",
+    "method": "storage.get",
+    "params": {
+      "target": {
+        "kind": "block",
+        "pos": [
+          40,
+          150,
+          40
+        ]
+      },
+      "handle": "fabric:energy"
+    }
+  },
+  {
+    "name": "storage.list bucket (shape)",
+    "method": "storage.list",
+    "params": {
+      "target": {
+        "kind": "item",
+        "stack": {
+          "item": "minecraft:water_bucket",
+          "count": 1
+        }
+      }
+    },
+    "ignore": [
+      "amount",
+      "capacity"
+    ]
+  },
+  {
+    "name": "storage.extract bucket 1 (shape)",
+    "method": "storage.extract",
+    "params": {
+      "target": {
+        "kind": "item",
+        "stack": {
+          "item": "minecraft:water_bucket",
+          "count": 1
+        }
+      },
+      "handle": "fabric:fluid",
+      "resource": {
+        "kind": "fluid",
+        "fluid": "minecraft:water"
+      },
+      "amount": 1
+    }
+  },
+  {
+    "name": "craft.craft planks",
+    "method": "craft.craft",
+    "params": {
+      "grid": [
+        {
+          "item": "minecraft:oak_log",
+          "count": 1
+        },
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ]
+    }
+  },
+  {
+    "name": "craft grid cell type",
+    "method": "craft.craft",
+    "params": {
+      "grid": [
+        "minecraft:oak_log",
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        null
+      ]
+    }
+  },
+  {
+    "name": "entity.spawn armor stand",
+    "method": "entity.spawn",
+    "params": {
+      "type": "minecraft:armor_stand",
+      "pos": [
+        44.5,
+        151.0,
+        40.5
+      ],
+      "nbt": {
+        "NoAI": true,
+        "NoGravity": true
+      }
+    },
+    "ignore": [
+      "uuid",
+      "id",
+      "entityId",
+      "persistentId"
+    ]
+  },
+  {
+    "name": "scan.findEntities armor stand",
+    "method": "scan.findEntities",
+    "params": {
+      "box": {
+        "from": [
+          44,
+          151,
+          40
+        ],
+        "to": [
+          44,
+          151,
+          40
+        ]
+      },
+      "type": "minecraft:armor_stand"
+    },
+    "ignore": [
+      "uuid",
+      "id",
+      "entityId",
+      "persistentId"
+    ]
+  },
+  {
+    "name": "entity.listItems armor stand",
+    "method": "entity.listItems",
+    "params": {
+      "box": {
+        "from": [
+          44,
+          151,
+          40
+        ],
+        "to": [
+          44,
+          151,
+          40
+        ]
+      },
+      "type": "minecraft:armor_stand"
+    },
+    "ignore": [
+      "uuid",
+      "id",
+      "entityId",
+      "persistentId"
+    ]
+  },
+  {
+    "name": "wait.until true",
+    "method": "wait.until",
+    "params": {
+      "predicate": "tick > 0",
+      "timeoutTicks": 40
+    }
+  },
+  {
+    "name": "wait.until timeout",
+    "method": "wait.until",
+    "params": {
+      "predicate": "tick < 0",
+      "timeoutTicks": 5
+    }
+  },
+  {
+    "name": "redstone.setLever",
+    "method": "redstone.setLever",
+    "params": {
+      "pos": [
+        41,
+        150,
+        40
+      ],
+      "powered": true
+    }
+  },
+  {
+    "name": "redstone.isPowered",
+    "method": "redstone.isPowered",
+    "params": {
+      "pos": [
+        41,
+        150,
+        40
+      ]
+    }
+  },
+  {
+    "name": "snapshot.capture",
+    "method": "snapshot.capture",
+    "params": {
+      "box": {
+        "from": [
+          40,
+          150,
+          40
+        ],
+        "to": [
+          41,
+          150,
+          40
+        ]
+      },
+      "include": [
+        "block",
+        "inventory"
+      ]
+    }
+  },
+  {
+    "name": "snapshot.diff inline",
+    "method": "snapshot.diff",
+    "params": {
+      "before": {
+        "tick": 1,
+        "time": 5,
+        "blocks": []
+      },
+      "after": {
+        "tick": 9,
+        "time": 7,
+        "blocks": []
+      }
+    }
+  },
+  {
+    "name": "reflect.resolve FQN",
+    "method": "reflect.resolve",
+    "params": {
+      "class": "net.minecraft.world.level.block.Blocks"
+    },
+    "expect_diff": true
+  },
+  {
+    "name": "reflect.get static field",
+    "method": "reflect.get",
+    "params": {
+      "class": "net.minecraft.world.level.block.Blocks",
+      "field": "STONE"
+    },
+    "expect_diff": true
+  },
+  {
+    "name": "reflect.resolve short name (documented difference)",
+    "method": "reflect.resolve",
+    "params": {
+      "class": "BlockEntity"
+    },
+    "expect_diff": true
+  },
+  {
+    "name": "missing param",
+    "method": "world.getBlock",
+    "params": {}
+  },
+  {
+    "name": "malformed pos",
+    "method": "world.getBlock",
+    "params": {
+      "pos": [
+        1,
+        2
+      ]
+    }
+  },
+  {
+    "name": "slot out of range",
+    "method": "inv.getSlot",
+    "params": {
+      "pos": [
+        40,
+        150,
+        40
+      ],
+      "slot": 999
+    }
+  },
+  {
+    "name": "no block entity",
+    "method": "be.getNbt",
+    "params": {
+      "pos": [
+        50,
+        150,
+        40
+      ]
+    },
+    "expect_diff": true
+  },
+  {
+    "name": "be.tick over limit",
+    "method": "be.tick",
+    "params": {
+      "pos": [
+        40,
+        150,
+        40
+      ],
+      "ticks": 20000
+    }
+  },
+  {
+    "name": "unknown method",
+    "method": "world.noSuchThing",
+    "params": null
+  },
+  {
+    "name": "client method on server plane",
+    "method": "gui.status",
+    "params": null
+  },
+  {
+    "name": "interactEntity with hit vector",
+    "method": "world.interactEntity",
+    "params": {
+      "box": {
+        "from": [
+          44,
+          151,
+          40
+        ],
+        "to": [
+          44,
+          151,
+          40
+        ]
+      },
+      "type": "minecraft:armor_stand",
+      "hit": [
+        44.5,
+        151.5,
+        40.5
+      ]
+    },
+    "ignore": [
+      "uuid",
+      "id",
+      "entityId"
+    ]
+  },
+  {
+    "name": "interactEntity without hit vector",
+    "method": "world.interactEntity",
+    "params": {
+      "box": {
+        "from": [
+          44,
+          151,
+          40
+        ],
+        "to": [
+          44,
+          151,
+          40
+        ]
+      },
+      "type": "minecraft:armor_stand"
+    },
+    "ignore": [
+      "uuid",
+      "id",
+      "entityId"
+    ]
+  }
+]

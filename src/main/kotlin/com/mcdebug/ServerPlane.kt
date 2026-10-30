@@ -16,11 +16,11 @@ import com.mcdebug.api.SnapshotOps
 import com.mcdebug.api.StorageOps
 import com.mcdebug.api.TraceOps
 import com.mcdebug.api.WorldOps
+import com.mcdebug.loader.Loader
 import com.mcdebug.rpc.RpcDispatcher
 import com.mcdebug.rpc.RpcEnv
 import com.mcdebug.rpc.RpcServer
 import com.mcdebug.wait.WaitOps
-import net.fabricmc.fabric.api.event.lifecycle.v1.ServerLifecycleEvents
 import net.minecraft.server.MinecraftServer
 import java.nio.file.Path
 import java.nio.file.Paths
@@ -29,10 +29,10 @@ import java.nio.file.Paths
  * The **server plane** of mcdebug: the original JSON-RPC surface (`world.*`, `be.*`,
  * `inv.*`, `wait.*`, …) that inspects and mutates a live [MinecraftServer].
  *
- * It is decoupled from [McDebugMod] (the Fabric `server` entrypoint, i.e.
- * `DedicatedServerModInitializer`) because the entrypoint only fires on **dedicated**
- * servers. The client entrypoint installs the very same hooks, so that a
- * single-player client (integrated server in the same JVM) exposes **both** planes:
+ * It is decoupled from the loader entrypoint (Fabric `DedicatedServerModInitializer` /
+ * NeoForge `@Mod`) because a dedicated-server entrypoint does not fire on a **client**.
+ * The client entrypoint installs the very same hooks, so that a single-player client
+ * (integrated server in the same JVM) exposes **both** planes:
  * `mcdebug/socket` (server plane, bound to the integrated server) and
  * `mcdebug/clientSocket` (client plane, `gui.*`).
  *
@@ -67,19 +67,19 @@ object ServerPlane {
     val tcpPort: Int? get() = rpcServer?.tcpPort
 
     /**
-     * Register SERVER_STARTED/SERVER_STOPPING listeners. Safe to call from both
-     * entrypoints; only the first call has an effect.
+     * Register server started/stopping listeners through the loader seam. Safe to call from
+     * both entrypoints; only the first call has an effect.
      */
     fun installLifecycleHooks() {
         if (hooksInstalled) return
         hooksInstalled = true
-        ServerLifecycleEvents.SERVER_STARTED.register(::onServerStarted)
-        ServerLifecycleEvents.SERVER_STOPPING.register(::onServerStopping)
+        Loader.api.onServerStarted(::onServerStarted)
+        Loader.api.onServerStopping(::onServerStopping)
     }
 
     private fun onServerStarted(server: MinecraftServer) {
         if (rpcServer != null) {
-            McDebugMod.LOGGER.warn("server plane already running; ignoring duplicate SERVER_STARTED")
+            McDebug.LOGGER.warn("server plane already running; ignoring duplicate server-started event")
             return
         }
 
@@ -111,7 +111,7 @@ object ServerPlane {
         FakePlayerPool.install()
 
         rpcServer = RpcServer(d, ::socketFilePath, ::tcpPortFilePath).also { it.start(server) }
-        McDebugMod.LOGGER.info(
+        McDebug.LOGGER.info(
             "mcdebug RPC ready (server plane): unix socket={}, tcpPort={}",
             rpcServer?.socketPath,
             rpcServer?.tcpPort,
@@ -128,7 +128,7 @@ object ServerPlane {
             FakePlayerPool.shutdown()
             rpcServer?.stop()
         } catch (e: Exception) {
-            McDebugMod.LOGGER.warn("error stopping mcdebug", e)
+            McDebug.LOGGER.warn("error stopping mcdebug", e)
         } finally {
             rpcServer = null
             dispatcher = null

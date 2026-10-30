@@ -2,7 +2,7 @@ package com.mcdebug.client
 
 import com.mcdebug.rpc.RpcErrors
 import com.mcdebug.rpc.RpcException
-import net.fabricmc.fabric.api.client.event.lifecycle.v1.ClientTickEvents
+import com.mcdebug.client.loader.ClientLoader
 import net.minecraft.client.Minecraft
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CancellationException
@@ -45,7 +45,7 @@ object ClientTasks {
 
     fun install() {
         if (installed) return
-        ClientTickEvents.END_CLIENT_TICK.register { _ -> onTick() }
+        ClientLoader.api.onClientTick { onTick() }
         installed = true
     }
 

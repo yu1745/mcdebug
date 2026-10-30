@@ -25,6 +25,8 @@ jobs:
         run: chmod +x ./gradlew
 
       - name: build
+        # :cli:copyCliJar 依赖 :neoforge:build（CLI 里内嵌两个 loader 的 mod jar），
+        # 所以这一行同时产出 Fabric remap jar + NeoForge jar + CLI fat jar。
         run: ./gradlew build :cli:copyCliJar
 
       - name: extract version from tag
@@ -35,15 +37,19 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # The remapped mod jar is named after mod_version: a tag that does not match it fails here.
+          # Both mod jars are named after mod_version: a tag that does not match it fails here.
           VERSION="${{ steps.version.outputs.VERSION }}"
           CANONICAL="mcdebug-${VERSION}.jar"
-          test -f "build/libs/$CANONICAL" || { echo "build/libs/$CANONICAL missing: tag v$VERSION != mod_version?"; ls build/libs; exit 1; }
-          cp "build/libs/$CANONICAL" "$CANONICAL"
+          NEOFORGE="mcdebug-neoforge-${VERSION}.jar"
+          for f in "$CANONICAL" "$NEOFORGE"; do
+            src=$([[ "$f" == "$NEOFORGE" ]] && echo "neoforge/build/libs/$f" || echo "build/libs/$f")
+            test -f "$src" || { echo "$src missing: tag v$VERSION != mod_version?"; ls build/libs neoforge/build/libs; exit 1; }
+            cp "$src" "$f"
+          done
 
           # SHA256 sidecars: <filename>.sha256 contains just the hex digest.
           # mcdebug-cli.jar (built at the repo root, not in git) also carries the mod jar.
-          for f in "$CANONICAL" mcdebug-cli.jar; do
+          for f in "$CANONICAL" "$NEOFORGE" mcdebug-cli.jar; do
             sha256sum "$f" | awk '{print $1}' > "$f.sha256"
             echo "SHA256 $f: $(cat "$f.sha256")"
           done
@@ -51,6 +57,8 @@ jobs:
           gh release create "${GITHUB_REF_NAME}" \
             "$CANONICAL" \
             "${CANONICAL}.sha256" \
+            "$NEOFORGE" \
+            "${NEOFORGE}.sha256" \
             mcdebug-cli.jar \
             mcdebug-cli.jar.sha256 \
             --title "${GITHUB_REF_NAME}" \

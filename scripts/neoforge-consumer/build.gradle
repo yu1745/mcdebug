@@ -1,0 +1,20 @@
+// 最小 NeoForge（ModDevGradle）消费者项目：**模板**，用前先整份拷到临时目录。
+// 它不含任何 mcdebug 源码/资源，只提供 run/mods 里的发布 jar 跑起来的 runtime。
+plugins {
+	id 'java'
+	id 'net.neoforged.moddev' version "${moddev_version}"
+}
+version = '1.0.0'
+java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
+repositories {
+	mavenCentral()
+	maven { name = 'NeoForged'; url = 'https://maven.neoforged.net/releases' }
+}
+neoForge {
+	version = project.neo_version
+	runs {
+		server { server(); programArguments.addAll '--nogui' }
+		client { client() }
+	}
+	mods { consumer { sourceSet sourceSets.main } }
+}

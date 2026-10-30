@@ -37,13 +37,37 @@ application {
 // always match and nothing is downloaded. The root project is evaluated first, so remapJar exists.
 def modJar = rootProject.tasks.named('remapJar')
 
+// The NeoForge jar of this same build travels inside the CLI as well (`mcdebug jar --loader neoforge`).
+// neoforge/ is an independent Gradle build, so this goes through the root delegate task
+// `:neoforge:build`; the file name carries the same mod_version, read from the root gradle.properties.
+def neoJarFile = rootProject.file("neoforge/build/libs/mcdebug-neoforge-${version}.jar")
+
 tasks.shadowJar {
+	dependsOn ':neoforge:build'
 	archiveClassifier = ''
 	archiveFileName = 'mcdebug-cli.jar'
 	mergeServiceFiles()
 	from(modJar.flatMap { it.archiveFile }) {
 		into 'META-INF/mcdebug'
 		rename { 'mod.jar' }
+	}
+	from(neoJarFile) {
+		into 'META-INF/mcdebug'
+		rename { 'mod-neoforge.jar' }
+	}
+	doLast {
+		// `from(file)` silently skips a missing file: check the produced fat jar instead of trusting it.
+		def required = ['META-INF/mcdebug/mod.jar', 'META-INF/mcdebug/mod-neoforge.jar']
+		def zip = new java.util.zip.ZipFile(tasks.shadowJar.archiveFile.get().asFile)
+		try {
+			def missing = required.findAll { zip.getEntry(it) == null }
+			if (!missing.isEmpty()) {
+				throw new GradleException("CLI fat jar is missing embedded mod jars: ${missing} " +
+					"(run './gradlew :neoforge:build' first, or check the neoforge build output name)")
+			}
+		} finally {
+			zip.close()
+		}
 	}
 	// The agent skill of the same version (`mcdebug skill` installs it).
 	from(rootProject.file('skills/mcdebug')) {

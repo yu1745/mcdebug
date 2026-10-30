@@ -1,7 +1,7 @@
 package com.mcdebug.client
 
 import com.google.gson.JsonObject
-import com.mcdebug.McDebugMod
+import com.mcdebug.McDebug
 import com.mcdebug.rpc.RpcErrors
 import com.mcdebug.rpc.RpcException
 import net.minecraft.client.Minecraft
@@ -97,7 +97,7 @@ internal object ScreenReload {
         }
         ScreenGuard.clear()
         reloads++
-        McDebugMod.LOGGER.info("mcdebug reloadScreen: {} from {} ({} classes)", root, dirs, loader.defined.size)
+        McDebug.LOGGER.info("mcdebug reloadScreen: {} from {} ({} classes)", root, dirs, loader.defined.size)
         return JsonObject().apply {
             addProperty("ok", true)
             addProperty("screen", root)

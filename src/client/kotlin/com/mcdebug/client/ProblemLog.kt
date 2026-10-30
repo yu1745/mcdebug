@@ -2,7 +2,7 @@ package com.mcdebug.client
 
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
-import com.mcdebug.McDebugMod
+import com.mcdebug.McDebug
 import org.apache.logging.log4j.Level
 import org.apache.logging.log4j.LogManager
 import org.apache.logging.log4j.core.LogEvent
@@ -107,7 +107,7 @@ object ProblemLog {
             installed = true
         } catch (t: Throwable) {
             // Diagnostics only: a foreign logging backend must not stop the client.
-            McDebugMod.LOGGER.warn("mcdebug problem log unavailable: {}", t.toString())
+            McDebug.LOGGER.warn("mcdebug problem log unavailable: {}", t.toString())
         }
     }
 

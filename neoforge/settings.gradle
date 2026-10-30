@@ -1,0 +1,11 @@
+// 独立 Gradle 构建：NeoForge 用 ModDevGradle，根构建用 Fabric Loom，两者不共用 marketplace/
+// 运行时生成逻辑，故各自一个 build（根构建通过 delegate.gradle 暴露 :neoforge:* 任务）。
+// Gradle 版本与根构建一致（ModDevGradle 2.x 支持 Gradle 9），如需单独钉版本改这里即可。
+pluginManagement {
+	repositories {
+		gradlePluginPortal()
+		maven { name = 'NeoForged'; url = 'https://maven.neoforged.net/releases' }
+	}
+}
+
+rootProject.name = 'mcdebug-neoforge'

@@ -1,0 +1,42 @@
+modLoader="kotlinforforge"
+loaderVersion="[5.10,)"
+license="MIT"
+
+[[mods]]
+modId="mcdebug"
+version="${version}"
+displayName="mcdebug"
+authors="mcdebug"
+description='''
+JSON-RPC debug agent for mod development automation (NeoForge). Two planes in one jar: the server plane (world/block-entity/inventory/storage inspection and modification over a unix socket + TCP) and the client plane (real GUI/rendering: screenshots and Screen-level clicks, method group gui.*).
+'''
+displayTest="IGNORE_ALL_VERSION"
+
+[[dependencies.mcdebug]]
+modId="neoforge"
+type="required"
+versionRange="[21.1,)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.mcdebug]]
+modId="minecraft"
+type="required"
+versionRange="[1.21.1,1.21.2)"
+ordering="NONE"
+side="BOTH"
+
+[[dependencies.mcdebug]]
+modId="kotlinforforge"
+type="required"
+versionRange="[5.10,)"
+ordering="NONE"
+side="BOTH"
+
+# 客户端 mixin 配置与 Fabric 版共用一份（package 相同：com.mcdebug.client.mixin）
+[[mixins]]
+config="mcdebug.client.mixins.json"
+
+# 服务端/公共 mixin 配置（当前为空占位，与 Fabric 侧保持同一结构）
+[[mixins]]
+config="mcdebug.mixins.json"

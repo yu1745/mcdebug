@@ -2,14 +2,13 @@ package com.mcdebug.api
 
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
-import com.mcdebug.McDebugMod
+import com.mcdebug.McDebug
 import com.mcdebug.rpc.RpcContext
 import com.mcdebug.rpc.RpcErrors
 import com.mcdebug.rpc.RpcException
 import com.mcdebug.rpc.RpcHandler
 import com.mcdebug.rpc.RpcHandlerGroup
 import com.mcdebug.util.ServerContext
-import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents
 import net.minecraft.world.level.block.Block
 import net.minecraft.world.level.block.LeverBlock
 import net.minecraft.server.MinecraftServer
@@ -17,6 +16,7 @@ import net.minecraft.server.level.ServerLevel
 import net.minecraft.core.BlockPos
 import net.minecraft.core.Direction
 import java.util.concurrent.CompletableFuture
+import com.mcdebug.loader.Loader
 
 object RedstoneOps : RpcHandlerGroup {
     private val pulses = mutableListOf<LeverPulse>()
@@ -33,7 +33,7 @@ object RedstoneOps : RpcHandlerGroup {
     fun install() {
         if (installed) return
         installed = true
-        ServerTickEvents.END_SERVER_TICK.register { server -> tick(server) }
+        Loader.api.onServerTick { server -> tick(server) }
     }
 
     fun uninstall() {
@@ -117,7 +117,7 @@ object RedstoneOps : RpcHandlerGroup {
                     setLeverPowered(pulse.world, pulse.pos, false)
                 }
             } catch (e: Exception) {
-                McDebugMod.LOGGER.warn("redstone pulse cleanup failed at {}", pulse.pos, e)
+                McDebug.LOGGER.warn("redstone pulse cleanup failed at {}", pulse.pos, e)
             }
         }
     }

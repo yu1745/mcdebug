@@ -3,7 +3,7 @@ package com.mcdebug.rpc
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
-import com.mcdebug.McDebugMod
+import com.mcdebug.McDebug
 import com.mcdebug.wait.WaitOps
 import net.minecraft.server.MinecraftServer
 import org.slf4j.LoggerFactory
@@ -293,7 +293,7 @@ class RpcServer(
                 addProperty("socket", socketPath?.toString() ?: "")
                 addProperty("tcpPort", tcpPort)
                 addProperty("protocolVersion", protocolVersion)
-                addProperty("modVersion", McDebugMod.MOD_VERSION)
+                addProperty("modVersion", McDebug.MOD_VERSION)
                 add("process", RpcEnv.processInfo())
             })
 

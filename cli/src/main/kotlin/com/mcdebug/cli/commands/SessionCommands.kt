@@ -35,7 +35,7 @@ internal class SessionStartCmd(
     private val task by option("--task", help = "Gradle runClient task (e.g. :core:runClient)").default("runClient")
     private val gameDir by option("--game-dir", metavar = "PATH", help = "game directory (default: project/run)")
     private val world by option("--world", metavar = "SAVE", help = "existing saves/ directory name, not display name; omitted = main menu")
-    private val render by option("--render", help = "client render mode").choice("continuous", "demand", "gui-only").default("demand")
+    private val render by option("--render", help = "client render mode (default: demand; the mod's global default is continuous)").choice("continuous", "demand", "gui-only").default("demand")
     private val display by option("--display", help = "DISPLAY for the child client; omitted = inherited")
     private val width by option("--width", help = "window width (default 854; the project's loom.runs.client programArgs win, and the record repeats what was requested)").int().default(854)
     private val height by option("--height", help = "window height (default 480; see --width)").int().default(480)

@@ -3,19 +3,19 @@ package com.mcdebug.api
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
-import com.mcdebug.McDebugMod
+import com.mcdebug.McDebug
 import com.mcdebug.rpc.RpcContext
 import com.mcdebug.rpc.RpcErrors
 import com.mcdebug.rpc.RpcException
 import com.mcdebug.rpc.RpcHandler
 import com.mcdebug.rpc.RpcHandlerGroup
 import com.mcdebug.util.ServerContext
-import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents
 import net.minecraft.server.MinecraftServer
 import net.minecraft.server.level.ServerLevel
 import net.minecraft.world.level.levelgen.structure.BoundingBox
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
+import com.mcdebug.loader.Loader
 
 object TraceOps : RpcHandlerGroup {
     private val traces = LinkedHashMap<String, ActiveTrace>()
@@ -33,7 +33,7 @@ object TraceOps : RpcHandlerGroup {
     fun install() {
         if (installed) return
         installed = true
-        ServerTickEvents.END_SERVER_TICK.register { server -> tick(server) }
+        Loader.api.onServerTick { server -> tick(server) }
     }
 
     fun uninstall() {
@@ -89,19 +89,19 @@ object TraceOps : RpcHandlerGroup {
                 try {
                     captureFrame(server, trace)
                 } catch (e: Exception) {
-                    McDebugMod.LOGGER.warn("trace {} final capture failed", trace.id, e)
+                    McDebug.LOGGER.warn("trace {} final capture failed", trace.id, e)
                 }
                 trace.autoStopped = true
                 traces.remove(trace.id)
                 archiveFinished(trace)
-                McDebugMod.LOGGER.info("trace {} auto-stopped after {} ticks (maxTicks={})", trace.id, server.tickCount - trace.startedTick, trace.maxTicks)
+                McDebug.LOGGER.info("trace {} auto-stopped after {} ticks (maxTicks={})", trace.id, server.tickCount - trace.startedTick, trace.maxTicks)
                 continue
             }
             if (server.tickCount - trace.lastCaptureTick < trace.intervalTicks) continue
             try {
                 captureFrame(server, trace)
             } catch (e: Exception) {
-                McDebugMod.LOGGER.warn("trace {} capture failed; stopping trace", trace.id, e)
+                McDebug.LOGGER.warn("trace {} capture failed; stopping trace", trace.id, e)
                 traces.remove(trace.id)
                 archiveFinished(trace)
             }

@@ -1,7 +1,7 @@
 package com.mcdebug.client
 
 import com.google.gson.JsonObject
-import com.mcdebug.McDebugMod
+import com.mcdebug.McDebug
 import net.minecraft.client.DeltaTracker
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.screens.Screen
@@ -33,7 +33,7 @@ object RenderControl {
             setting("clientIdleFps", "MCDEBUG_CLIENT_IDLE_FPS", "1").toInt(),
         )
         schedule = RenderSchedule(settings)
-        McDebugMod.LOGGER.info("mcdebug render policy: mode={} loopFps={} idleFps={}", settings.mode.id, settings.loopFps, settings.idleFps)
+        McDebug.LOGGER.info("mcdebug render policy: mode={} loopFps={} idleFps={}", settings.mode.id, settings.loopFps, settings.idleFps)
     }
 
     private fun safeToThrottle(client: Minecraft): Boolean =

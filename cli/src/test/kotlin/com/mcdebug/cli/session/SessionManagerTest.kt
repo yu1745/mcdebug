@@ -66,6 +66,48 @@ class SessionManagerTest {
         assertTrue(Files.isDirectory(game.resolve("saves/New 世界")))
     }
 
+    /**
+     * ModDevGradle's run task cannot take Gradle's `--args`: its main class is
+     * `net.neoforged.devlaunch.Main`, which reads its own generated argument file as the first
+     * program argument, so `--args=--gameDir ...` makes it look for a main class called
+     * `--gameDir` (real crash on a NeoForge consumer project). Those values go through an init
+     * script instead — and the other loader keeps the `--args` launch it has always used.
+     */
+    @Test fun `moddevgradle project launches through an init script instead of gradle args`() {
+        val req = request()
+        Files.writeString(req.project.resolve("build.gradle"), """
+            plugins {
+                id 'java'
+                id 'net.neoforged.moddev' version '2.0.148'
+            }
+        """.trimIndent())
+        onLaunch(world = false, singleplayer = false)
+        assertEquals("client_ready", state(manager.start(req)))
+        val spec = runtime.launches.single()
+        assertEquals(listOf("setsid", "--wait", "/bin/sh"), spec.command.take(3))
+        assertFalse(spec.command.any { it.startsWith("--args=") })
+        val initIndex = spec.command.indexOf("--init-script")
+        assertTrue(initIndex > 0, "expected --init-script in ${spec.command}")
+        val script = Files.readString(Path.of(spec.command[initIndex + 1]))
+        assertTrue(script.contains("gameDirectory"), script)
+        assertTrue(script.contains(game.toRealPath().toString()), script)
+        assertTrue(script.contains("'--width'"), script)
+        assertTrue(script.contains("runClient"), script)
+    }
+
+    @Test fun `fabric loom project keeps the gradle args launch`() {
+        val req = request()
+        Files.writeString(req.project.resolve("build.gradle"), "plugins { id 'fabric-loom' version '1.15-SNAPSHOT' }")
+        onLaunch(world = false, singleplayer = false)
+        assertEquals("client_ready", state(manager.start(req)))
+        val spec = runtime.launches.single()
+        assertFalse(spec.command.any { it == "--init-script" })
+        val args = spec.command.last()
+        assertTrue(args.startsWith("--args="), args)
+        assertTrue(args.contains("--gameDir"), args)
+        assertTrue(args.contains(game.toRealPath().toString()), args)
+    }
+
     @Test fun `same live configuration reuses launch while changed configuration is refused`() {
         val req = request()
         onLaunch(false)

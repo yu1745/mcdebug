@@ -9,18 +9,11 @@ import com.mcdebug.rpc.RpcErrors
 import com.mcdebug.rpc.RpcException
 import com.mcdebug.rpc.RpcHandler
 import com.mcdebug.rpc.RpcHandlerGroup
-import com.mcdebug.util.NbtJson
+import com.mcdebug.loader.EnergyStorage
+import com.mcdebug.loader.FluidStorage
+import com.mcdebug.loader.ItemStorage
+import com.mcdebug.loader.Loader
 import com.mcdebug.util.ServerContext
-import net.fabricmc.fabric.api.transfer.v1.context.ContainerItemContext
-import net.fabricmc.fabric.api.transfer.v1.fluid.FluidStorage
-import net.fabricmc.fabric.api.transfer.v1.fluid.FluidVariant
-import net.fabricmc.fabric.api.transfer.v1.item.InventoryStorage
-import net.fabricmc.fabric.api.transfer.v1.item.ItemStorage
-import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant
-import net.fabricmc.fabric.api.transfer.v1.storage.SlottedStorage
-import net.fabricmc.fabric.api.transfer.v1.storage.Storage
-import net.fabricmc.fabric.api.transfer.v1.storage.StorageView
-import net.fabricmc.fabric.api.transfer.v1.transaction.Transaction
 import net.minecraft.world.entity.Entity
 import net.minecraft.world.entity.npc.InventoryCarrier
 import net.minecraft.world.entity.player.Player
@@ -37,12 +30,8 @@ import net.minecraft.world.level.levelgen.structure.BoundingBox
 import net.minecraft.core.BlockPos
 import net.minecraft.core.Direction
 import net.minecraft.world.level.Level
-import java.lang.reflect.Method
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
-import net.minecraft.core.component.DataComponentPatch
-import net.minecraft.world.SimpleContainer
-import net.minecraft.nbt.NbtOps
 
 object StorageOps : RpcHandlerGroup {
     internal const val HANDLE_VANILLA_INVENTORY = "vanilla:inventory"
@@ -144,7 +133,7 @@ object StorageOps : RpcHandlerGroup {
             }
             HANDLE_FABRIC_ITEM -> {
                 val storage = itemStorageFor(target, side) ?: throwStorageNotFound(handle, target)
-                transferInsert(storage, ItemVariant.of(stack), amount, simulate)
+                storage.insert(stack, amount, simulate)
             }
             else -> throwStorageNotFound(handle, target)
         }
@@ -168,7 +157,7 @@ object StorageOps : RpcHandlerGroup {
             }
             HANDLE_FABRIC_ITEM -> {
                 val storage = itemStorageFor(target, side) ?: throwStorageNotFound(handle, target)
-                transferExtract(storage, ItemVariant.of(stack), amount, simulate)
+                storage.extract(stack, amount, simulate)
             }
             else -> throwStorageNotFound(handle, target)
         }
@@ -183,11 +172,11 @@ object StorageOps : RpcHandlerGroup {
         amount: Long,
         simulate: Boolean,
     ): JsonElement {
-        val variant = FluidVariant.of(resolveFluid(server, resource.requireString("fluid")))
-        val endpoint = fluidEndpoint(target, side, mutableItem = true) ?: throwStorageNotFound(HANDLE_FABRIC_FLUID, target)
-        val inserted = transferInsert(endpoint.storage, variant, amount, simulate)
+        val fluid = resolveFluid(server, resource.requireString("fluid"))
+        val storage = fluidStorageFor(target, side) ?: throwStorageNotFound(HANDLE_FABRIC_FLUID, target)
+        val inserted = storage.insert(fluid, amount, simulate)
         return moveResult(HANDLE_FABRIC_FLUID, "fluid", amount, inserted, simulate, "inserted").apply {
-            endpoint.targetAfter()?.let { add("targetAfter", it) }
+            storage.itemAfter()?.let { add("targetAfter", itemAfterJson(it)) }
         }
     }
 
@@ -199,27 +188,27 @@ object StorageOps : RpcHandlerGroup {
         amount: Long,
         simulate: Boolean,
     ): JsonElement {
-        val variant = FluidVariant.of(resolveFluid(server, resource.requireString("fluid")))
-        val endpoint = fluidEndpoint(target, side, mutableItem = true) ?: throwStorageNotFound(HANDLE_FABRIC_FLUID, target)
-        val extracted = transferExtract(endpoint.storage, variant, amount, simulate)
+        val fluid = resolveFluid(server, resource.requireString("fluid"))
+        val storage = fluidStorageFor(target, side) ?: throwStorageNotFound(HANDLE_FABRIC_FLUID, target)
+        val extracted = storage.extract(fluid, amount, simulate)
         return moveResult(HANDLE_FABRIC_FLUID, "fluid", amount, extracted, simulate, "extracted").apply {
-            endpoint.targetAfter()?.let { add("targetAfter", it) }
+            storage.itemAfter()?.let { add("targetAfter", itemAfterJson(it)) }
         }
     }
 
     private fun insertEnergy(target: TargetRef, side: Direction?, amount: Long, simulate: Boolean): JsonElement {
-        val endpoint = energyEndpoint(target, side, mutableItem = true) ?: throwStorageNotFound(HANDLE_TEAM_REBORN_ENERGY, target)
-        val inserted = EnergyReflection.insert(endpoint.storage, amount, simulate)
+        val storage = energyStorageFor(target, side) ?: throwStorageNotFound(HANDLE_TEAM_REBORN_ENERGY, target)
+        val inserted = storage.insert(amount, simulate)
         return moveResult(HANDLE_TEAM_REBORN_ENERGY, "energy", amount, inserted, simulate, "inserted").apply {
-            endpoint.targetAfter()?.let { add("targetAfter", it) }
+            storage.itemAfter()?.let { add("targetAfter", itemAfterJson(it)) }
         }
     }
 
     private fun extractEnergy(target: TargetRef, side: Direction?, amount: Long, simulate: Boolean): JsonElement {
-        val endpoint = energyEndpoint(target, side, mutableItem = true) ?: throwStorageNotFound(HANDLE_TEAM_REBORN_ENERGY, target)
-        val extracted = EnergyReflection.extract(endpoint.storage, amount, simulate)
+        val storage = energyStorageFor(target, side) ?: throwStorageNotFound(HANDLE_TEAM_REBORN_ENERGY, target)
+        val extracted = storage.extract(amount, simulate)
         return moveResult(HANDLE_TEAM_REBORN_ENERGY, "energy", amount, extracted, simulate, "extracted").apply {
-            endpoint.targetAfter()?.let { add("targetAfter", it) }
+            storage.itemAfter()?.let { add("targetAfter", itemAfterJson(it)) }
         }
     }
 
@@ -236,7 +225,16 @@ object StorageOps : RpcHandlerGroup {
         val stack = itemStackResource(server, resource, 1)
         val fromStorage = itemStorageFor(from, fromSide) ?: throwStorageNotFound(HANDLE_FABRIC_ITEM, from)
         val toStorage = itemStorageFor(to, toSide) ?: throwStorageNotFound(HANDLE_FABRIC_ITEM, to)
-        val moved = transferBetween(fromStorage, toStorage, ItemVariant.of(stack), amount, simulate)
+        // Loader-native transaction first: on Fabric the whole move either happens or does not
+        // (the Fabric-only pre-port code did this in one Transfer API Transaction). NeoForge
+        // capabilities have no transaction, so it returns null and we fall back to the dry-run
+        // path documented in moveBetween.
+        val atomic = Loader.api.storage.moveItemsAtomically(fromStorage, toStorage, stack, amount, simulate)
+        val moved = atomic ?: moveBetween(
+            MoveEndpoint({ a, sim -> fromStorage.insert(stack, a, sim) }, { a, sim -> fromStorage.extract(stack, a, sim) }),
+            MoveEndpoint({ a, sim -> toStorage.insert(stack, a, sim) }, { a, sim -> toStorage.extract(stack, a, sim) }),
+            amount, simulate,
+        )
         return transferResult("item", moved, amount, simulate)
     }
 
@@ -250,13 +248,18 @@ object StorageOps : RpcHandlerGroup {
         amount: Long,
         simulate: Boolean,
     ): JsonElement {
-        val variant = FluidVariant.of(resolveFluid(server, resource.requireString("fluid")))
-        val fromEndpoint = fluidEndpoint(from, fromSide, mutableItem = true) ?: throwStorageNotFound(HANDLE_FABRIC_FLUID, from)
-        val toEndpoint = fluidEndpoint(to, toSide, mutableItem = true) ?: throwStorageNotFound(HANDLE_FABRIC_FLUID, to)
-        val moved = transferBetween(fromEndpoint.storage, toEndpoint.storage, variant, amount, simulate)
+        val fluid = resolveFluid(server, resource.requireString("fluid"))
+        val fromStorage = fluidStorageFor(from, fromSide) ?: throwStorageNotFound(HANDLE_FABRIC_FLUID, from)
+        val toStorage = fluidStorageFor(to, toSide) ?: throwStorageNotFound(HANDLE_FABRIC_FLUID, to)
+        val atomic = Loader.api.storage.moveFluidsAtomically(fromStorage, toStorage, fluid, amount, simulate)
+        val moved = atomic ?: moveBetween(
+            MoveEndpoint({ a, sim -> fromStorage.insert(fluid, a, sim) }, { a, sim -> fromStorage.extract(fluid, a, sim) }),
+            MoveEndpoint({ a, sim -> toStorage.insert(fluid, a, sim) }, { a, sim -> toStorage.extract(fluid, a, sim) }),
+            amount, simulate,
+        )
         return transferResult("fluid", moved, amount, simulate).apply {
-            fromEndpoint.targetAfter()?.let { add("fromAfter", it) }
-            toEndpoint.targetAfter()?.let { add("toAfter", it) }
+            fromStorage.itemAfter()?.let { add("fromAfter", itemAfterJson(it)) }
+            toStorage.itemAfter()?.let { add("toAfter", itemAfterJson(it)) }
         }
     }
 
@@ -268,12 +271,16 @@ object StorageOps : RpcHandlerGroup {
         amount: Long,
         simulate: Boolean,
     ): JsonElement {
-        val fromEndpoint = energyEndpoint(from, fromSide, mutableItem = true) ?: throwStorageNotFound(HANDLE_TEAM_REBORN_ENERGY, from)
-        val toEndpoint = energyEndpoint(to, toSide, mutableItem = true) ?: throwStorageNotFound(HANDLE_TEAM_REBORN_ENERGY, to)
-        val moved = EnergyReflection.transfer(fromEndpoint.storage, toEndpoint.storage, amount, simulate)
+        val fromStorage = energyStorageFor(from, fromSide) ?: throwStorageNotFound(HANDLE_TEAM_REBORN_ENERGY, from)
+        val toStorage = energyStorageFor(to, toSide) ?: throwStorageNotFound(HANDLE_TEAM_REBORN_ENERGY, to)
+        val moved = moveBetween(
+            MoveEndpoint({ a, sim -> fromStorage.insert(a, sim) }, { a, sim -> fromStorage.extract(a, sim) }),
+            MoveEndpoint({ a, sim -> toStorage.insert(a, sim) }, { a, sim -> toStorage.extract(a, sim) }),
+            amount, simulate,
+        )
         return transferResult("energy", moved, amount, simulate).apply {
-            fromEndpoint.targetAfter()?.let { add("fromAfter", it) }
-            toEndpoint.targetAfter()?.let { add("toAfter", it) }
+            fromStorage.itemAfter()?.let { add("fromAfter", itemAfterJson(it)) }
+            toStorage.itemAfter()?.let { add("toAfter", itemAfterJson(it)) }
         }
     }
 
@@ -303,32 +310,37 @@ object StorageOps : RpcHandlerGroup {
             addProperty("simulated", simulate)
         }
 
-    private fun <T> transferInsert(storage: Storage<T>, resource: T, amount: Long, simulate: Boolean): Long {
-        Transaction.openOuter().use { tx ->
-            val inserted = storage.insert(resource, amount, tx)
-            if (!simulate && inserted > 0) tx.commit()
-            return inserted
-        }
+    /** One side of a transfer, bound to a concrete resource (item stack / fluid / energy). */
+    private class MoveEndpoint(
+        val insert: (Long, Boolean) -> Long,
+        val extract: (Long, Boolean) -> Long,
+    )
+
+    /**
+     * Move as much as both sides accept, without a cross-storage transaction: the amount is
+     * decided by dry runs first, so an execute never half-moves more than the destination can
+     * take. A racing change between the dry run and the execute is corrected by putting the
+     * surplus back (best effort) — see the loader seam note about transaction-less capabilities.
+     */
+    private fun moveBetween(from: MoveEndpoint, to: MoveEndpoint, amount: Long, simulate: Boolean): Long {
+        val canExtract = from.extract(amount, true)
+        if (canExtract <= 0) return 0
+        val canInsert = to.insert(canExtract, true)
+        if (canInsert <= 0) return 0
+        if (simulate) return canInsert
+        val extracted = from.extract(canInsert, false)
+        if (extracted <= 0) return 0
+        val inserted = to.insert(extracted, false)
+        if (inserted < extracted) from.insert(extracted - inserted, false)
+        return inserted
     }
 
-    private fun <T> transferExtract(storage: Storage<T>, resource: T, amount: Long, simulate: Boolean): Long {
-        Transaction.openOuter().use { tx ->
-            val extracted = storage.extract(resource, amount, tx)
-            if (!simulate && extracted > 0) tx.commit()
-            return extracted
+    /** `targetAfter` DTO of an item-hosted storage (bucket emptied, battery charged, …). */
+    private fun itemAfterJson(stack: ItemStack): JsonObject =
+        JsonObject().apply {
+            addProperty("kind", "item")
+            add("stack", ServerContext.itemStackToJson(stack))
         }
-    }
-
-    private fun <T> transferBetween(from: Storage<T>, to: Storage<T>, resource: T, amount: Long, simulate: Boolean): Long {
-        Transaction.openOuter().use { tx ->
-            val canExtract = Transaction.openNested(tx).use { nested -> from.extract(resource, amount, nested) }
-            val accepted = to.insert(resource, canExtract, tx)
-            val extracted = from.extract(resource, accepted, tx)
-            val moved = if (accepted == extracted) accepted else 0
-            if (!simulate && moved > 0) tx.commit()
-            return moved
-        }
-    }
 
     private fun vanillaInsert(inv: Container, side: Direction?, stack: ItemStack, simulate: Boolean): Int {
         if (stack.isEmpty) return 0
@@ -420,26 +432,26 @@ object StorageOps : RpcHandlerGroup {
                 add(JsonObject().apply {
                     addProperty("handle", HANDLE_FABRIC_ITEM)
                     addProperty("kind", "item")
-                    addProperty("slots", itemSlotCount(itemStorage))
+                    addProperty("slots", itemStorage.slotCount)
                 })
             }
 
-            val fluid = fluidEndpoint(target, side, mutableItem = false)
+            val fluid = fluidStorageFor(target, side)
             if (fluid != null) {
                 add(JsonObject().apply {
                     addProperty("handle", HANDLE_FABRIC_FLUID)
                     addProperty("kind", "fluid")
-                    addProperty("tanks", fluidTankCount(fluid.storage))
+                    addProperty("tanks", fluid.tankCount)
                 })
             }
 
-            val energy = energyEndpoint(target, side, mutableItem = false)
+            val energy = energyStorageFor(target, side)
             if (energy != null) {
                 add(JsonObject().apply {
                     addProperty("handle", HANDLE_TEAM_REBORN_ENERGY)
                     addProperty("kind", "energy")
-                    addProperty("amount", EnergyReflection.amount(energy.storage))
-                    addProperty("capacity", EnergyReflection.capacity(energy.storage))
+                    addProperty("amount", energy.amount)
+                    addProperty("capacity", energy.capacity)
                 })
             }
         }
@@ -458,11 +470,11 @@ object StorageOps : RpcHandlerGroup {
                 itemStorageToJson(storage, handle)
             }
             HANDLE_FABRIC_FLUID -> {
-                val storage = fluidEndpoint(target, side, mutableItem = false)?.storage ?: throwStorageNotFound(handle, target)
+                val storage = fluidStorageFor(target, side) ?: throwStorageNotFound(handle, target)
                 fluidStorageToJson(storage, handle)
             }
             HANDLE_TEAM_REBORN_ENERGY -> {
-                val storage = energyEndpoint(target, side, mutableItem = false)?.storage ?: throwStorageNotFound(handle, target)
+                val storage = energyStorageFor(target, side) ?: throwStorageNotFound(handle, target)
                 energyStorageToJson(storage, handle)
             }
             else -> throwStorageNotFound(handle, target)
@@ -496,105 +508,75 @@ object StorageOps : RpcHandlerGroup {
             })
         }
 
-    @Suppress("UNCHECKED_CAST")
-    private fun itemStorageToJson(storage: Storage<ItemVariant>, handle: String): JsonObject =
+    private fun itemStorageToJson(storage: ItemStorage, handle: String): JsonObject =
         JsonObject().apply {
             addProperty("handle", handle)
             addProperty("kind", "item")
-            addProperty("supportsInsertion", storage.supportsInsertion())
-            addProperty("supportsExtraction", storage.supportsExtraction())
+            addProperty("supportsInsertion", storage.supportsInsertion)
+            addProperty("supportsExtraction", storage.supportsExtraction)
             add("slots", JsonArray().apply {
-                if (storage is SlottedStorage<*>) {
-                    val slotted = storage as SlottedStorage<ItemVariant>
-                    for (i in 0 until slotted.slotCount) add(itemViewToJson(i, slotted.getSlot(i)))
-                } else {
-                    var i = 0
-                    for (view in storage) {
-                        if (!view.isResourceBlank || view.amount > 0) add(itemViewToJson(i, view))
-                        i++
-                    }
+                for (view in storage.views()) {
+                    add(JsonObject().apply {
+                        addProperty("index", view.index)
+                        add("stack", ServerContext.itemStackToJson(view.stack))
+                        addProperty("amount", view.amount)
+                        addProperty("capacity", view.capacity)
+                    })
                 }
             })
         }
 
-    private fun fluidStorageToJson(storage: Storage<FluidVariant>, handle: String): JsonObject =
+    private fun fluidStorageToJson(storage: FluidStorage, handle: String): JsonObject =
         JsonObject().apply {
             addProperty("handle", handle)
             addProperty("kind", "fluid")
-            addProperty("supportsInsertion", storage.supportsInsertion())
-            addProperty("supportsExtraction", storage.supportsExtraction())
+            addProperty("supportsInsertion", storage.supportsInsertion)
+            addProperty("supportsExtraction", storage.supportsExtraction)
             add("tanks", JsonArray().apply {
-                var i = 0
-                for (view in storage) {
-                    if (!view.isResourceBlank || view.amount > 0 || view.capacity > 0) add(fluidViewToJson(i, view))
-                    i++
+                for (view in storage.views()) {
+                    add(JsonObject().apply {
+                        addProperty("index", view.index)
+                        if (view.fluidId == null) add("fluid", JsonNull.INSTANCE) else addProperty("fluid", view.fluidId)
+                        view.fluidNbt?.let { add("nbt", it) }
+                        addProperty("amount", view.amount)
+                        addProperty("capacity", view.capacity)
+                    })
                 }
             })
         }
 
-    private fun energyStorageToJson(storage: Any, handle: String): JsonObject =
+    private fun energyStorageToJson(storage: EnergyStorage, handle: String): JsonObject =
         JsonObject().apply {
             addProperty("handle", handle)
             addProperty("kind", "energy")
-            addProperty("supportsInsertion", EnergyReflection.supportsInsertion(storage))
-            addProperty("supportsExtraction", EnergyReflection.supportsExtraction(storage))
-            addProperty("amount", EnergyReflection.amount(storage))
-            addProperty("capacity", EnergyReflection.capacity(storage))
+            addProperty("supportsInsertion", storage.supportsInsertion)
+            addProperty("supportsExtraction", storage.supportsExtraction)
+            addProperty("amount", storage.amount)
+            addProperty("capacity", storage.capacity)
         }
 
-    private fun itemViewToJson(index: Int, view: StorageView<ItemVariant>): JsonObject =
-        JsonObject().apply {
-            addProperty("index", index)
-            val variant = view.resource
-            add("stack", if (variant.isBlank) ServerContext.itemStackToJson(ItemStack.EMPTY) else ServerContext.itemStackToJson(variant.toStack(view.amount.toInt())))
-            addProperty("amount", view.amount)
-            addProperty("capacity", view.capacity)
-        }
-
-    private fun fluidViewToJson(index: Int, view: StorageView<FluidVariant>): JsonObject =
-        JsonObject().apply {
-            addProperty("index", index)
-            val variant = view.resource
-            if (variant.isBlank) add("fluid", JsonNull.INSTANCE) else addProperty("fluid", BuiltInRegistries.FLUID.getKey(variant.fluid).toString())
-            if (!variant.isBlank && variant.hasComponents()) add("nbt", fluidComponentsToJson(variant.components))
-            addProperty("amount", view.amount)
-            addProperty("capacity", view.capacity)
-        }
-
-    @Suppress("UNCHECKED_CAST")
-    private fun itemSlotCount(storage: Storage<ItemVariant>): Int =
-        if (storage is SlottedStorage<*>) (storage as SlottedStorage<ItemVariant>).slotCount else storage.count()
-
-    private fun fluidTankCount(storage: Storage<FluidVariant>): Int = storage.count()
-
-    @Suppress("UNCHECKED_CAST")
-    private fun itemStorageFor(target: TargetRef, side: Direction?): Storage<ItemVariant>? =
+    private fun itemStorageFor(target: TargetRef, side: Direction?): ItemStorage? =
         when (target) {
-            is TargetRef.Block -> ItemStorage.SIDED.find(target.world, target.pos, side)
-            is TargetRef.Entity -> inventoryFor(target)?.let { InventoryStorage.of(it, null) as Storage<ItemVariant> }
-            is TargetRef.Item -> null
+            is TargetRef.Block -> Loader.api.storage.itemStorage(target.world, target.pos, side)
+            is TargetRef.Entity -> inventoryFor(target)?.let { Loader.api.storage.itemStorageOf(it, null) }
+            is TargetRef.Item -> Loader.api.storage.itemStorageOfItem(target.stack)
         }
 
-    private fun fluidEndpoint(target: TargetRef, side: Direction?, mutableItem: Boolean): FluidEndpoint? =
+    private fun fluidStorageFor(target: TargetRef, side: Direction?): FluidStorage? =
         when (target) {
-            is TargetRef.Block -> FluidStorage.SIDED.find(target.world, target.pos, side)?.let { FluidEndpoint(it, null) }
+            is TargetRef.Block -> Loader.api.storage.fluidStorage(target.world, target.pos, side)
             is TargetRef.Entity -> null
-            is TargetRef.Item -> {
-                val context = itemContext(target.stack, mutableItem)
-                context.find(FluidStorage.ITEM)?.let { FluidEndpoint(it, context) }
-            }
+            is TargetRef.Item -> Loader.api.storage.fluidStorageOfItem(target.stack)
         }
 
-    private fun energyEndpoint(target: TargetRef, side: Direction?, mutableItem: Boolean): EnergyEndpoint? =
+    private fun energyStorageFor(target: TargetRef, side: Direction?): EnergyStorage? =
         when (target) {
-            is TargetRef.Block -> EnergyReflection.find(target.world, target.pos, side)?.let { EnergyEndpoint(it, null) }
+            is TargetRef.Block -> Loader.api.storage.energyStorage(target.world, target.pos, side)
             is TargetRef.Entity -> null
-            is TargetRef.Item -> {
-                val context = itemContext(target.stack, mutableItem)
-                EnergyReflection.findItem(context)?.let { EnergyEndpoint(it, context) }
-            }
+            is TargetRef.Item -> Loader.api.storage.energyStorageOfItem(target.stack)
         }
 
+    /** The vanilla Container behind a target, if any (block entity, entity inventory). */
     private fun inventoryFor(target: TargetRef): Container? =
         when (target) {
             is TargetRef.Block -> target.world.getBlockEntity(target.pos) as? Container
@@ -610,49 +592,9 @@ object StorageOps : RpcHandlerGroup {
             else -> null
         }
 
+    /** Sides only make sense for block targets; entity inventories are single-faced. */
     private fun sideForInventory(target: TargetRef, side: Direction?): Direction? =
         if (target is TargetRef.Block) side else null
-
-    private fun itemContext(stack: ItemStack, mutable: Boolean): ContainerItemContext =
-        if (mutable) {
-            //withInitial was removed in fabric-transfer 1.21; a one-slot InventoryStorage reproduces its
-            //mutable-copy container-item semantics
-            val inv = SimpleContainer(1)
-            inv.setItem(0, stack.copy())
-            ContainerItemContext.ofSingleSlot(InventoryStorage.of(inv, null).getSlot(0))
-        } else ContainerItemContext.withConstant(stack.copy())
-
-    /** 1.21: fluid variants carry component changes instead of NBT; encode them losslessly for the DTO. */
-    private fun fluidComponentsToJson(changes: net.minecraft.core.component.DataComponentPatch): com.google.gson.JsonElement =
-        try {
-            NbtJson.toJson(
-                net.minecraft.core.component.DataComponentPatch.CODEC
-                    .encodeStart(net.minecraft.nbt.NbtOps.INSTANCE, changes)
-                    .result()
-                    .orElseThrow { RpcException(RpcErrors.INTERNAL_ERROR, "failed to encode fluid components") }
-            )
-        } catch (e: RpcException) {
-            throw e
-        } catch (e: Exception) {
-            throw RpcException(RpcErrors.INTERNAL_ERROR, "failed to encode fluid components: ${e.message}")
-        }
-
-    private fun itemTargetAfter(context: ContainerItemContext): JsonObject {
-        val variant = context.itemVariant
-        val stack = if (variant.isBlank) ItemStack.EMPTY else variant.toStack(context.amount.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
-        return JsonObject().apply {
-            addProperty("kind", "item")
-            add("stack", ServerContext.itemStackToJson(stack))
-        }
-    }
-
-    private data class FluidEndpoint(val storage: Storage<FluidVariant>, val context: ContainerItemContext?) {
-        fun targetAfter(): JsonObject? = context?.let(::itemTargetAfter)
-    }
-
-    private data class EnergyEndpoint(val storage: Any, val context: ContainerItemContext?) {
-        fun targetAfter(): JsonObject? = context?.let(::itemTargetAfter)
-    }
 
     private fun itemStackResource(server: MinecraftServer, resource: JsonObject, count: Int): ItemStack {
         if (resource.requireString("kind") != "item") {
@@ -759,84 +701,6 @@ object StorageOps : RpcHandlerGroup {
         throw RpcException(RpcErrors.STORAGE_NOT_FOUND, "storage not found: $handle at $target", data)
     }
 
-    private object EnergyReflection {
-        private val energyClass: Class<*>? by lazy {
-            try {
-                Class.forName("team.reborn.energy.api.EnergyStorage")
-            } catch (_: ClassNotFoundException) {
-                null
-            }
-        }
-
-        private val sidedLookup: Any? by lazy { energyClass?.getField("SIDED")?.get(null) }
-        private val itemLookup: Any? by lazy { energyClass?.getField("ITEM")?.get(null) }
-
-        private val sidedFindMethod: Method? by lazy {
-            sidedLookup?.javaClass?.methods?.firstOrNull { it.name == "find" && it.parameterCount == 3 }
-        }
-
-        private val itemFindMethod: Method? by lazy {
-            itemLookup?.javaClass?.methods?.firstOrNull { it.name == "find" && it.parameterCount == 2 }
-        }
-
-        fun find(world: Level, pos: BlockPos, side: Direction?): Any? {
-            val lookup = sidedLookup ?: return null
-            val method = sidedFindMethod ?: return null
-            return method.invoke(lookup, world, pos, side)
-        }
-
-        fun findItem(context: ContainerItemContext): Any? {
-            val lookup = itemLookup ?: return null
-            val method = itemFindMethod ?: return null
-            if (context.itemVariant.isBlank) return null
-            return method.invoke(lookup, context.itemVariant.toStack(context.amount.toInt()), context)
-        }
-
-        fun amount(storage: Any): Long = callLong(storage, "getAmount")
-        fun capacity(storage: Any): Long = callLong(storage, "getCapacity")
-        fun supportsInsertion(storage: Any): Boolean = callBoolean(storage, "supportsInsertion")
-        fun supportsExtraction(storage: Any): Boolean = callBoolean(storage, "supportsExtraction")
-
-        fun insert(storage: Any, amount: Long, simulate: Boolean): Long {
-            Transaction.openOuter().use { tx ->
-                val inserted = callTransfer(storage, "insert", amount, tx)
-                if (!simulate && inserted > 0) tx.commit()
-                return inserted
-            }
-        }
-
-        fun extract(storage: Any, amount: Long, simulate: Boolean): Long {
-            Transaction.openOuter().use { tx ->
-                val extracted = callTransfer(storage, "extract", amount, tx)
-                if (!simulate && extracted > 0) tx.commit()
-                return extracted
-            }
-        }
-
-        fun transfer(from: Any, to: Any, amount: Long, simulate: Boolean): Long {
-            Transaction.openOuter().use { tx ->
-                val canExtract = Transaction.openNested(tx).use { nested -> callTransfer(from, "extract", amount, nested) }
-                val accepted = callTransfer(to, "insert", canExtract, tx)
-                val extracted = callTransfer(from, "extract", accepted, tx)
-                val moved = if (accepted == extracted) accepted else 0
-                if (!simulate && moved > 0) tx.commit()
-                return moved
-            }
-        }
-
-        private fun callLong(storage: Any, name: String): Long =
-            energyClass!!.getMethod(name).invoke(storage) as Long
-
-        private fun callBoolean(storage: Any, name: String): Boolean =
-            energyClass!!.getMethod(name).invoke(storage) as Boolean
-
-        private fun callTransfer(storage: Any, name: String, amount: Long, tx: Any): Long {
-            val method = energyClass!!.methods.first {
-                it.name == name && it.parameterCount == 2 && it.parameterTypes[0] == java.lang.Long.TYPE
-            }
-            return method.invoke(storage, amount, tx) as Long
-        }
-    }
 }
 
 

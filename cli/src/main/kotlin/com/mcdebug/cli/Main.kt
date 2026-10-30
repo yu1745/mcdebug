@@ -134,7 +134,7 @@ class McDebugCli : CliktCommand(
         help = "run one command string (e.g. -c \"world get-block --x 1 --y 2 --z 3\"), repeatable; " +
             "all -c commands share ONE connection and run in order",
     ).multiple()
-    val batchMode by option("--batch", help = "batch mode: run all -c commands, print per-command status, stop at first failure (exit code = that failure's code)").flag()
+    val batchMode by option("--batch", help = "run all -c commands, print per-command status, stop at first failure (exit code = that failure's code); more than one -c already behaves this way, the flag is explicit intent").flag()
 
     fun clientOptions(): RpcClientOptions {
         validateSessionOptions()

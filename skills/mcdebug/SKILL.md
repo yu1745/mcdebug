@@ -1,6 +1,6 @@
 ---
 name: mcdebug
-description: Drive a live Minecraft (Fabric 1.21.1) game through the mcdebug CLI (`mdb` / `java -jar mcdebug-cli.jar`) - set blocks, NBT, inventories, storages, entities on the server plane; screenshot, click, hover and hot-reload GUI Screens on the client plane; assert with wait.until. Use when testing or debugging a mod's blocks, machines or GUIs in a running game, or when operating a server through its mcdebug RPC socket.
+description: Drive a live Minecraft (Fabric 1.21.1 or NeoForge 21.1.x) game through the mcdebug CLI (`mdb` / `java -jar mcdebug-cli.jar`) - set blocks, NBT, inventories, storages, entities on the server plane; screenshot, click, hover and hot-reload GUI Screens on the client plane; assert with wait.until. Use when testing or debugging a mod's blocks, machines or GUIs in a running game, or when operating a server through its mcdebug RPC socket.
 ---
 
 # mcdebug CLI
@@ -34,9 +34,10 @@ mcdebug --version
 ```
 
 Releases before v0.6.3 have no `mcdebug-cli.jar` asset. From a source checkout instead:
-`./gradlew :cli:copyCliJar` writes `./mcdebug-cli.jar`. The CLI carries the mod jar and this
-skill of its own version: `mcdebug jar --output <gameDir>/mods` installs a matching mod (and
-removes old ones), `mcdebug skill` refreshes this skill to match the CLI.
+`./gradlew :cli:copyCliJar` writes `./mcdebug-cli.jar`. The CLI carries the mod jar of **both
+loaders** and this skill, all of its own version: `mcdebug jar --output <gameDir>/mods` installs
+the Fabric mod, `mcdebug jar --loader neoforge --output <gameDir>/mods` the NeoForge one (each
+removes the other/older jars), `mcdebug skill` refreshes this skill to match the CLI.
 
 Below, `mcdebug` means whichever of these you found.
 
@@ -46,7 +47,7 @@ Below, `mcdebug` means whichever of these you found.
   and finds both planes for you:
   ```bash
   mcdebug jar --output run/mods                     # same-version mod jar into the consumer's mods/ (removes old ones)
-  mcdebug session start dev --project . --world "New World" --render demand   # world = saves/ dir name
+  mcdebug session start dev --project . --world "New World"                  # world = saves/ dir name
   mcdebug --session dev status                      # every later call: --session dev
   mcdebug session stop dev                          # owned sessions only; saves the world
   ```
@@ -59,12 +60,27 @@ Below, `mcdebug` means whichever of these you found.
   JVM open: `session stop --force`.
   `--width/--height` lose to `programArgs '--width' ...` in the project's `loom.runs.client`
   (the session record still shows the requested size; `gui status` shows the real window).
-  After `session stop` the discovery files (`mcdebug/port`, `clientPort`, locks) stay; only the
-  sockets are removed, so an existing `port` file does not mean a live endpoint.
-  Records live in `$XDG_STATE_HOME/mcdebug/sessions/<name>.json` (`--sessions-dir` to change);
+  `--render` defaults to **demand** for a managed session (the mod's own global default is
+  continuous); pass `--render continuous` when a task needs a normal continuous frameloop.
+  States: `starting` → `client_ready` (title screen) → `world_ready` (needs `--world`, must be
+  in-world *and* singleplayer), then `stopping`/`stopped`; failures are `failed` (see `lastError`)
+  and `dead`. `session logs NAME --lines N` tails the session log (the option is `--lines`; there
+  is no `--tail`).
+  After `session stop` the discovery files (`mcdebug/port`, `clientPort`, locks, `client.json`,
+  `session-stop.json`) stay; only the sockets are removed, so an existing `port` file does not mean
+  a live endpoint. The Gradle wrapper of a stopped session can linger ~10 s after `stop` already
+  reports `stopped`: an immediate "no leftover process" check can false-alarm, and an immediate
+  restart in the same gameDir can collide with it.
+  Records live in `$XDG_STATE_HOME/mcdebug/sessions/<name>.json` (`--sessions-dir` to change, or the
+  `MCDEBUG_SESSIONS_DIR` environment variable);
   `session remove NAME` forgets an attached record any time (the game keeps running) and an owned
   one once it is stopped/failed/dead. Never delete lock or discovery files by hand: they guard
   against driving the wrong JVM.
+  Transport flags are per plane: `--socket`/`--tcp` address the **server** plane,
+  `--client-socket`/`--client-tcp` the client plane, and `--session NAME` routes each call by its
+  method. Passing `--socket` to a `gui.*` method is silently ignored (that call still uses client
+  discovery), and discovery without an explicit flag resolves relative to the **current directory**
+  — run from the game/project directory or pass absolute paths.
   A unix socket path over the OS limit (~107 bytes, deep gameDirs) or a JVM without AF_UNIX makes
   the mod fall back to loopback TCP; discovery then holds `tcp:127.0.0.1:N` and the CLI follows it.
   That is normal, not an error.
@@ -96,11 +112,54 @@ mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeo
   To give the player an item: `raw server.runCommand '{"command":"give @p minecraft:diamond 4"}'`
   (any server command works this way; it is also how to clear, teleport, set time).
 - `storage list` shows which handles a block exposes. `storage.*` is the generic item/fluid/energy API (handles `vanilla:inventory`, `fabric:item`,
-  `fabric:fluid`, `teamreborn:energy`); fluids are in droplets (81000 = 1 bucket).
+  `fabric:fluid`, `teamreborn:energy` — the same handle names on both loaders, the implementation
+  behind them is Fabric's Transfer API resp. NeoForge capabilities).
+  **Amounts use each loader's native unit** — read `server.status.fluidUnit` (`droplet` on Fabric,
+  81000 = 1 bucket; `mb` on NeoForge, 1000 = 1 bucket) and `server.status.energyUnit` (`E` on
+  Fabric, `FE` on NeoForge) before comparing numbers across loaders. On NeoForge, `fluid.*`'s
+  `--index` only selects which tank is *reported* (fill/drain go through the whole
+  `IFluidHandler`), and `supportsInsertion/supportsExtraction` describe the **current** state
+  (a full tank answers `supportsInsertion:false` although it can be drained) while Fabric's are
+  capability flags — do not compare the two across loaders, and do not treat `false` as "this
+  storage can never take it".
+  `reflect.*` resolves FQNs on NeoForge (its short-name table is Fabric-only). Both `reflect get`
+  and `reflect set` take `--path`; `set` writes the **last** segment (`--path overworld.dayTime`
+  writes `dayTime` on `overworld`), and `--field` is the direct form. Big collections come back
+  summarised: a ref answer carries `size` and, when the summary was cut, `truncated:true` +
+  `returned:N`; an inline plain-value array appends a final `{"$truncated":<how many more>}`
+  element. Read `size` before concluding a key does not exist.
   `inserted`/`extracted` can be far below `amount`: the block's own transfer limit applies, and
   it is usually **per tick**, so repeating the call within the same tick (a tight loop, `--batch`)
   gets 0. `remaining` is about this call only; read the result back with `storage get`. To fill
   quickly, write the block entity's NBT instead of looping.
+- **Entities on a server without players do not stay**: vanilla despawns mobs with no player
+  nearby (measured ~3 s on a dedicated server, even with `PersistenceRequired`), so
+  `entity spawn` -> `scan.findEntities` can look broken when the entity is simply gone. Pad the
+  floor (spawn does **not** snap to the ground: a pig dropped 120 -> 111), keep the whole
+  spawn-assert sequence in one `-c` batch (one round trip, sub-second), and re-check the entity
+  count with `scan.findEntities` before concluding anything.
+- `inv.setSlot --nbt` writes 1.21.1 **item components**: a raw tag ends up under
+  `components."minecraft:custom_data"` and `inv.getSlot` echoes exactly that back, so "it round
+  tripped" does not prove the mod read it. Assert through the API that matters (the GUI, the
+  behaviour) like any other NBT.
+- **Verifying pixels against a scene**: a container/UI screen can be pinned down (`--mode gui` crops
+  to the GUI, `gui screen` gives slot rectangles), but a *world* frame cannot be cropped to a
+  region (no region flag) and weather/entity animation makes two unedited frames differ by tens of
+  percent of pixels. For world scenes assert logically (`gui open-block` succeeded, the draw log
+  contains the item you placed, the server reads the same state) and use `pixelHash` only as a
+  "this frame changed" signal; reserve `gui compare` for stable UI frames with `--ignore` regions.
+- Slot coordinates differ per plane: `gui screen` slots are **absolute GUI units** (the same space
+  as `gui click --gui`), while `screen.*`'s `slotDetails` (and the server-side menu) use
+  container-relative coordinates; convert with the container's `gui.left/top` from `gui screen`.
+  `snapshot`/`storage` report a slot's `capacity` as what that slot can actually take
+  (`min(slot limit, the stack's own max size)`, 64 for an empty slot), so it can change when the
+  slot's item changes — not a fixture to compare across different items.
+- `trace get` frames are `{tick, snapshot}` objects (the snapshot is the same shape `snapshot.*`
+  returns), so a trace is diffed by reading the field you care about per frame, not by comparing
+  whole frames.
+- `snapshot capture` is the method for taking a box snapshot (`snapshot.take` does not exist);
+  `snapshot --help` lists the operations, and there is no generic "list all RPC methods" command —
+  use per-group `--help` and this skill.
 - `be.setNbt` loads the given tag into the block entity; what happens to keys you leave out is
   up to that block entity's load code. Write only the keys you mean to change. `be set-field`
   writes one path, reads it back and answers `ok:false reason:NOT_APPLIED` when the load code
@@ -108,6 +167,9 @@ mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeo
   A field can still change right after (the block's own tick): it was applied, the game moved on. One value may be
   stored in several fields (a mirror, a split long): verify through the API that matters
   (`storage get`, `inv.getSlot`, the GUI), not by reading the NBT back.
+- `raw craft.craft` takes `{"grid":[ ... 9 cells ... ]}` where each cell is **null or an object**
+  like `{"item":"minecraft:oak_log","count":1}` (a bare string is a shape error and answers
+  `-32602` naming `grid[i]`); `craft do <item>` is the shortcut that builds the grid for you.
 - Slot numbers of a block are its own: find input/output slots with `gui screen` (GUI open) or
   `inv get-size` + `inv get-slot`, never by guessing. `inv extract` needs `--item` (it is a
   storage-style extract); for a whole slot use `inv set-slot` with an empty item.
@@ -159,6 +221,15 @@ mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeo
 - `screen.*` is a **server-side fake-player menu** (slot JSON, no pixels). Pixels only come from `gui.*`.
 
 ## 3. Client plane: the GUI loop
+
+> **Tooltips need the lite render mode.** On a headless/CI box (no window manager) the game window
+> is never focused, and Minecraft ignores real cursor movement while unfocused — so in the default
+> `continuous` mode `gui hover` moves the pointer but the game keeps computing the hover from its
+> stale position (symptom: `tooltips: []`, `hoveredSlot` pointing at the wrong inventory slot).
+> Start the client with `clientRenderMode=demand` (or `gui-only`) — in lite mode the mod feeds a
+> **virtual cursor** into the frame it renders, so hover works unfocused. Clicks, screenshots,
+> `gui screen`, `scroll`, `key`, `type` and `drag` work in either mode.
+
 
 ```bash
 mcdebug gui open-block --x 100 --y 64 --z 100            # or: gui open-screen pkg.Fixtures#myScreen
@@ -221,6 +292,33 @@ mcdebug gui problems --brief                             # WARN/ERROR log + caug
 - A Screen that throws while rendering no longer crashes the client: it stops drawing and
   `gui problems` shows the trace.
 
+### 3b. Flags vs raw parameters
+
+The CLI flags are the friendly face of the RPC parameters; when you use `raw` you must spell the
+parameters the way the handler reads them:
+
+| CLI flag | raw parameter |
+|---|---|
+| `gui screenshot --mode window\|gui` | `mode: "window" \| "gui"` (there is **no** `crop` — `mode:"gui"` crops to the container rectangle; use `--out` + a local crop otherwise) |
+| `gui screenshot --hash-only` | `format: "none"` (no PNG, no file) |
+| `gui screenshot --hide-cursor` | `cursor: "hide"` (also `"keep"`, default) |
+| `gui screenshot --annotate` / `--draw-log` | `annotate: true` / `drawLog: true` (+ `delayTicks`, `inline`, `name`) |
+| `gui click --slot/--widget/--text/--png/--gui` | `slot` / `widget` / `text` / `png:[x,y]` / `gui:[x,y]` |
+
+Unknown raw parameters are **silently ignored** (a typo in `crop` returns the full window instead of
+an error) — check `transform.crop`/`pngSize` in the response when the result matters.
+`gui click --gui`/`--png` report only the landing point (`guiX/guiY`), not `via`/`before`, unlike
+`--slot`/`--widget`/`--text`. `gui drag` echoes the **end** point only; keep your `--from` yourself.
+When no screen is open, `gui key`/`gui type` fail with the same `-32020 CLIENT_NOT_READY` code used
+for "client not ready" — distinguish by `data.reason` ("no Screen is open").
+
+- `gui open-screen` takes a **runtime class name** (or the `inventory` alias); there is no command
+  that lists Screen classes and an unknown one answers `CLASS_NOT_FOUND` with only the name you
+  guessed. To discover names, read them off a live screen: `gui screen` / `gui status` print the
+  current screen's class, and `reflect resolve --client --root screen` gives the exact runtime name
+  to reuse. Screens from your own project are addressed by their own factory (`pkg.Fixtures#make`,
+  dev classpath only).
+
 ## 4. Change code without restarting
 
 ```bash
@@ -246,7 +344,23 @@ into the JVM, `false` = it was already loaded (normal, not a failure).
 - Failure exits 2 and redefines nothing (all or nothing).
 - `reload-screen`'s `reloads` counts reloads of this Screen so far; `classes` lists what was loaded.
 
+## 4b. Two planes, one CLI
+
+`world.*`/`be.*`/`inv.*`/`storage.*`/`scan.*`/`wait.*`/`reflect.*` go to the **server** plane,
+`gui.*` to the **client** plane. `--session NAME` picks the plane per method; with explicit
+transports you must pick it yourself (`--socket`/`--tcp` = server, `--client-socket`/`--client-tcp`
+= client). Calling a client method with only a server transport is refused by the CLI (exit 1)
+*before* the request is sent — you will never see the server's `-32601 method not found` for this
+case, and `--socket` passed to a `gui.*` method is silently ignored (that call uses client
+discovery, which resolves relative to the current directory).
+
 ## 5. Regression
+
+- `gui compare` exits 1 on a mismatch and prints a JSON line **plus** a human `error: ...` line on
+  stdout — parse the exit code, or the JSON line, not the whole stream. Same-view frames still
+  differ where the player model animates (the cursor-hide interpolation does too): pass
+  `--ignore x,y,w,h` for that region or the comparison is noise. Size mismatch fails immediately and
+  writes no diff image.
 
 `mcdebug gui screenshot --mode gui --hide-cursor --out new.png`, then
 `mcdebug gui compare --expected golden.png --actual new.png --ignore x,y,w,h --report r.html`

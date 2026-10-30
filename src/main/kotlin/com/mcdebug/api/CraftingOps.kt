@@ -203,7 +203,12 @@ object CraftingOps : RpcHandlerGroup {
         for (i in 0 until 9) {
             val el = arr[i]
             if (el.isJsonNull) continue
-            val obj = el.asJsonObject
+            // A string/count cell is a shape mistake, not a server fault: name the slot and the
+            // expected shape instead of letting `asJsonObject` surface as -32603.
+            val obj = el as? JsonObject ?: throw RpcException(
+                RpcErrors.INVALID_PARAMS,
+                "grid[$i] must be null or an object like {\"item\":\"minecraft:oak_log\",\"count\":1}, got ${el.toString().take(48)}",
+            )
             val itemId = obj.getStringOrNull("item")
             if (itemId == null || itemId == "minecraft:air") continue
             val count = obj.getIntOr("count", 1)

@@ -1,0 +1,156 @@
+plugins {
+	id 'java'
+	id 'net.neoforged.moddev' version "${moddev_version}"
+	id 'org.jetbrains.kotlin.jvm' version "${kotlin_version}"
+}
+
+// 版本与根项目同源（gradle.properties 的 mod_version），不单独 bump
+def rootProps = new Properties()
+file('../gradle.properties').withInputStream { rootProps.load(it) }
+version = rootProps.getProperty('mod_version')
+group = rootProps.getProperty('maven_group')
+base { archivesName = 'mcdebug-neoforge' }
+
+java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
+
+repositories {
+	mavenCentral()
+	maven { name = 'NeoForged'; url = 'https://maven.neoforged.net/releases' }
+	maven { name = 'KotlinForForge'; url = 'https://thedarkcolour.github.io/KotlinForForge/' }
+}
+
+neoForge {
+	version = project.neo_version
+
+	runs {
+		server {
+			server()
+			programArguments.addAll '--nogui'
+		}
+		client {
+			client()
+		}
+	}
+
+	mods {
+		mcdebug { sourceSet sourceSets.main }
+	}
+}
+
+// ---- 共享源码 ----------------------------------------------------------------
+// loader 无关的那部分 mcdebug（服务端平面 + contract）直接编译进 NeoForge 构建；只有
+// loader 专属文件留在各自目录里：Fabric 版在 src/main/kotlin（原处），NeoForge 版在本目录。
+// contract 源码同样编进来：发布 jar 必须自包含（见根 build.gradle 的 verifyJarSelfContained）。
+def sharedDir = layout.buildDirectory.dir('generated/shared')
+tasks.register('syncShared', Sync) {
+	// 服务端平面 + 契约
+	from('../src/main/kotlin') {
+		exclude 'com/mcdebug/McDebugMod.kt'              // Fabric server entrypoint
+		exclude 'com/mcdebug/loader/fabric/**'           // Fabric 接缝实现
+	}
+	// 客户端平面（gui.*）：只有 entrypoint 与 loader 专属实现不同，其余全部共享
+	from('../src/client/kotlin') {
+		exclude 'com/mcdebug/client/McDebugClientMod.kt' // Fabric client entrypoint
+		exclude 'com/mcdebug/client/loader/fabric/**'    // Fabric 客户端接缝实现
+	}
+	// 客户端 mixin（Java，Mixin + MixinExtras 两个 loader 都自带）；
+	// MixinTargets 是每个 loader 一份的编译期常量（注入点不同），排除 Fabric 那份用本目录的
+	from('../src/client/java') {
+		exclude 'com/mcdebug/client/mixin/MixinTargets.java'
+	}
+	from('../contract/src/main/kotlin')
+	into sharedDir
+}
+sourceSets.main.kotlin.srcDir(sharedDir)
+sourceSets.main.java.srcDir(sharedDir)
+tasks.named('compileKotlin') { dependsOn 'syncShared' }
+tasks.named('compileJava') { dependsOn 'syncShared' }
+
+dependencies {
+	// KotlinForForge：按它自己的文档用 implementation 引入（会带出 kffmod/kfflang/kfflib，
+	// 其中 kffmod 声明 kotlinforforge 这个 mod、kfflang 注册 Kotlin 语言加载器）。
+	// 生产环境由 mods/ 里的 KFF 提供同一份运行时，见 README。
+	implementation "thedarkcolour:kotlinforforge-neoforge:${kff_version}"
+}
+
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+	kotlinOptions {
+		jvmTarget = '21'
+		freeCompilerArgs += ['-Xemit-jvm-type-annotations']
+	}
+}
+
+processResources {
+	inputs.property 'version', project.version
+	filesMatching('META-INF/neoforge.mods.toml') { expand 'version': project.version }
+	// 共享资源整棵树进来，只排掉 Fabric 专属文件（fabric.mod.json / 模板遗留 modid.mixins.json）。
+	// 以前只点名两个 mixin 配置：将来往 src/*/resources 加运行时文件会静默漏出 jar，而
+	// verifyJarSelfContained 只查类/入口点/mixin 配置，发现不了。必须落在 jar 根目录：
+	// neoforge.mods.toml 的 [[mixins]] config= 按根路径解析。
+	from('../src/main/resources') { exclude 'fabric.mod.json', 'modid.mixins.json' }
+	from('../src/client/resources')
+}
+
+// 客户端 mixin 的 refmap：NeoForge 的 dev 与生产都用 Mojang 官方名，不需要 refmap，
+// 与 Fabric 侧（Loom 直接重映射注解值）结论一致。
+
+jar {
+	manifest {
+		attributes 'Implementation-Title': 'mcdebug-neoforge', 'Implementation-Version': project.version
+	}
+}
+
+// ---- 自包含校验 ---------------------------------------------------------------
+// 发布 jar 是单个文件丢进 mods/，缺失入口点/接缝/mixin 资源时必须在构建期失败，
+// 而不是在消费者项目的启动崩溃里才发现（与根构建的 verifyJarSelfContained 同一条线）。
+tasks.register('verifyJarSelfContained') {
+	description = 'Fail if the NeoForge jar misses classes/resources the entrypoints need at runtime'
+	group = 'verification'
+	def jarTask = tasks.named('jar')
+	dependsOn jarTask
+	doLast {
+		def required = [
+			'META-INF/neoforge.mods.toml',
+			'mcdebug.client.mixins.json',
+			'mcdebug.mixins.json',
+			// entrypoints + 两个 loader 接缝实现
+			'com/mcdebug/loader/neoforge/McDebugNeoForge.class',
+			'com/mcdebug/loader/neoforge/McDebugNeoForgeClient.class',
+			'com/mcdebug/loader/neoforge/NeoForgeLoaderApi.class',
+			'com/mcdebug/loader/neoforge/NeoForgeClientLoaderApi.class',
+			'com/mcdebug/loader/neoforge/NeoForgeStorageApi.class',
+			'com/mcdebug/loader/neoforge/NeoCapabilities.class',
+			// 共享平面（服务端 + 客户端 + loader 中立接缝）
+			'com/mcdebug/ServerPlane.class',
+			'com/mcdebug/loader/LoaderApi.class',
+			'com/mcdebug/loader/StorageApi.class',
+			'com/mcdebug/api/StorageOps.class',
+			'com/mcdebug/api/FluidOps.class',
+			'com/mcdebug/client/ClientPlane.class',
+			'com/mcdebug/client/GuiOps.class',
+			'com/mcdebug/client/Capture.class',
+			'com/mcdebug/client/RenderControl.class',
+			'com/mcdebug/client/loader/ClientLoaderApi.class',
+			// 客户端 mixin（含每个 loader 一份的注入点常量）
+			'com/mcdebug/client/mixin/GameRendererMixin.class',
+			'com/mcdebug/client/mixin/GuiGraphicsMixin.class',
+			'com/mcdebug/client/mixin/MinecraftRenderMixin.class',
+			'com/mcdebug/client/mixin/MixinTargets.class',
+			// contract 源码直接编进 jar（不是 implementation 依赖），发布 jar 必须自包含
+			'com/mcdebug/contract/Methods.class',
+		]
+		def jarFile = jarTask.get().archiveFile.get().asFile
+		def zip = new java.util.zip.ZipFile(jarFile)
+		try {
+			def missing = required.findAll { zip.getEntry(it) == null }
+			if (!missing.isEmpty()) {
+				throw new GradleException("${jarFile.name} is missing ${missing.size()} required entries: ${missing}")
+			}
+		} finally {
+			zip.close()
+		}
+		logger.lifecycle("verifyJarSelfContained (neoforge): ${required.size()} required entries present in ${jarFile.name}")
+	}
+}
+
+tasks.named('check') { dependsOn 'verifyJarSelfContained' }

@@ -150,7 +150,7 @@ object ServerContext {
      * meaning the same thing across versions.
      */
     fun stackNbt(stack: ItemStack): CompoundTag? =
-        (stack.get(DataComponents.CUSTOM_DATA) as? CustomData)?.copyTag()
+        stack.get(DataComponents.CUSTOM_DATA)?.copyTag()
 
     fun stackSetNbt(stack: ItemStack, nbt: CompoundTag?) {
         //set(type, null) removes the component

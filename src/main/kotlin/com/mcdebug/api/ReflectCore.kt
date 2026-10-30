@@ -319,7 +319,6 @@ class ReflectCore(
                     e.invoke(instance ?: throw RpcException(RpcErrors.INVALID_PARAMS,
                         "method ${e.name} is not static; start from a ref, root or path"), *coerced)
                 is java.lang.reflect.Constructor<*> -> e.newInstance(*coerced)
-                else -> error("unsupported executable $e")
             }
         } catch (ex: java.lang.reflect.InvocationTargetException) {
             val cause = ex.targetException
@@ -348,9 +347,9 @@ class ReflectCore(
     }
 
     private fun fitsIntegral(v: Long, type: Class<*>): Boolean = when (type) {
-        java.lang.Byte::class.java -> v in Byte.MIN_VALUE..Byte.MAX_VALUE
-        java.lang.Short::class.java -> v in Short.MIN_VALUE..Short.MAX_VALUE
-        java.lang.Integer::class.java -> v in Int.MIN_VALUE..Int.MAX_VALUE
+        Byte::class.javaObjectType -> v in Byte.MIN_VALUE..Byte.MAX_VALUE
+        Short::class.javaObjectType -> v in Short.MIN_VALUE..Short.MAX_VALUE
+        Int::class.javaObjectType -> v in Int.MIN_VALUE..Int.MAX_VALUE
         else -> true
     }
 
@@ -359,12 +358,12 @@ class ReflectCore(
         val t = BOXED[type] ?: type
         if (value == null || t.isInstance(value)) return value
         if (value is Number) return when (t) {
-            java.lang.Long::class.java -> value.toLong()
-            java.lang.Integer::class.java -> value.toLong().takeIf { fitsIntegral(it, t) }?.toInt()
-            java.lang.Short::class.java -> value.toLong().takeIf { fitsIntegral(it, t) }?.toInt()?.toShort()
-            java.lang.Byte::class.java -> value.toLong().takeIf { fitsIntegral(it, t) }?.toInt()?.toByte()
-            java.lang.Double::class.java -> value.toDouble()
-            java.lang.Float::class.java -> value.toFloat()
+            Long::class.javaObjectType -> value.toLong()
+            Int::class.javaObjectType -> value.toLong().takeIf { fitsIntegral(it, t) }?.toInt()
+            Short::class.javaObjectType -> value.toLong().takeIf { fitsIntegral(it, t) }?.toInt()?.toShort()
+            Byte::class.javaObjectType -> value.toLong().takeIf { fitsIntegral(it, t) }?.toInt()?.toByte()
+            Double::class.javaObjectType -> value.toDouble()
+            Float::class.javaObjectType -> value.toFloat()
             else -> null
         }
         if (value is String && t.isEnum) return t.enumConstants.firstOrNull { (it as Enum<*>).name == value }
@@ -408,6 +407,13 @@ class ReflectCore(
             Mappings.mojangClassName(v.javaClass)?.takeIf { it != v.javaClass.name }?.let { addProperty("mojangClass", it) }
             if (size >= 0) {
                 addProperty("size", size)
+                val returned = minOf(size, SUMMARY_LIMIT)
+                // Say it out loud: a truncated summary used to look like "the rest does not exist"
+                // (a 1060-key map answered with 20 entries and no marker).
+                if (size > returned) {
+                    addProperty("truncated", true)
+                    addProperty("returned", returned)
+                }
                 add("items", when {
                     v is Map<*, *> -> JsonObject().apply {
                         v.entries.take(SUMMARY_LIMIT).forEach { (k, x) -> add(k.toString(), summary(x)) }
@@ -460,15 +466,15 @@ class ReflectCore(
             val prim = el.asJsonPrimitive
             return when {
                 prim.isString -> String::class.java to prim.asString
-                prim.isBoolean -> java.lang.Boolean::class.java to prim.asBoolean
+                prim.isBoolean -> Boolean::class.javaObjectType to prim.asBoolean
                 prim.isNumber -> {
                     // integers keep full long precision (asDouble loses it above 2^53)
                     val text = prim.asString
                     val asLong = text.toLongOrNull()
                     when {
-                        asLong == null -> java.lang.Double::class.java to text.toDouble()
-                        asLong in Int.MIN_VALUE..Int.MAX_VALUE -> java.lang.Integer::class.java to asLong.toInt()
-                        else -> java.lang.Long::class.java to asLong
+                        asLong == null -> Double::class.javaObjectType to text.toDouble()
+                        asLong in Int.MIN_VALUE..Int.MAX_VALUE -> Int::class.javaObjectType to asLong.toInt()
+                        else -> Long::class.javaObjectType to asLong
                     }
                 }
                 else -> null to prim.asString
@@ -525,15 +531,15 @@ class ReflectCore(
         )
 
         private val BOXED: Map<Class<*>, Class<*>> = mapOf(
-            Integer.TYPE to java.lang.Integer::class.java, java.lang.Long.TYPE to java.lang.Long::class.java,
-            java.lang.Short.TYPE to java.lang.Short::class.java, java.lang.Byte.TYPE to java.lang.Byte::class.java,
-            java.lang.Double.TYPE to java.lang.Double::class.java, java.lang.Float.TYPE to java.lang.Float::class.java,
-            java.lang.Boolean.TYPE to java.lang.Boolean::class.java, Character.TYPE to java.lang.Character::class.java,
+            Integer.TYPE to Int::class.javaObjectType, java.lang.Long.TYPE to Long::class.javaObjectType,
+            java.lang.Short.TYPE to Short::class.javaObjectType, java.lang.Byte.TYPE to Byte::class.javaObjectType,
+            java.lang.Double.TYPE to Double::class.javaObjectType, java.lang.Float.TYPE to Float::class.javaObjectType,
+            java.lang.Boolean.TYPE to Boolean::class.javaObjectType, Character.TYPE to Char::class.javaObjectType,
         )
 
         private val NUMERIC_RANK: Map<Class<*>, Int> = mapOf(
-            java.lang.Byte::class.java to 0, java.lang.Short::class.java to 1, java.lang.Integer::class.java to 2,
-            java.lang.Long::class.java to 3, java.lang.Float::class.java to 4, java.lang.Double::class.java to 5,
+            Byte::class.javaObjectType to 0, Short::class.javaObjectType to 1, Int::class.javaObjectType to 2,
+            Long::class.javaObjectType to 3, Float::class.javaObjectType to 4, Double::class.javaObjectType to 5,
         )
     }
 }

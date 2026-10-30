@@ -23,6 +23,7 @@ import net.minecraft.core.BlockPos
 import org.slf4j.LoggerFactory
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CopyOnWriteArrayList
+import com.mcdebug.loader.Loader
 
 /**
  * WaitOps — passive observation only. Registers a ServerTickEvents.END_SERVER_TICK callback
@@ -39,9 +40,9 @@ object WaitOps : RpcHandlerGroup {
         "until" to ::until
     )
 
-    /** Install the tick listener. Called from McDebugMod's OnServerStarted hook. */
+    /** Install the passive tick observer through the loader seam. */
     fun install() {
-        net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents.END_SERVER_TICK.register { srv ->
+        Loader.api.onServerTick { srv ->
             tickSweep(srv)
         }
     }

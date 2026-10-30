@@ -3,7 +3,7 @@ package com.mcdebug.api
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
-import com.mcdebug.McDebugMod
+import com.mcdebug.McDebug
 import com.mcdebug.rpc.RpcContext
 import com.mcdebug.rpc.RpcErrors
 import com.mcdebug.rpc.RpcException
@@ -16,6 +16,7 @@ import net.minecraft.commands.CommandSource
 import net.minecraft.commands.CommandSourceStack
 import net.minecraft.network.chat.Component
 import java.util.concurrent.CompletableFuture
+import com.mcdebug.loader.Loader
 
 object ServerOps : RpcHandlerGroup {
     override fun methods(): Map<String, RpcHandler> = mapOf(
@@ -60,8 +61,10 @@ object ServerOps : RpcHandlerGroup {
             val dayTime = overworld?.getDayTime() ?: 0L
             JsonObject().apply {
                 addProperty("mcVersion", server.getServerVersion())
-                addProperty("modVersion", McDebugMod.MOD_VERSION)
-                addProperty("modLoader", "fabric")
+                addProperty("modVersion", McDebug.MOD_VERSION)
+                addProperty("modLoader", Loader.api.name)
+                addProperty("fluidUnit", Loader.api.fluidUnit)
+                addProperty("energyUnit", Loader.api.energyUnit)
                 addProperty("protocolVersion", 1)
                 add("dims", dims)
                 addProperty("players", server.playerCount)

@@ -1,0 +1,16 @@
+modLoader="javafml"
+loaderVersion="[4,)"
+license="MIT"
+
+[[mods]]
+modId="consumer"
+version="1.0.0"
+displayName="consumer"
+description='''Throwaway NeoForge consumer project used to test mcdebug release jars.'''
+
+[[dependencies.consumer]]
+modId="neoforge"
+type="required"
+versionRange="[21.1,)"
+ordering="NONE"
+side="BOTH"

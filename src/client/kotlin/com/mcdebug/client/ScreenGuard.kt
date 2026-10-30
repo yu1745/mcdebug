@@ -2,7 +2,7 @@ package com.mcdebug.client
 
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
-import com.mcdebug.McDebugMod
+import com.mcdebug.McDebug
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.screens.Screen
 import java.nio.file.Files
@@ -19,7 +19,7 @@ object ClientConfig {
         } catch (e: Exception) {
             // The shared transport config is best-effort too. A broken/empty
             // file must not prevent a normal player client from starting.
-            McDebugMod.LOGGER.warn("Cannot read client config {}: {}; ignoring file", path, e.message)
+            McDebug.LOGGER.warn("Cannot read client config {}: {}; ignoring file", path, e.message)
             JsonObject()
         }
     }
@@ -60,7 +60,7 @@ object ScreenGuard {
         if (!enabled) return false
         faulted = screen
         val description = ProblemLog.describe(error)
-        McDebugMod.LOGGER.error("mcdebug screen guard: {} threw while rendering; it is no longer drawn until gui.reinit or close",
+        McDebug.LOGGER.error("mcdebug screen guard: {} threw while rendering; it is no longer drawn until gui.reinit or close",
             screen.javaClass.name, error)
         // The ERROR line above already reaches ProblemLog through its appender.
         if (!ProblemLog.available) ProblemLog.record("ERROR", "mcdebug/screen-guard", "render failed in ${screen.javaClass.name}", error)

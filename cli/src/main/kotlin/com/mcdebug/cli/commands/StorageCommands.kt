@@ -48,7 +48,7 @@ private fun normalizeSide(side: String?): String? = if (side == "null") null els
 
 // ---- storage group ----
 
-class StorageCommands : CliktCommand(name = "storage", help = "generic item/fluid/energy storage operations") {
+class StorageCommands : CliktCommand(name = "storage", help = "generic item/fluid/energy storage operations. `supportsInsertion/supportsExtraction` in a `get` answer: on Fabric they are the loader's capability flags, on NeoForge they are derived from the CURRENT tank/slot state (a full tank reports false even though it can be drained) — do not compare them across loaders") {
     override fun run() = Unit
 }
 
@@ -158,7 +158,7 @@ class StorageTransferCmd : CliktCommand(name = "transfer", help = "move resource
 
 // ---- fluid group ----
 
-class FluidCommands : CliktCommand(name = "fluid", help = "per-tank fluid operations (tank index); storage get/insert/extract with --handle fabric:fluid is the generic form") {
+class FluidCommands : CliktCommand(name = "fluid", help = "per-tank fluid operations (tank index; amount unit = server.status.fluidUnit, droplet on Fabric / mb on NeoForge); storage get/insert/extract with --handle fabric:fluid is the generic form") {
     override fun run() = Unit
 }
 
@@ -187,7 +187,7 @@ class FluidGetCmd : CliktCommand(name = "get", help = "read one tank part") {
     }
 }
 
-class FluidInsertCmd : CliktCommand(name = "insert", help = "insert fluid into a tank; amount unit is DROPLETS (81000 = 1 bucket = 3 bottles)") {
+class FluidInsertCmd : CliktCommand(name = "insert", help = "insert fluid into a tank; amount unit is LOADER-DEPENDENT — read server.status.fluidUnit: droplet (Fabric, 81000 = 1 bucket = 3 bottles) or mb (NeoForge, 1000 = 1 bucket)") {
     private val x by option("--x").int().required()
     private val y by option("--y").int().required()
     private val z by option("--z").int().required()
@@ -202,7 +202,7 @@ class FluidInsertCmd : CliktCommand(name = "insert", help = "insert fluid into a
     }
 }
 
-class FluidExtractCmd : CliktCommand(name = "extract", help = "extract fluid from a tank; amount unit is DROPLETS (81000 = 1 bucket = 3 bottles); extraction works in WHOLE-BOTTLE units (27000) — finer amounts are not extracted") {
+class FluidExtractCmd : CliktCommand(name = "extract", help = "extract fluid from a tank; amount unit is LOADER-DEPENDENT — read server.status.fluidUnit: droplet (Fabric, 81000 = 1 bucket = 3 bottles, and bottle-sized requests are rounded to 27000) or mb (NeoForge, 1000 = 1 bucket)") {
     private val x by option("--x").int().required()
     private val y by option("--y").int().required()
     private val z by option("--z").int().required()

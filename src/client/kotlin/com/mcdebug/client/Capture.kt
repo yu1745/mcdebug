@@ -3,7 +3,7 @@ package com.mcdebug.client
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
-import com.mcdebug.McDebugMod
+import com.mcdebug.McDebug
 import com.mcdebug.client.mixin.AbstractContainerScreenAccessor
 import com.mcdebug.client.mixin.NativeImageAccessor
 import com.mojang.blaze3d.platform.GlStateManager
@@ -373,7 +373,7 @@ object Capture {
             readCrop(frame, crop)
         } catch (t: Throwable) {
             // Driver without a usable read framebuffer path: full texture download + crop.
-            McDebugMod.LOGGER.debug("mcdebug crop readback failed, using full texture download: {}", t.toString())
+            McDebug.LOGGER.debug("mcdebug crop readback failed, using full texture download: {}", t.toString())
             downloadAndCrop(frame, crop)
         }
         return Shot(image, transform, frame.id, frame.tick, drawLog, boxes)
@@ -384,6 +384,7 @@ object Capture {
      * `--mode gui` capture of a 2560x1440 window no longer downloads 14 MiB and
      * copies it. Alpha is forced opaque exactly like Screenshot.takeScreenshot.
      */
+    @Suppress("CAST_NEVER_SUCCEEDS") // NativeImageAccessor is mixed into NativeImage at runtime
     private fun readCrop(frame: Frame, crop: Rect): NativeImage {
         RenderSystem.assertOnRenderThread()
         val image = NativeImage(NativeImage.Format.RGBA, crop.width, crop.height, false)
@@ -452,6 +453,7 @@ object Capture {
         return boxes
     }
 
+    @Suppress("CAST_NEVER_SUCCEEDS") // NativeImageAccessor is mixed into NativeImage at runtime
     private fun encode(request: Request) {
         val shot = synchronized(lock) {
             val image = request.shot ?: return // cleanup/close already reclaimed it

@@ -69,7 +69,7 @@ class RemoveCmd : CliktCommand(name = "remove", help = "remove a block (sets it 
     }
 }
 
-class FillBoxCmd : CliktCommand(name = "fill-box", help = "fill a box with one block state; chunks must ALREADY be loaded (unloaded chunk -> -32008), unlike get-region which auto-loads") {
+class FillBoxCmd : CliktCommand(name = "fill-box", help = "fill a box with one block state; chunks must ALREADY be loaded (unloaded chunk -> -32008), unlike get-region which auto-loads. To write into a far-away box, load it first with `world forceload --cx/--cz` (get-region's auto-load does NOT persist), then write") {
     private val from by option("--from", help = "box corner \"x,y,z\" (comma string)").required()
     private val to by option("--to", help = "box corner \"x,y,z\" (comma string)").required()
     private val block by option("--block").required()
@@ -84,7 +84,7 @@ class FillBoxCmd : CliktCommand(name = "fill-box", help = "fill a box with one b
     }
 }
 
-class ClearBoxCmd : CliktCommand(name = "clear-box", help = "fill a box with air; chunks must ALREADY be loaded (unloaded chunk -> -32008), unlike get-region which auto-loads") {
+class ClearBoxCmd : CliktCommand(name = "clear-box", help = "fill a box with air; chunks must ALREADY be loaded (unloaded chunk -> -32008), unlike get-region which auto-loads. Load a far-away box first with `world forceload --cx/--cz` (get-region's auto-load does NOT persist)") {
     private val from by option("--from", help = "box corner \"x,y,z\" (comma string)").required()
     private val to by option("--to", help = "box corner \"x,y,z\" (comma string)").required()
     private val flags by option("--flags").int()

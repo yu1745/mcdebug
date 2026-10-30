@@ -4,7 +4,6 @@ import com.google.gson.JsonObject
 import com.mcdebug.rpc.RpcErrors
 import com.mcdebug.rpc.RpcException
 import com.mojang.authlib.GameProfile
-import net.fabricmc.fabric.api.event.lifecycle.v1.ServerTickEvents
 import net.minecraft.world.entity.Entity
 import net.minecraft.network.Connection
 import net.minecraft.network.protocol.PacketFlow
@@ -21,6 +20,7 @@ import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
 import net.minecraft.server.level.ClientInformation
 import net.minecraft.server.network.CommonListenerCookie
+import com.mcdebug.loader.Loader
 
 /**
  * Fake ServerPlayer used by the interaction RPCs (world.placeAsPlayer,
@@ -93,6 +93,8 @@ internal object FakePlayerPool {
         return p
     }
 
+    // NeoForge deprecates ServerPlayer#mayfly (its own flight model); vanilla/Fabric do not.
+    @Suppress("DEPRECATION")
     fun create(server: MinecraftServer, world: ServerLevel, profile: GameProfile): ServerPlayer {
         val p = ServerPlayer(server, world, profile, ClientInformation.createDefault())
         // Resting state: survival + protected (a spawned player must never die or drift).
@@ -196,11 +198,11 @@ internal object FakePlayerPool {
         }
     }
 
-    /** Register the keepalive tick. Called from McDebugMod's onServerStarted hook. */
+    /** Register the keepalive tick through the loader seam. */
     fun install() {
         if (installed) return
         installed = true
-        ServerTickEvents.END_SERVER_TICK.register {
+        Loader.api.onServerTick {
             // Prune removed players (killed / world unloaded) and pin the rest in place.
             cache.entries.removeIf { (_, p) ->
                 if (p.isRemoved) { allSpawned.remove(p); true } else { pin(p); false }
@@ -246,6 +248,7 @@ internal object FakePlayerPool {
         val flySpeed: Float,
         val walkSpeed: Float
     ) {
+        @Suppress("DEPRECATION")
         fun restore(player: ServerPlayer) {
             player.abilities.invulnerable = invulnerable
             player.abilities.flying = flying
@@ -257,6 +260,7 @@ internal object FakePlayerPool {
         }
 
         companion object {
+            @Suppress("DEPRECATION")
             fun capture(player: ServerPlayer): AbilitiesSnapshot = AbilitiesSnapshot(
                 invulnerable = player.abilities.invulnerable,
                 flying = player.abilities.flying,

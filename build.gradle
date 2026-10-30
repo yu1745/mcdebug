@@ -175,6 +175,14 @@ tasks.register('verifyJarSelfContained') {
 			'com/mcdebug/client/RenderSettings.class',
 			'com/mcdebug/client/RenderMode.class',
 			'com/mcdebug/client/mixin/MinecraftRenderMixin.class',
+			'com/mcdebug/loader/LoaderApi.class',                    // loader 中立接缝（Fabric 与 NeoForge 各一份实现）
+			'com/mcdebug/loader/StorageApi.class',
+			'com/mcdebug/loader/fabric/FabricLoaderApi.class',
+			'com/mcdebug/loader/fabric/FabricStorageApi.class',
+			'com/mcdebug/client/ClientPlane.class',                 // 两个 loader 共用的客户端平面引导
+			'com/mcdebug/client/loader/ClientLoaderApi.class',
+			'com/mcdebug/client/loader/fabric/FabricClientLoaderApi.class',
+			'com/mcdebug/client/mixin/MixinTargets.class',          // 每个 loader 一份的注入点常量
 			'com/mcdebug/client/mixin/GameRendererMixin.class',
 			'com/mcdebug/client/mixin/AbstractContainerScreenAccessor.class',
 			'com/mcdebug/client/GuiClickOps.class',                // agent loop (0.7): settle/act/inspection
