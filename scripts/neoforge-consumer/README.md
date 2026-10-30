@@ -21,6 +21,11 @@ java -jar "$REPO/mcdebug-cli.jar" jar --loader neoforge --output "$F/consumer/ru
 for j in $(find ~/.gradle/caches/modules-2/files-2.1/thedarkcolour -name '*5.12.0.jar' | grep -v sources); do
   cp "$j" "$F/consumer/run/mods/"
 done
+
+# ↑ 必须四个一起拷：KotlinForForge 5.x 把 language provider 拆在 kffmod/kfflib/kfflang 里，
+#   只放 kotlinforforge-*.jar 会在启动时失败：
+#     Mod File …/mcdebug-neoforge-0.8.0.jar needs language provider kotlinforforge:5.10 or above
+#     We have found -            ← 这行“空的已找到列表”就是 KFF 没加载的特征（真机踩过）
 printf 'eula=true\nonline-mode=false\nserver-port=0\nspawn-protection=0\nmax-players=1\n' > "$F/consumer/run/eula.txt"
 printf 'eula=true\nonline-mode=false\nserver-port=0\nspawn-protection=0\nmax-players=1\n' > "$F/consumer/run/server.properties"
 
