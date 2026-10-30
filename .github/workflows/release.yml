@@ -62,4 +62,4 @@ jobs:
             mcdebug-cli.jar \
             mcdebug-cli.jar.sha256 \
             --title "${GITHUB_REF_NAME}" \
-            --generate-notes
+            --notes-from-tag   # tag 的 annotated message 就是 Release 说明（见 AGENTS.md §10）

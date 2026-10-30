@@ -240,9 +240,9 @@ node scripts/set-version.mjs X.Y.Z
 □ ./gradlew build :cli:copyCliJar      ← 契约测试 + 单测 + fat jar（内嵌同版本 mod jar）
 □ java -jar mcdebug-cli.jar --version  ← 必须输出 X.Y.Z
 □ git commit -m "vX.Y.Z: ..."
-□ git tag -a vX.Y.Z -m "..."
+□ git tag -a vX.Y.Z -m "..."   ← 这段 message 会成为 Release 说明（release.yml 用 --notes-from-tag），写清这一版装哪个 jar
 □ git push origin 1.21.1 && git push origin vX.Y.Z   ← 1.21.1 是活跃分支（main = 归档的 1.20.1 线）
-□ Release 页有 mcdebug-X.Y.Z.jar / mcdebug-cli.jar 及 .sha256（release.yml 生成；tag 与 mod_version 不符会失败）
+□ Release 页有 mcdebug-X.Y.Z.jar / mcdebug-neoforge-X.Y.Z.jar / mcdebug-cli.jar 及各自 .sha256（release.yml 生成；tag 与 mod_version 不符会失败）
 ```
 
 ### 踩过的坑
