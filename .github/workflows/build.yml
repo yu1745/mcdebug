@@ -22,7 +22,8 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: Artifacts
-          # mod jar (+ sources) and the CLI fat jar, which carries the same mod jar
+          # both mod jars (Fabric + NeoForge, + sources) and the CLI fat jar, which carries both
           path: |
             build/libs/
+            neoforge/build/libs/
             mcdebug-cli.jar
