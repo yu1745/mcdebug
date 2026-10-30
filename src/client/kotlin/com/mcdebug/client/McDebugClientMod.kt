@@ -58,12 +58,17 @@ class McDebugClientMod : ClientModInitializer {
         ClientLifecycleEvents.CLIENT_STOPPING.register { client ->
             GuiInputOps.close(client)
             GuiSettle.close()
+            ClientReflectOps.clear()
             Capture.close()
             ClientTasks.close()
             ClientInfo.close()
         }
 
-        val dispatcher = ClientRpcDispatcher().apply { registerGroup("gui", GuiOps) }
+        val dispatcher = ClientRpcDispatcher().apply {
+            registerGroup("gui", GuiOps)
+            // gui.reflect.*: the server plane's reflection core in this JVM (Screen, widgets, client caches).
+            registerGroup("gui", ClientReflectOps)
+        }
         val mismatch = contractMismatch(dispatcher.methods())
         ClientInfo.setContractMismatch(mismatch)
         if (mismatch.isEmpty()) {

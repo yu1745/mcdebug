@@ -99,6 +99,8 @@ object Methods {
         "gui.key", "gui.type", "gui.drag", "gui.disconnect",
         "gui.act", "gui.settle", "gui.reinit", "gui.problems", "gui.hotswap",
         "gui.hover", "gui.scroll", "gui.openScreen", "gui.reloadScreen",
+        "gui.reflect.resolve", "gui.reflect.get", "gui.reflect.set", "gui.reflect.call",
+        "gui.reflect.new", "gui.reflect.refs", "gui.reflect.release", "gui.reflect.mappings",
     )
 
     /** 客户端平面全部方法名。 */

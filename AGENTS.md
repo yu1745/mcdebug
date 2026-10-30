@@ -231,6 +231,7 @@ node scripts/set-version.mjs X.Y.Z
   - `path`：`a.b[0]["k"]`，段=字段→无参方法→getX/isX，`name()` 仅方法；**无参数、无表达式、无 eval**，要参数用 `reflect.call`。
   - ref 表：每平面全局 LRU（1024）、同一对象同一 id、停服清空。**刻意不绑连接**：CLI 每条命令一个连接，绑了 ref 跨命令即失效。对象集合整体一个 ref + `size`/`items` 摘要（原来每个元素一个强引用 ref、永不释放）。
   - 新 `reflect.set`（非 final 字段，数字按字段类型并做范围检查，enum 用常量名，返回 before/after）；重载按匹配度打分（精确 < 装箱/子类 < 拓宽 < 收窄可容纳的整数字面量），平局报错要求 `argTypes`；整数参数保留 long 精度（原来先转 double）；`InvocationTargetException` 展开为目标异常。
+  - **客户端平面 `gui.reflect.*`**（`src/client/.../ClientReflectOps.kt`）：同一 [ReflectCore]，root 换成 `minecraft`/`screen`/`player`/`level`/`server`，一律 `ClientTasks.onClient` 在客户端线程执行；ref 表按 client 实例重建，`CLIENT_STOPPING` 清空（否则 Screen/控件图被钉在内存）。契约 `Methods.CLIENT_METHODS` 已加 8 个 `gui.reflect.*`，客户端启动自检会双向核对。CLI 侧同一套 `reflect` 子命令加 `--client`，经 `withPlaneFor` 路由到 `gui.` 前缀。ItemStack 的友好展示改为 ReflectCore 的 `itemSummary` 钩子（服务端带 NBT，客户端只有 id+count），core 本身不依赖服务端 util。
 
 - **0.6.3 服务端平面整理**
   - reflect 映射表：删掉打包的 1.20.1 yarn/mojang 表（1.6MB，类名在 1.21.1 已对不上，如 BlockEntity 混淆名 `czn`→`dqh`），`generateReflectMappings` 构建时从 Loom 的 1.21.1 映射生成 intermediary↔Mojang 单表（~620KB）；运行时按 `currentRuntimeNamespace` 决定翻译方向（dev=Mojang、生产=intermediary），成员沿继承链查找，同名重载给出多个候选按参数挑。输出字段 `yarnClass/yarnName` → `mojangClass/mojangName`。顺带修了 `world.useItemHold` 在 dev 里找不到 `updatingUsingItem` 的问题（原来按 yarn 名 `tickActiveItemStack` 找）。

@@ -8,8 +8,6 @@ import com.google.gson.JsonPrimitive
 import com.mcdebug.rpc.RpcErrors
 import com.mcdebug.rpc.RpcException
 import com.mcdebug.util.Mappings
-import com.mcdebug.util.NbtJson
-import com.mcdebug.util.ServerContext
 import java.lang.reflect.Executable
 import java.lang.reflect.Field
 import java.lang.reflect.Method
@@ -370,12 +368,7 @@ class ReflectCore(
         if (value == null) return JsonObject().apply { addProperty("\$null", true) }
         val v = unwrapOptional(value) ?: return JsonPrimitive("<empty Optional>")
         simpleJson(v)?.let { return it }
-        if (v is net.minecraft.world.item.ItemStack) return JsonObject().apply {
-            addProperty("\$ref", refOf(v))
-            addProperty("item", v.item.toString())
-            addProperty("count", v.count)
-            ServerContext.stackNbt(v)?.let { add("nbt", NbtJson.toJson(it)) }
-        }
+        (itemSummary(v))?.let { return it }
         val elements: List<Any?>? = when {
             v is Collection<*> -> v.take(LIST_LIMIT + 1)
             v is Array<*> -> v.take(LIST_LIMIT + 1)
@@ -417,6 +410,9 @@ class ReflectCore(
             }
         }
     }
+
+    /** Item stacks read better with their id/count; planes may override ([itemSummary]). */
+    var itemSummary: (Any) -> JsonElement? = { null }
 
     private fun summary(x: Any?): JsonElement = when {
         x == null -> JsonNull.INSTANCE

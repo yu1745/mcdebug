@@ -25,7 +25,7 @@ class ReflectCommands : CliktCommand(
 
 /** Shared base + path options: the object a reflect command works on. */
 class ReflectTarget : OptionGroup("Target (one of --root/--ref/--class, then --path)") {
-    val root by option("--root", help = "server | level | be | entity | player")
+    val root by option("--root", help = "server | level | be | entity | player (server plane); minecraft | screen | player | level | server (--client)")
     val ref by option("--ref", help = "object ref from an earlier result").long()
     val className by option("--class", help = "class for static members (Mojang, intermediary or mod name)")
     val path by option("--path", help = "e.g. 'overworld.dayTime' or 'items[0]'")
@@ -33,6 +33,9 @@ class ReflectTarget : OptionGroup("Target (one of --root/--ref/--class, then --p
     val dim by option("--dim", help = "dimension for --root level/be (default overworld)")
     val uuid by option("--uuid", help = "entity uuid for --root entity")
     val name by option("--name", help = "player name for --root player (default: first player)")
+
+    /** `--client` sends the call to `gui.reflect.*` (same options, client JVM, client RPC thread). */
+    val client by option("--client", help = "run on the client plane (roots: minecraft|screen|player|level|server)").flag()
 
     fun params(): LinkedHashMap<String, Any?> {
         val bases = listOfNotNull(root, ref, className)
@@ -54,14 +57,20 @@ class ReflectTarget : OptionGroup("Target (one of --root/--ref/--class, then --p
     }
 }
 
+/** `reflect.*` (server plane) or `gui.reflect.*` (--client, same core in the client JVM). */
+private fun CliktCommand.reflectCall(target: ReflectTarget, suffix: String, obj: MutableMap<String, Any?>) {
+    val method = if (target.client) "gui.reflect.$suffix" else "reflect.$suffix"
+    withPlaneFor(rootCli(), method) { c -> printJson(c.call(method, gson.toJsonTree(obj))) }
+}
+
 class ReflectResolveCmd : CliktCommand(name = "resolve", help = "class of the target: runtime/Mojang name, superclass, fields, methods (overloads listed separately)") {
     private val target by ReflectTarget()
     private val members by option("--members").flag()
 
-    override fun run() = withApi { api ->
+    override fun run() {
         val obj = target.params()
         obj["members"] = members
-        printJson(api.rpc.call("reflect.resolve", gson.toJsonTree(obj)))
+        reflectCall(target, "resolve", obj)
     }
 }
 
@@ -69,10 +78,10 @@ class ReflectGetCmd : CliktCommand(name = "get", help = "read the value at --pat
     private val target by ReflectTarget()
     private val field by option("--field", help = "last segment, kept for compatibility: same as appending .field to --path")
 
-    override fun run() = withApi { api ->
+    override fun run() {
         val obj = target.params()
         field?.let { obj["field"] = it }
-        printJson(api.rpc.call("reflect.get", gson.toJsonTree(obj)))
+        reflectCall(target, "get", obj)
     }
 }
 
@@ -81,11 +90,11 @@ class ReflectSetCmd : CliktCommand(name = "set", help = "write a non-final field
     private val field by option("--field").required()
     private val value by option("--value", help = "JSON value: 5, true, \"text\", {\"\$ref\":N}, {\"enum\":..,\"name\":..}").required()
 
-    override fun run() = withApi { api ->
+    override fun run() {
         val obj = target.params()
         obj["field"] = field
         obj["value"] = parseJsonArg(value)
-        printJson(api.rpc.call("reflect.set", gson.toJsonTree(obj)))
+        reflectCall(target, "set", obj)
     }
 }
 
@@ -95,12 +104,12 @@ class ReflectCallCmd : CliktCommand(name = "call", help = "invoke a method on th
     private val args by option("--args", help = "args array JSON or @file; an arg may be {\"\$ref\":N} or {\"root\":..,\"path\":..}")
     private val argTypes by option("--arg-types", help = "comma-separated parameter types to pick an overload, e.g. int,long")
 
-    override fun run() = withApi { api ->
+    override fun run() {
         val obj = target.params()
         obj["method"] = method
         obj["args"] = args?.let { parseJsonArg(it) }
         argTypes?.let { t -> obj["argTypes"] = t.split(",").map(String::trim) }
-        printJson(api.rpc.call("reflect.call", gson.toJsonTree(obj)))
+        reflectCall(target, "call", obj)
     }
 }
 
@@ -109,16 +118,22 @@ class ReflectNewCmd : CliktCommand(name = "new", help = "construct an object: --
     private val args by option("--args", help = "constructor args array JSON or @file")
     private val argTypes by option("--arg-types", help = "comma-separated parameter types to pick a constructor")
 
-    override fun run() = withApi { api ->
+    private val client by option("--client", help = "client plane (gui.reflect)").flag()
+
+    override fun run() {
+        val method = if (client) "gui.reflect.new" else "reflect.new"
         val obj = linkedMapOf<String, Any?>("class" to className, "args" to args?.let { parseJsonArg(it) })
         argTypes?.let { t -> obj["argTypes"] = t.split(",").map(String::trim) }
-        printJson(api.rpc.call("reflect.new", gson.toJsonTree(obj)))
+        withPlaneFor(rootCli(), method) { c -> printJson(c.call(method, gson.toJsonTree(obj))) }
     }
 }
 
 class ReflectRefsCmd : CliktCommand(name = "refs", help = "list live object references") {
-    override fun run() = withApi { api ->
-        printJson(api.rpc.call("reflect.refs", null))
+    private val client by option("--client", help = "client plane (gui.reflect)").flag()
+
+    override fun run() {
+        val method = if (client) "gui.reflect.refs" else "reflect.refs"
+        withPlaneFor(rootCli(), method) { c -> printJson(c.call(method, null)) }
     }
 }
 
@@ -126,10 +141,13 @@ class ReflectReleaseCmd : CliktCommand(name = "release", help = "release an obje
     private val ref by option("--ref").long()
     private val all by option("--all").flag()
 
-    override fun run() = withApi { api ->
+    private val client by option("--client", help = "client plane (gui.reflect)").flag()
+
+    override fun run() {
         if ((ref == null) == !all) throw UsageError("give --ref N or --all")
+        val method = if (client) "gui.reflect.release" else "reflect.release"
         val obj = if (all) mapOf<String, Any?>("all" to true) else mapOf<String, Any?>("ref" to ref)
-        printJson(api.rpc.call("reflect.release", gson.toJsonTree(obj)))
+        withPlaneFor(rootCli(), method) { c -> printJson(c.call(method, gson.toJsonTree(obj))) }
     }
 }
 

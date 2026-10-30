@@ -53,7 +53,19 @@ object ReflectOps : RpcHandlerGroup {
 
     private var server: MinecraftServer? = null
 
-    private val core = ReflectCore(::root, ROOTS)
+    private val core = ReflectCore(::root, ROOTS).apply {
+        // Readable item stacks (id, count, custom NBT) instead of a bare toString.
+        itemSummary = { v ->
+            (v as? net.minecraft.world.item.ItemStack)?.let {
+                JsonObject().apply {
+                    addProperty("\$ref", refOf(it))
+                    addProperty("item", it.item.toString())
+                    addProperty("count", it.count)
+                    ServerContext.stackNbt(it)?.let { nbt -> add("nbt", com.mcdebug.util.NbtJson.toJson(nbt)) }
+                }
+            }
+        }
+    }
 
     /** Drop every ref (server stopping): they would pin the old world in memory. */
     fun clear() {

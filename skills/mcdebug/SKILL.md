@@ -146,6 +146,10 @@ mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeo
   field (numbers take the field's type) and prints before/after; an ambiguous overload in
   `reflect call` asks for `--arg-types int,long`. It bypasses the block's own logic: no sync,
   no `setChanged`; prefer the normal APIs when they exist.
+  Client-side state (the open Screen, widgets, client caches) is the same command with
+  `--client`, rooted at `minecraft|screen|player|level|server`; e.g.
+  `reflect get --client --root screen --path 'children[0].message.string'`. Its refs live in
+  the client process, so `--client` must be on every call that uses one.
 - `screen.*` is a **server-side fake-player menu** (slot JSON, no pixels). Pixels only come from `gui.*`.
 
 ## 3. Client plane: the GUI loop

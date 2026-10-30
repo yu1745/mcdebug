@@ -71,6 +71,7 @@ fun withClientPlane(cli: McDebugCli, block: (RpcClient) -> Unit) {
  * `raw` 用这个，避免 agent 为了调一个 gui 方法还要记住多一层开关。
  */
 fun withPlaneFor(cli: McDebugCli, method: String, block: (RpcClient) -> Unit) {
+    // reflect.* exists on both planes: `gui.reflect.*` is the client one.
     if (method.startsWith("gui.")) withClientPlane(cli, block) else withClient(cli, block)
 }
 
