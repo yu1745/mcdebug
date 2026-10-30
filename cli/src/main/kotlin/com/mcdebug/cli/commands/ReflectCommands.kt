@@ -17,7 +17,7 @@ class ReflectCommands : CliktCommand(
     help = "arbitrary runtime reflection on the server plane. Start from --root (server|level|be|entity|player), " +
         "--ref N or --class (statics), then walk --path: dot segments, `name` = field, else no-arg method, else " +
         "getName/isName; `name()` = method; `[3]` index; `[\"key\"]` map key; no arguments or expressions. " +
-        "Mojang and intermediary names both work. Objects come back as {\"\$ref\":N}; refs are kept " +
+        "Mojang and intermediary names both work. Objects come back as {\"ref\":N}; refs are kept " +
         "(LRU, max 1024) across commands until released or the server stops",
 ) {
     override fun run() = Unit
@@ -88,7 +88,7 @@ class ReflectGetCmd : CliktCommand(name = "get", help = "read the value at --pat
 class ReflectSetCmd : CliktCommand(name = "set", help = "write a non-final field of the target; numbers take the field's type (range-checked), enum fields take the constant name; prints before/after") {
     private val target by ReflectTarget()
     private val field by option("--field").required()
-    private val value by option("--value", help = "JSON value: 5, true, \"text\", {\"\$ref\":N}, {\"enum\":..,\"name\":..}").required()
+    private val value by option("--value", help = "JSON value: 5, true, \"text\", {\"ref\":N}, or {\"enum\":..,\"name\":..}").required()
 
     override fun run() {
         val obj = target.params()
@@ -101,7 +101,7 @@ class ReflectSetCmd : CliktCommand(name = "set", help = "write a non-final field
 class ReflectCallCmd : CliktCommand(name = "call", help = "invoke a method on the target; the best-fitting overload is chosen, ties need --arg-types") {
     private val target by ReflectTarget()
     private val method by option("--method").required()
-    private val args by option("--args", help = "args array JSON or @file; an arg may be {\"\$ref\":N} or {\"root\":..,\"path\":..}")
+    private val args by option("--args", help = "args array JSON or @file; an arg may be {\"ref\":N} or {\"root\":..,\"path\":..}")
     private val argTypes by option("--arg-types", help = "comma-separated parameter types to pick an overload, e.g. int,long")
 
     override fun run() {

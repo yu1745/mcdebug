@@ -150,6 +150,12 @@ mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeo
   `--client`, rooted at `minecraft|screen|player|level|server`; e.g.
   `reflect get --client --root screen --path 'children[0].message.string'`. Its refs live in
   the client process, so `--client` must be on every call that uses one.
+  Client block entities carry **no items**: a client-side chest/machine BE always reads empty
+  even when the GUI shows contents (vanilla syncs inventories into the open menu, not the BE).
+  For what the client shows use `--root screen --path 'menu.slots[N].item'`; for truth use the
+  server plane. Server → client state is a packet behind: `gui settle` before reading.
+  `reflect set` on the client also skips `options.txt`: `OptionInstance.set` changes the live
+  value (visible in `gui status`/Video Settings) but nothing is written to disk.
 - `screen.*` is a **server-side fake-player menu** (slot JSON, no pixels). Pixels only come from `gui.*`.
 
 ## 3. Client plane: the GUI loop
@@ -185,7 +191,13 @@ mcdebug gui problems --brief                             # WARN/ERROR log + caug
 - `gui key`/`type` go to the current Screen only (no Screen: `-32020`). `type` appends to the
   focused EditBox, and boxes often start pre-filled (an anvil shows the item's name): use
   `gui type --text X --clear` to replace. `handled:false` means nothing took the characters (no
-  focus, or a disabled box, e.g. an anvil with an empty input slot).
+  focus, or a disabled box, e.g. an anvil with an empty input slot). Typing can also succeed
+  (`handled:true`, the value sets) while the container still refuses the result — an anvil
+  needs XP for a rename: `click --slot 2` then reports `changed:false`. Judge by the click
+  report, not by `handled`.
+- Inside `gui act`, a follow-up view that fails (e.g. `--shot gui` on a screen that just
+  navigated to options) no longer discards the action: the result is kept and the failure
+  arrives as `screenshotError`/`screenError` with `ok:false`.
 - `--text` matches substrings across the whole Screen: a label also inside a button ("New World"
   in "Create New World") hits the first widget. Narrow the screen first (a search box), pass
   `--index`, or click the row's `--gui X,Y` from `gui screen`/a screenshot.
@@ -240,7 +252,9 @@ into the JVM, `false` = it was already loaded (normal, not a failure).
 `mcdebug gui compare --expected golden.png --actual new.png --ignore x,y,w,h --report r.html`
 (exit 1 on mismatch; `--ignore` is in PNG pixels, w and h > 0; read `$?` without a pipe or with
 `set -o pipefail`, `| head` hides it). Only an explicit `--accept` writes the golden.
-`--mode gui` crops to the GUI rectangle, but translucent texture edges still blend with the world
+`--mode gui` crops to the **container** GUI rectangle, so it needs an open container Screen
+(chest/furnace/inventory); on options-style Screens it fails (`NO_CONTAINER_SCREEN`) — use
+`--mode window` there. Even then translucent texture edges still blend with the world
 behind it: if two identical shots differ by 1 per channel, use `--channel-tolerance 2`. `--annotate`
 with `--out x.png` also writes `x.annotated.png` (copies: `path` stays under
 `<gameDir>/mcdebug/screenshots/`, `copiedTo` is yours). `--hash-only` is the cheap "did it change?" probe.

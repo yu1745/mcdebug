@@ -58,7 +58,7 @@ object ClientReflectOps : ClientRpcGroup {
         itemSummary = { v ->
             (v as? net.minecraft.world.item.ItemStack)?.let {
                 JsonObject().apply {
-                    addProperty("\$ref", refOf(it))
+                    addProperty("ref", refOf(it))
                     addProperty("item", it.item.toString())
                     addProperty("count", it.count)
                 }
@@ -168,7 +168,7 @@ object ClientReflectOps : ClientRpcGroup {
         val t = c.target(p)
         if (t.isNull) throw RpcException(RpcErrors.INVALID_PARAMS, "object at path is null")
         val field = c.findField(t.clazz, name)
-            ?: throw RpcException(RpcErrors.INVALID_PARAMS, "field not found: $name in ${t.clazz.name}")
+            ?: throw RpcException(RpcErrors.INVALID_PARAMS, "field not found: $name in ${t.clazz.name}" + c.fieldNameHint(name))
         val (before, after) = c.writeField(field, t.instance, name, value)
         return JsonObject().apply {
             addProperty("field", name)

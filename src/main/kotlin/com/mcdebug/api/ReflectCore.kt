@@ -86,7 +86,10 @@ class ReflectCore(
         var clazz: Class<*>
         var instance: Any?
         when {
-            p.has("ref") -> { instance = deref(p.requireLong("ref")); clazz = instance.javaClass }
+            p.has("ref") || p.has("\$ref") -> {
+                val id = (p.get("ref") ?: p.get("\$ref"))!!.asLong
+                instance = deref(id); clazz = instance.javaClass
+            }
             p.has("root") -> {
                 val name = p.requireString("root")
                 instance = roots(name, p) ?: throw RpcException(RpcErrors.INVALID_PARAMS, "root $name is not available")
@@ -243,6 +246,12 @@ class ReflectCore(
         return out
     }
 
+    /** A field name that looks like a path is the usual cause of "field not found". */
+    fun fieldNameHint(userName: String): String =
+        if (userName.any { it == '.' || it == '(' || it == '[' }) {
+            "; '$userName' looks like a path — use --path for nested access and --field for one name"
+        } else ""
+
     fun readField(field: Field, instance: Any?, userName: String): Any? {
         field.isAccessible = true
         if (Modifier.isStatic(field.modifiers)) return field.get(null)
@@ -394,7 +403,7 @@ class ReflectCore(
             return JsonObject().apply { v.forEach { (k, x) -> add(k.toString(), x?.let(::simpleJson) ?: JsonNull.INSTANCE) } }
         }
         return JsonObject().apply {
-            addProperty("\$ref", refOf(v))
+            addProperty("ref", refOf(v))
             addProperty("class", v.javaClass.name)
             Mappings.mojangClassName(v.javaClass)?.takeIf { it != v.javaClass.name }?.let { addProperty("mojangClass", it) }
             if (size >= 0) {
@@ -467,7 +476,9 @@ class ReflectCore(
         }
         if (el.isJsonObject) {
             val obj = el.asJsonObject
-            if (obj.has("\$ref")) return deref(obj.get("\$ref").asLong).let { it.javaClass to it }
+            // `ref` (what results print) and the older `$ref` both name an object from the ref table.
+            val refId = obj.get("ref") ?: obj.get("\$ref")
+            if (refId != null) return deref(refId.asLong).let { it.javaClass to it }
             if (obj.has("root") || obj.has("path")) {
                 val t = target(obj)
                 return t.instance?.let { it.javaClass to it } ?: (null to null)
@@ -498,7 +509,7 @@ class ReflectCore(
                 items.forEachIndexed { i, (h, v) -> java.lang.reflect.Array.set(arr, i, coerce(h, v, comp) ?: v) }
                 return arr.javaClass to arr
             }
-            throw RpcException(RpcErrors.INVALID_PARAMS, "object arg must have \$ref, root/path, new, class, enum, or array")
+            throw RpcException(RpcErrors.INVALID_PARAMS, "object arg must have ref, root/path, new, class, enum, or array")
         }
         throw RpcException(RpcErrors.INVALID_PARAMS, "unsupported arg: $el")
     }

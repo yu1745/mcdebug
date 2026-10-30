@@ -336,8 +336,12 @@ object Capture {
         val crop = if (mode == "gui") {
             if (frame.overlay != null) throw RpcException(RpcErrors.CLIENT_NOT_READY,
                 "GUI is hidden by ${frame.overlay}; wait for loading/reload to finish", reason("GUI_OBSCURED"))
+            // Not "no Screen": there may be a perfectly good non-container Screen (options,
+            // video settings). mode=gui crops to a container's GUI rectangle, so say that.
             val gui = frame.container ?: throw RpcException(RpcErrors.SCREEN_NOT_FOUND,
-                "mode=gui needs an open container screen (current screen: ${frame.screen})", reason("SCREEN_NOT_FOUND"))
+                "mode=gui crops to a container screen's GUI rectangle; the open screen " +
+                    "(${frame.screen}) has none — use --mode window (or --mode gui on a chest/furnace screen)",
+                reason("NO_CONTAINER_SCREEN"))
             if (gui.width <= 0 || gui.height <= 0) throw RpcException(RpcErrors.INVALID_PARAMS,
                 "container has an empty GUI rectangle", reason("EMPTY_GUI_CROP"))
             val clipped = CaptureGeometry.clipGuiRect(frame.width, frame.height, frame.scaleX, frame.scaleY,

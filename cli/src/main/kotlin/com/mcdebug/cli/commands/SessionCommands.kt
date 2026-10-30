@@ -37,8 +37,8 @@ internal class SessionStartCmd(
     private val world by option("--world", metavar = "SAVE", help = "existing saves/ directory name, not display name; omitted = main menu")
     private val render by option("--render", help = "client render mode").choice("continuous", "demand", "gui-only").default("demand")
     private val display by option("--display", help = "DISPLAY for the child client; omitted = inherited")
-    private val width by option("--width", help = "window width").int().default(854)
-    private val height by option("--height", help = "window height").int().default(480)
+    private val width by option("--width", help = "window width (default 854; the project's loom.runs.client programArgs win, and the record repeats what was requested)").int().default(854)
+    private val height by option("--height", help = "window height (default 480; see --width)").int().default(480)
     private val waitSeconds by option("--wait-seconds", help = "finite startup/readiness deadline in seconds").long().default(180L)
 
     override fun run() {

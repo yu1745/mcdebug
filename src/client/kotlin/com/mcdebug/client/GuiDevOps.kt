@@ -81,21 +81,30 @@ object GuiDevOps : ClientRpcGroup {
             else ClientTasks.onClient(client) { GuiSettle.settle(client, settle).thenApply<JsonObject?> { it } }.thenCompose { it }
         }
         // Screenshot first: it forces a fresh frame, so hover state in the screen view matches the image.
-        val image: CompletableFuture<JsonElement?> = settled.thenCompose {
+        // A failed follow-up view must not discard a successful action: the click already
+        // happened (typical: it navigated to a non-container Screen, where `mode=gui` cannot
+        // crop). Keep the action report and record the view failure next to it.
+        val image: CompletableFuture<Pair<JsonElement?, Throwable?>> = settled.thenCompose {
             if (shot == null) CompletableFuture.completedFuture(null)
             else Capture.screenshot(client, shot).thenApply<JsonElement?> { it }
-        }
-        val screen = ClientTasks.thenOnClient(client, image) { if (wantScreen) GuiScreenOps.snapshot(client) else null }
+        }.handle { value, error -> value to error?.let(::unwrap) }
+        val screen: CompletableFuture<Pair<JsonObject?, Throwable?>> = ClientTasks.thenOnClient(client, image) {
+            if (wantScreen) GuiScreenOps.snapshot(client) else null
+        }.handle { value, error -> value to error?.let(::unwrap) }
         return ClientTasks.thenOnClient(client, screen) { _ ->
-            val picture = image.join()
+            val (picture, pictureError) = image.join()
+            val (screenView, screenError) = screen.join()
             val (result, error) = outcome.join() // all stages above are complete
             JsonObject().apply {
                 addProperty("ok", error == null)
                 addProperty("action", action)
                 if (error == null) add("result", result ?: JsonNull.INSTANCE) else add("error", errorJson(error))
                 settled.join()?.let { add("settle", it) }
-                screen.join()?.let { add("screen", it) }
+                screenView?.let { add("screen", it) }
                 picture?.let { add("screenshot", it) }
+                // View failures are reported, not thrown: the action itself stands.
+                if (pictureError != null) { addProperty("ok", false); add("screenshotError", errorJson(pictureError)) }
+                if (screenError != null) { addProperty("ok", false); add("screenError", errorJson(screenError)) }
                 addProperty("ticks", ClientTasks.currentTick() - startTick)
                 add("problems", ProblemLog.buffer.since(cursor, false, 50).toJson())
                 ScreenGuard.currentFault(client)?.let { add("screenFault", it) }

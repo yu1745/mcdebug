@@ -231,6 +231,13 @@ node scripts/set-version.mjs X.Y.Z
   - `path`：`a.b[0]["k"]`，段=字段→无参方法→getX/isX，`name()` 仅方法；**无参数、无表达式、无 eval**，要参数用 `reflect.call`。
   - ref 表：每平面全局 LRU（1024）、同一对象同一 id、停服清空。**刻意不绑连接**：CLI 每条命令一个连接，绑了 ref 跨命令即失效。对象集合整体一个 ref + `size`/`items` 摘要（原来每个元素一个强引用 ref、永不释放）。
   - 新 `reflect.set`（非 final 字段，数字按字段类型并做范围检查，enum 用常量名，返回 before/after）；重载按匹配度打分（精确 < 装箱/子类 < 拓宽 < 收窄可容纳的整数字面量），平局报错要求 `argTypes`；整数参数保留 long 精度（原来先转 double）；`InvocationTargetException` 展开为目标异常。
+  - **帮助文本禁 `$`**：clikt 用 mordant 渲染帮助，一段文本里两个 `$` 会被当数学公式解析并抛
+    `Unexpected token when parsing inlines`；父命令打印子命令短帮助，所以**任何一处** `$` 都会让
+    `mcdebug --help`/`-h` 整体退出 1（0.6.3 真机踩到，ref 对象写成 `{"$ref":N}` 导致）。现在 ref 对象
+    统一叫 `{"ref":N}`（`$ref` 仍接受），并有 `HelpRenderingTest` 遍历整棵命令树渲染帮助兜底。
+  - **gui.act 的后续视图失败不丢动作**：截图/`screen` 失败改为记录在 `screenshotError`/`screenError`
+    里（`ok:false`），动作本身的结果照常返回。`mode=gui` 需要容器 Screen，非容器时错误码仍是
+    `SCREEN_NOT_FOUND`，但 reason 改为 `NO_CONTAINER_SCREEN` 并提示 `--mode window`。
   - **客户端平面 `gui.reflect.*`**（`src/client/.../ClientReflectOps.kt`）：同一 [ReflectCore]，root 换成 `minecraft`/`screen`/`player`/`level`/`server`，一律 `ClientTasks.onClient` 在客户端线程执行；ref 表按 client 实例重建，`CLIENT_STOPPING` 清空（否则 Screen/控件图被钉在内存）。契约 `Methods.CLIENT_METHODS` 已加 8 个 `gui.reflect.*`，客户端启动自检会双向核对。CLI 侧同一套 `reflect` 子命令加 `--client`，经 `withPlaneFor` 路由到 `gui.` 前缀。ItemStack 的友好展示改为 ReflectCore 的 `itemSummary` 钩子（服务端带 NBT，客户端只有 id+count），core 本身不依赖服务端 util。
 
 - **0.6.3 服务端平面整理**

@@ -43,7 +43,7 @@ import java.util.concurrent.CompletableFuture
  *   reflect.refs / reflect.release { "ref" | "all": true } / reflect.mappings
  *
  * Plain values (numbers, strings, enums, ids, lists/maps of them) are returned
- * inline; objects come back as { "\$ref": N, "class", "toString" }, and object
+ * inline; objects come back as { "ref": N, "class", "toString" }, and object
  * collections as one ref with `size` and a summary of `items`. Minecraft is not
  * frozen: treat every value as a snapshot.
  */
@@ -58,7 +58,7 @@ object ReflectOps : RpcHandlerGroup {
         itemSummary = { v ->
             (v as? net.minecraft.world.item.ItemStack)?.let {
                 JsonObject().apply {
-                    addProperty("\$ref", refOf(it))
+                    addProperty("ref", refOf(it))
                     addProperty("item", it.item.toString())
                     addProperty("count", it.count)
                     ServerContext.stackNbt(it)?.let { nbt -> add("nbt", com.mcdebug.util.NbtJson.toJson(nbt)) }
@@ -205,7 +205,7 @@ object ReflectOps : RpcHandlerGroup {
         val t = core.target(p)
         if (t.isNull) throw RpcException(RpcErrors.INVALID_PARAMS, "object at path is null")
         val field = core.findField(t.clazz, name)
-            ?: throw RpcException(RpcErrors.INVALID_PARAMS, "field not found: $name in ${t.clazz.name}")
+            ?: throw RpcException(RpcErrors.INVALID_PARAMS, "field not found: $name in ${t.clazz.name}" + core.fieldNameHint(name))
         val (before, after) = core.writeField(field, t.instance, name, value)
         return JsonObject().apply {
             addProperty("field", name)

@@ -63,8 +63,17 @@ class ReflectCoreTest {
         assertTrue(c.toJson(box.numbers).isJsonArray)
         val items = c.toJson(box.items).asJsonObject
         assertEquals(2, items.get("size").asInt)
-        assertTrue(items.has("\$ref"))
+        assertTrue(items.has("ref"))
         assertEquals(1, c.refsJson().get("count").asInt)
+    }
+
+    @Test
+    fun `both ref and dollar-ref name an object`() {
+        val c = core()
+        val inner = Inner(4)
+        val id = c.refOf(inner)
+        assertEquals(inner, c.target(params("""{"ref":""" + id + "}")).instance)
+        assertEquals(inner, c.target(params("{\"\$ref\":" + id + "}")).instance)
     }
 
     @Test
