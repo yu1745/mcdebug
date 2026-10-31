@@ -86,7 +86,9 @@ class NeoForgeLoaderApi : LoaderApi {
         hitResult: EntityHitResult?,
     ): InteractionResult {
         val event = if (hitResult != null) {
-            CommonHooks.onInteractEntityAt(player, entity, hitResult.location, hand)
+            // The Vec3 overload takes the position *relative to the entity* (localPos); the
+            // HitResult overload does the subtraction, exactly like the packet handler.
+            CommonHooks.onInteractEntityAt(player, entity, hitResult, hand)
         } else {
             CommonHooks.onInteractEntity(player, entity, hand)
         }

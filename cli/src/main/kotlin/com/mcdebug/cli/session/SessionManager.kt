@@ -116,6 +116,9 @@ class SessionManager(
                 val current = read(name) ?: return@locked record.toJson()
                 check(current.recordId == record.recordId) { "session $name changed during remove" }
                 delete(name)
+                runCatching {
+                    Files.deleteIfExists(Path.of(current.registryDir).resolve("${current.name}-${current.sessionToken}.init.gradle"))
+                }
                 val owner = ownerPath(Path.of(current.gameDir))
                 if (current.owned && readRecord(owner)?.sessionToken == current.sessionToken) Files.deleteIfExists(owner)
                 current.toJson().apply { addProperty("removed", true) }
@@ -296,10 +299,14 @@ class SessionManager(
             val parts = task.removePrefix(":").split(":").dropLast(1)
             if (parts.isNotEmpty()) dir = project.resolve(parts.joinToString("/"))
         }
-        val text = listOf("build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "gradle.properties")
-            .mapNotNull { runCatching { Files.readString(dir.resolve(it)) }.getOrNull() }
-            .joinToString("\n")
-        return if (text.contains("net.neoforged.moddev")) RunFlavor.MODDEVGRADLE else RunFlavor.LOOM
+        // The plugin may be declared in the root build / version catalog / buildSrc and only
+        // aliased in the subproject, so scan those too (plus the NeoGradle userdev plugin id).
+        val files = listOf(dir, project).distinct().flatMap { d ->
+            listOf("build.gradle", "build.gradle.kts", "settings.gradle", "settings.gradle.kts", "gradle.properties",
+                "gradle/libs.versions.toml").map { d.resolve(it) }
+        } + listOf("buildSrc/build.gradle", "buildSrc/build.gradle.kts").map { project.resolve(it) }
+        val text = files.mapNotNull { runCatching { Files.readString(it) }.getOrNull() }.joinToString("\n")
+        return if (text.contains("net.neoforged.moddev") || text.contains("net.neoforged.gradle")) RunFlavor.MODDEVGRADLE else RunFlavor.LOOM
     }
 
     /** Init script for the ModDevGradle path: same knobs `--args` gives a Loom run. */
