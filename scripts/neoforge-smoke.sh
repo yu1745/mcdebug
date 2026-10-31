@@ -109,6 +109,34 @@ check "guard: fill destination"          '"inserted":1728'               raw sto
 check "guard: source has 3 redstone"     '"ok":true'                     raw inv.setSlot '{"pos":[2,202,0],"slot":0,"item":"minecraft:redstone","count":3}'
 check "guard: transfer into full = 0"    '"transferred":0'               raw storage.transfer '{"from":{"kind":"block","pos":[2,202,0]},"to":{"kind":"block","pos":[6,202,0]},"resource":{"kind":"item","item":"minecraft:redstone"},"amount":3}'
 check "guard: source slot untouched"     '"item":"minecraft:redstone","count":3' raw inv.getSlot '{"pos":[2,202,0],"slot":0}'
+# ---- 快进（时间压缩）：原版 /tick 机制直通 + wait.until sprint:true + health.tps 加速读数 ----
+# 与 fabric-smoke.sh 同一套断言：sprint 是原版机制，两个 loader 行为必须一致
+# 与 fabric-smoke.sh 同一套断言：sprint 是原版机制，两个 loader 行为必须一致。
+# health 断言用持续 rate（无到期）：快机上 sprint ~76k TPS，预算式断言不可满足（详见 fabric-smoke.sh）。
+check "rate set 10000"            '"success":true'                    raw server.runCommand '{"command":"/tick rate 10000"}'
+_tps=""
+for _ in 1 2 3; do
+  _tps=$(cli raw server.health | grep -o '"tps":[0-9.]*' | head -1 | cut -d: -f2)
+  if [[ -n "$_tps" ]] && python3 -c "import sys; sys.exit(0 if float(sys.argv[1]) > 20.5 else 1)" "$_tps" 2>/dev/null; then break; fi
+  _tps=""; sleep 0.3
+
+done
+if [[ -n "$_tps" ]]; then echo "ok   rate 10000: health tps > 20 (${_tps})"
+else echo "FAIL rate 10000: health tps never exceeded 20"; fail=1; fi
+check "rate restore 20"           '"success":true'                    raw server.runCommand '{"command":"/tick rate 20"}'
+_tick0=$(cli status | grep -o '"tick":[0-9]*' | head -1 | cut -d: -f2)
+_target=$((_tick0 + 1200))
+_t0=$(date +%s.%N)
+check "wait.until sprint matched"  '"matched":true'                     raw wait.until "{\"predicate\":\"tick >= ${_target}\",\"timeoutTicks\":2400,\"sprint\":true}"
+_t1=$(date +%s.%N)
+_dur=$(python3 -c "print(f'{${_t1} - ${_t0}:.1f}')")
+if python3 -c "import sys; sys.exit(0 if float(sys.argv[1]) < 30 else 1)" "$_dur" 2>/dev/null; then
+  echo "ok   wait.until sprint fast (${_dur}s for 1200 ticks)"
+else
+  echo "FAIL wait.until sprint not fast: ${_dur}s"; fail=1
+fi
+check "wait.until sprint engine off" '"success":false'                  raw server.runCommand '{"command":"/tick sprint stop"}'
+
 # ---- 参数校验：缺参/类型错必须 -32602 并点名参数 ----
 check "missing pos -> -32602"      'error [-32602] missing param: pos'   raw inv.setSlot '{"slot":0,"item":"minecraft:stone"}'
 check "bad pos -> -32001"          'error [-32001] param pos'            raw world.getBlock '{"pos":[1,2]}'

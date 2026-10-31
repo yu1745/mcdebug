@@ -5,6 +5,7 @@ import com.google.gson.JsonNull
 import com.google.gson.JsonObject
 import com.google.gson.JsonPrimitive
 import com.mcdebug.api.getIntOr
+import com.mcdebug.api.getBoolOrFalse
 import com.mcdebug.api.getStringOrNull
 import com.mcdebug.api.requireString
 import com.mcdebug.rpc.RpcContext
@@ -23,6 +24,7 @@ import net.minecraft.core.BlockPos
 import org.slf4j.LoggerFactory
 import java.util.concurrent.CompletableFuture
 import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.atomic.AtomicInteger
 import com.mcdebug.loader.Loader
 
 /**
@@ -30,11 +32,24 @@ import com.mcdebug.loader.Loader
  * that evaluates the predicate each natural server tick. Does NOT advance ticks.
  *
  * This follows the project's tick-design principle: the server drives ticks; mcdebug only watches.
+ * The one pacing lever is `sprint:true` (wait.until): it asks the vanilla tick-rate manager for a
+ * bounded /tick sprint budget, so the engine itself runs its own ticks without the 50 ms throttle.
+ * mcdebug still never decides when a tick happens — same rule as AGENTS.md §1.
  */
 object WaitOps : RpcHandlerGroup {
 
     private val log = LoggerFactory.getLogger("mcdebug-wait")
     private val activeWaits = CopyOnWriteArrayList<WaitJob>()
+
+    /** 并发 wait --sprint 的油门所有权：只有最后一个持有者结束才停全局 sprint。只在 server 线程触碰。 */
+    internal val sprintOwnership = SprintOwnership()
+
+    /** sprint 预算归属的 server（endSprint/uninstall 收油门用；server 线程写）。 */
+    private var sprintServer: MinecraftServer? = null
+    private val jobIds = AtomicInteger()
+
+    /** sprint 预算在 timeout 之上的余量：sweep 在 tick 域判超时，最多晚 pollInterval 拍发现。 */
+    private const val SPRINT_SLACK_TICKS = 20
 
     override fun methods(): Map<String, RpcHandler> = mapOf(
         "until" to ::until
@@ -57,6 +72,11 @@ object WaitOps : RpcHandlerGroup {
             }
         }
         activeWaits.clear()
+        // 收油门：sprint 状态随 server 实例销毁，这里只是礼貌性停止（停服期调用可能失败，忽略）
+        if (sprintOwnership.clear()) {
+            sprintServer?.let { srv -> runCatching { srv.tickRateManager().stopSprinting() } }
+        }
+        sprintServer = null
     }
 
     /**
@@ -73,6 +93,10 @@ object WaitOps : RpcHandlerGroup {
                     RpcException(RpcErrors.INTERNAL_ERROR, "client disconnected")
                 )
                 cancelled++
+                // 断连也要收油门：跳回 server 线程停 sprint（停服期 execute 会被拒，交给 sweep 兑底）
+                if (job.sprint) {
+                    runCatching { job.server?.execute { endSprint(job) } }
+                }
             }
         }
         if (cancelled > 0) log.debug("cancelled {} wait(s) for connection {}", cancelled, connId)
@@ -115,6 +139,20 @@ object WaitOps : RpcHandlerGroup {
             }
         }
         activeWaits.removeAll(toRemove)
+        toRemove.forEach { endSprint(it) }
+    }
+
+    /**
+     * job 终止（命中/超时/求值异常/isDone 清理）后收油门：只有最后一个 sprint 持有者结束才停
+     * 全局 sprint。只在 server 线程调用（cancelConnection 路径已用 server.execute 跳回来）。
+     */
+    private fun endSprint(job: WaitJob) {
+        if (!job.sprint) return
+        if (sprintOwnership.end(job.id)) {
+            val srv = sprintServer ?: job.server ?: return
+            runCatching { srv.tickRateManager().stopSprinting() }
+                .onFailure { log.debug("stopSprinting after wait failed: {}", it.toString()) }
+        }
     }
 
     /**
@@ -129,12 +167,33 @@ object WaitOps : RpcHandlerGroup {
         // 默认有限超时 1200 ticks（1 min @20tps）；0 表示无限等待（需显式传）。
         val timeoutTicks = p.getIntOr("timeoutTicks", 1200).coerceAtLeast(0)
         val pollInterval = p.getIntOr("pollIntervalTicks", 1).coerceAtLeast(1)
+        // 快进：向原版 tick-rate manager 申请 sprint 预算（timeout + poll + 余量），服务器以极限速率
+        // 推进自然 tick，谓词照常每拍求值。命中/超时/求值异常/断连时自动 stopSprinting()。
+        // 这不是 tick 驱动：引擎照常决定何时 tick，只是去掉 50ms 步进（与原版 /tick sprint 同一机制）。
+        // 不要与手动 /tick sprint 混用：后申请的预算会覆盖前者。
+        val sprint = p.getBoolOrFalse("sprint")
+        if (sprint && timeoutTicks == 0) {
+            throw RpcException(RpcErrors.INVALID_PARAMS, "sprint requires a finite timeoutTicks (0 means wait forever)")
+        }
         val predicate = PredicateExpr.parse(predicateStr)
         val future = CompletableFuture<JsonElement>()
         val connId = RpcContext.currentConnectionId.get()
-        val job = WaitJob(future, predicate, timeoutTicks, pollInterval, connId)
+        val job = WaitJob(
+            future, predicate, timeoutTicks, pollInterval, connId,
+            sprint = sprint, server = server, id = jobIds.incrementAndGet(),
+        )
         try {
-            server.execute { activeWaits.add(job) }
+            server.execute {
+                activeWaits.add(job)
+                if (job.sprint) {
+                    sprintServer = server
+                    sprintOwnership.begin(job.id)
+                    runCatching {
+                        server.tickRateManager()
+                            .requestGameToSprint(job.timeoutTicks + job.pollInterval + SPRINT_SLACK_TICKS)
+                    }.onFailure { log.warn("sprint request failed: {}", it.toString()) }
+                }
+            }
         } catch (e: Exception) {
             future.completeExceptionally(RpcException(RpcErrors.INTERNAL_ERROR, "server shutting down"))
         }
@@ -273,8 +332,31 @@ object WaitOps : RpcHandlerGroup {
         val pollInterval: Int,
         /** Owning RPC connection id, for cancel-on-disconnect. Null if invoked outside a connection. */
         val connId: Int? = null,
+        /** 该 wait 是否持有 sprint 油门（wait.until sprint:true）。 */
+        val sprint: Boolean = false,
+        /** 注册时的 server：cancelConnection 从 RPC 线程跳回 server 线程收油门用。 */
+        val server: MinecraftServer? = null,
+        /** SprintOwnership 的 key（防重复 end）。 */
+        val id: Int = -1,
     ) {
         var ticksElapsed: Int = 0
         var lastValue: JsonElement? = null
     }
+}
+
+/**
+ * sprint 油门所有权计数（纯状态机，可单测）：记录哪些 wait job 持有 sprint。
+ * [end] / [clear] 返回“是否应调用 stopSprinting()”（最后一个持有者结束 / 曾有持有者被整体消空）。
+ * 只在 server 线程触碰；同一 id 重复 end 是 no-op。
+ */
+internal class SprintOwnership {
+    private val active = mutableSetOf<Int>()
+
+    fun begin(id: Int) {
+        active.add(id)
+    }
+
+    fun end(id: Int): Boolean = active.remove(id) && active.isEmpty()
+
+    fun clear(): Boolean = active.isNotEmpty().also { active.clear() }
 }

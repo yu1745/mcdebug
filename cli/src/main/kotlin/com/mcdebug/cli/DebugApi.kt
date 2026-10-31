@@ -260,9 +260,10 @@ class FluidApi(private val rpc: RpcClient) {
 }
 
 class WaitApi(private val rpc: RpcClient) {
-    /** 被动等待谓词为真（服务端自然 tick 求值），不推进 tick。 */
-    fun until(predicate: String, timeoutTicks: Int? = null, pollIntervalTicks: Int? = null): JsonElement =
-        rpc.call("wait.until", params { p("predicate", predicate); p("timeoutTicks", timeoutTicks); p("pollIntervalTicks", pollIntervalTicks) })
+    /** 被动等待谓词为真（服务端自然 tick 求值），不推进 tick。
+     *  sprint=true：同时申请原版 /tick sprint 快进预算（timeout+余量），命中/超时/断连自动收油门。 */
+    fun until(predicate: String, timeoutTicks: Int? = null, pollIntervalTicks: Int? = null, sprint: Boolean? = null): JsonElement =
+        rpc.call("wait.until", params { p("predicate", predicate); p("timeoutTicks", timeoutTicks); p("pollIntervalTicks", pollIntervalTicks); p("sprint", sprint) })
 }
 
 class CraftApi(private val rpc: RpcClient) {

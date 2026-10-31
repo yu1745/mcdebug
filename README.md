@@ -125,7 +125,7 @@ Use `mcdebug raw <namespace.method> <json>` for anything without a dedicated com
 | `screen.*` | open/drive server-side menus (`AbstractContainerMenu`) with a fake player (**slot JSON, no pixels**) |
 | `gui.*` | **client plane**: real GUI screenshots + Screen clicks (see below) |
 | `redstone.*` | read power, set/pulse levers, neighbor updates |
-| `wait.until` | wait for a predicate on natural server ticks (never drives ticks) |
+| `wait.until` | wait for a predicate on natural server ticks (never drives ticks; `--sprint` fast-forwards via the vanilla tick manager) |
 | `reflect.*` | resolve/get/set/call/new from a root (`server`/`level`/`be`/`entity`/`player`), a ref or a class, along a field/getter `path`; Mojang or intermediary names work in dev and production (table generated for this Minecraft version) |
 | `gui.reflect.*` | the same reflection core in the **client** JVM: roots `minecraft`/`screen`/`player`/`level`/`server` — open Screen, widgets, client caches. CLI: `reflect ... --client` |
 
@@ -141,6 +141,41 @@ Fluid amounts are in each loader's native unit (`server.status.fluidUnit`): `dro
 
 The server never exposes `tick.run`/`tick.runUntil`: `trace.*` and `wait.until` observe natural
 ticks only (`be.tick` is the one bounded exception: it runs a single block entity's ticker).
+Acceleration for slow transformations goes through the **vanilla tick-rate manager** (below).
+
+### Fast-forward: time compression for slow transformations
+
+Long-running transformations (crops, machines that take MC days) don't have to be waited out in
+real time. Acceleration reuses the vanilla 1.21.1 tick-rate manager — mcdebug adds no
+tick-driving RPC; the engine still decides when ticks happen, only the 50 ms pacing is lifted.
+
+```bash
+# one-shot: fast-forward until a condition holds (sprint budget = timeout + slack,
+# auto-stops on match / timeout / disconnect; needs a finite --timeout-ticks)
+mcdebug wait until "be[100,64,100].progress >= 1000" --timeout-ticks 72000 --sprint
+
+# bounded burst: N ticks at full speed, vanilla auto-stops (time suffixes: t / s / d)
+mcdebug raw server.runCommand '{"command":"/tick sprint 3d"}'
+mcdebug wait until "be[100,64,100].progress >= 1000" --timeout-ticks 72000
+mcdebug raw server.runCommand '{"command":"/tick sprint stop"}'   # early stop
+
+# sustained rate (no auto-revert — restore it yourself)
+mcdebug raw server.runCommand '{"command":"/tick rate 200"}'
+# ...
+mcdebug raw server.runCommand '{"command":"/tick rate 20"}'
+```
+
+- Tick-domain semantics are unchanged: `wait.until` timeouts and `trace.start --max-ticks`
+  count ticks; `snapshot.diff` ignores `/tick`/`/time` by default.
+- `server.health` reports the real TPS under acceleration (cap follows the target rate;
+  sprint caps at 10000).
+- Only tick-driven state accelerates: mod logic on wall-clock time
+  (`System.currentTimeMillis`-style cooldowns) does not.
+- During a sprint vanilla runs ticks with `hasTimeLeft=false` (some optional chunk/connection
+  work is deferred). Watchdog and autosave are rate-aware.
+- Don't mix a manual `/tick sprint` with `wait --sprint`: a later sprint request overwrites the
+  earlier budget.
+- On an integrated server the game must not be paused (sprint ticks don't advance while paused).
 
 Params: a box is `{"from":[x,y,z],"to":[x,y,z]}` (corners in any order, both inclusive; for entity
 queries the whole blocks). A missing or mistyped param is `-32602` naming the param; an unexpected

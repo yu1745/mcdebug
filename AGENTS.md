@@ -25,6 +25,7 @@ Fabric 1.21.1（Mojang 官方映射）+ Kotlin Mod，提供 JSON-RPC 服务，�
 - 反过来，**别的项目（消费者项目 A）的 `run/mods/` 就是发布 jar 的正常部署位置**：把 `build/libs/mcdebug-<version>.jar` 拷进去当普通 mod 用，一个 jar 同时提供服务端平面和客户端平面。放新 jar 前先删掉旧版本（`mods/` 里两份同 modid 会加载失败/加载到旧的）。
 - **绝对不要**暴露 `tick.run` / `tick.runUntil` 之类主动推进 server tick 的 RPC。tick 由游戏引擎驱动，mod 只观察不控制。断言统一走 `wait.until`（注册 `ServerTickEvents.END_SERVER_TICK` 回调检查条件）。
   - 唯一例外 `be.tick`：在 server 线程把**单个** BE 的 ticker 同步跑 N 次（0..12000，上限防止卡死 server 线程），不推进世界时间、不 tick 邻居。ic2 机器测试靠它把十几秒的自然等待压到毫秒级。不要以它为先例增加别的驱动型 RPC。
+  - **快进例外（0.8.0）**：时间压缩不新造 tick 驱动 RPC，一律复用原版 tick-rate manager：手动加速直通 `server.runCommand` + `/tick rate`、`/tick sprint`；`wait.until` 的 `sprint:true` 只是申请一份原版 sprint 预算（timeout+poll+20 ticks）并在命中/超时/求值异常/断连时 `stopSprinting()`（`SprintOwnership` 保证并发 wait 只有最后一个结束才停全局 sprint）。引擎仍自己决定何时 tick，mcdebug 只是去掉 50ms 步进——与"不驱动 tick"原则一致。
 - 服务端默认监听 `0.0.0.0`，容器部署时通过端口发布规则或防火墙限制访问范围。
 - 不要在 `src/main/resources/assets/mcdebug/` 之外加资源（避免污染上游资源命名空间）。
 - **两个 loader（Fabric / NeoForge 21.1.x）共用同一份源码**：`src/main`、`src/client`、`contract` 里**不允许**出现 `net.fabricmc.*` / `net.neoforged.*` 的 import，一律走接缝（§2 的 `loader/` 与 `client/loader/`）；loader 专属代码只能放 `src/main/kotlin/com/mcdebug/loader/fabric/**`、`src/client/kotlin/com/mcdebug/client/loader/fabric/**`、两个 entrypoint 和 `neoforge/`。改共享源码后**两个构建都要绿**（§8）。
@@ -194,7 +195,8 @@ java -jar mcdebug-cli.jar jar --loader neoforge --output ../consumer/run/mods  #
   - 字面量：数字（默认窄化为 NbtInt；NBT 写入要精确类型用 `be.setNbt` 的 `#nbt` 标注，见 §11b）/ 字符串 / `true` / `false` / `null`
   - 操作符：`==/!=/</<=/>/>=`
   - v1 的单比较谓词是 v2 DSL 的子集，完全向后兼容
-- 断连时服务端会取消该连接发起的 `wait.until`（`WaitOps.cancelConnection`），不依赖超时兜底
+- 断连时服务端会取消该连接发起的 `wait.until`（`WaitOps.cancelConnection`），不依赖超时兜底；若该 wait 持有 sprint 油门，同一路径会跳回 server 线程收油门
+- `wait.until` 支持 `sprint:true`（快进，见 §1 例外条款）：要求有限 timeoutTicks，预算=timeout+pollInterval+20；墙钟计时逻辑不被加速，见 §11
 
 ## 8. 提交前验证
 
@@ -264,8 +266,11 @@ node scripts/set-version.mjs X.Y.Z
 - `inv.*` 与 `storage.*` 有重叠：`inv.getSlot/setSlot` 是槽位级访问（storage 没有对应），保留；`inv.insert/extract` 和 `fluid.*` 是 `storage.*` 的特例，帮助文本已指向 storage，ic2 测试仍在用所以没删
 - 坐标参数在 CLI 有三种写法（`--x/--y/--z`、`--from "x,y,z"`、chunk 的 `--cx/--cz`），RPC 侧统一是 `[x,y,z]` 数组；没统一 CLI 是因为会破坏现有脚本
 - `inv.insert` / `inv.extract` 对目标方块已消失（如过压爆炸成 air）时报 `-32004 no block entity`，错误不够友好；改进：目标无 BE 时返回 `INVALID_TARGET`/`STORAGE_NOT_FOUND` 类错误并带 `reason`（ic2-fabric 过压测试曾踩中：机器放下即炸后 insertItem 必然撞上）
+- 快进（`/tick sprint`、`wait.until sprint:true`）只加速 tick 域状态：mod 里用墙钟（`System.currentTimeMillis`/`Instant.now`）的冷却/进度不会被加速。sprint 期间原版以 `hasTimeLeft=false` 跑 tick，部分可选工作（区块任务等）被推迟，属原版语义；watchdog/autosave 是 rate-aware 的，不会误杀/刷存档。集成服务器需处于非暂停状态（暂停时 sprint 不推进）。手动 `/tick sprint` 与 `wait --sprint` 不要混用：后申请的预算覆盖前者
 
 ## 11b. 已完成变更记录（v2 → 0.6.x）
+
+- **0.8.0 快进/时间压缩**：不新增 tick 驱动 RPC，加速一律复用原版 tick-rate manager。①`server.health.tps` 的 `coerceAtMost(20)` 改为 rate-aware 上限（sprint→10000，否则 `max(20, tickrate)`），加速下不再恒报 20；②`wait.until` 新增 `sprint:true`（CLI `--sprint`）：申请原版 sprint 预算 `timeout+pollInterval+20`，命中/超时/求值异常/断连/uninstall 时自动 `stopSprinting()`，`SprintOwnership` 纯状态机（单测 `SprintOwnershipTest`）保证并发 wait 只有最后一个结束才停全局 sprint；`timeoutTicks=0`（无限等）+sprint 拒绝 `-32602`。③手动加速直通 `server.runCommand` + 原版 `/tick rate`/`/tick sprint`（README/SKILL 记录工作流）。双端冒烟各 +6 断言（sprint 启停、health tps>20、`wait --sprint` 1200 ticks 墙钟 <30s、命中后油门已收）。
 
 - **reflect 补齐（未发版）**：`api/ReflectCore.kt`（与平面无关：ref 表、path、重载、参数转换、JSON）+ `ReflectOps`（服务端 root）。
   - 入口：`root` = `server`/`level`/`be`/`entity`/`player`（原来只能从 static 或 ref 出发，MC 没有拿 server 的静态入口）。

@@ -119,6 +119,36 @@ check "fluid extract from bucket"  '"extracted":81000'                 raw stora
 check "fluid targetAfter emptied"  '"targetAfter":{"kind":"item","stack":{"item":"minecraft:bucket"' raw storage.extract '{"target":{"kind":"item","stack":{"item":"minecraft:water_bucket","count":1}},"handle":"fabric:fluid","resource":{"kind":"fluid","fluid":"minecraft:water"},"amount":81000}'
 check "fluid partial bucket = 0"   '"extracted":0'                     raw storage.extract '{"target":{"kind":"item","stack":{"item":"minecraft:water_bucket","count":1}},"handle":"fabric:fluid","resource":{"kind":"fluid","fluid":"minecraft:water"},"amount":1000}'
 check "wait.until"                 '"matched":true'                     raw wait.until '{"predicate":"inv[2,200,0].0.count == 5","timeoutTicks":50}'
+
+# ---- 快进（时间压缩）：原版 /tick 机制直通 + wait.until sprint:true + health.tps 加速读数 ----
+# 不新造 tick 驱动 RPC：加速一律走原版 tick-rate manager（见 AGENTS.md §1 例外条款）。
+# health 断言用持续 rate（无到期时间）：快机上 sprint 能到 ~76k TPS，72000 ticks 一秒多就烧完，
+# “先 sprint 再采样”的断言在这台机器上不可满足；sprint 启停不单独断言，wait --sprint 三连覆盖同一引擎路径。
+check "rate set 10000"            '"success":true'                    raw server.runCommand '{"command":"/tick rate 10000"}'
+_tps=""
+for _ in 1 2 3; do
+  _tps=$(cli raw server.health | grep -o '"tps":[0-9.]*' | head -1 | cut -d: -f2)
+  if [[ -n "$_tps" ]] && python3 -c "import sys; sys.exit(0 if float(sys.argv[1]) > 20.5 else 1)" "$_tps" 2>/dev/null; then break; fi
+  _tps=""; sleep 0.3   # mspt 平滑均值还没热身就重试
+
+done
+if [[ -n "$_tps" ]]; then echo "ok   rate 10000: health tps > 20 (${_tps})"
+else echo "FAIL rate 10000: health tps never exceeded 20"; fail=1; fi
+check "rate restore 20"           '"success":true'                    raw server.runCommand '{"command":"/tick rate 20"}'
+_tick0=$(cli status | grep -o '"tick":[0-9]*' | head -1 | cut -d: -f2)
+_target=$((_tick0 + 1200))
+_t0=$(date +%s.%N)
+check "wait.until sprint matched"  '"matched":true'                     raw wait.until "{\"predicate\":\"tick >= ${_target}\",\"timeoutTicks\":2400,\"sprint\":true}"
+_t1=$(date +%s.%N)
+_dur=$(python3 -c "print(f'{${_t1} - ${_t0}:.1f}')")
+# 20 TPS 下 1200 ticks 要 60s；sprint 下应几秒内完事。30s 阈值区分“真的在快进”
+if python3 -c "import sys; sys.exit(0 if float(sys.argv[1]) < 30 else 1)" "$_dur" 2>/dev/null; then
+  echo "ok   wait.until sprint fast (${_dur}s for 1200 ticks)"
+else
+  echo "FAIL wait.until sprint not fast: ${_dur}s"; fail=1
+fi
+# wait 命中后必须已自动收油门：手动 stop 应报告“没有在跑的 sprint”
+check "wait.until sprint engine off" '"success":false'                  raw server.runCommand '{"command":"/tick sprint stop"}'
 # world.setBlock 走原版 /setblock 的形状更新：悬空拉杆会被 updateFromNeighbourShapes 拿掉（ok:false），
 # 所以先垫一块支撑方块，并用显式 props 跳过形状推导（face=floor 需要下方是固体）
 check "lever support"              '"ok":true'                          raw world.setBlock '{"pos":[4,199,0],"block":"minecraft:stone"}'

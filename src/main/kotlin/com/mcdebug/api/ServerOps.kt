@@ -14,6 +14,7 @@ import net.minecraft.server.MinecraftServer
 import net.minecraft.world.level.Level
 import net.minecraft.commands.CommandSource
 import net.minecraft.commands.CommandSourceStack
+import kotlin.math.max
 import net.minecraft.network.chat.Component
 import java.util.concurrent.CompletableFuture
 import com.mcdebug.loader.Loader
@@ -33,7 +34,11 @@ object ServerOps : RpcHandlerGroup {
     private fun health(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
         RpcContext.onServer(server) {
             val mspt = server.currentSmoothedTickTime
-            val tps = if (mspt > 0f) (1000.0 / mspt).coerceAtMost(20.0) else 20.0
+            // 加速（原版 /tick rate、/tick sprint）下 1000/mspt 可以远大于 20：上限跟随目标速率。
+            // sprint 期间引擎不再按 50ms 步进（l=0），上限即原版命令的最大速率 10000。
+            val trm = server.tickRateManager()
+            val tpsCap = if (trm.isSprinting()) 10000.0 else max(20.0, trm.tickrate().toDouble())
+            val tps = if (mspt > 0f) (1000.0 / mspt).coerceAtMost(tpsCap) else tpsCap
             val dims = JsonArray()
             server.getAllLevels().forEach { w ->
                 dims.add(JsonObject().apply {

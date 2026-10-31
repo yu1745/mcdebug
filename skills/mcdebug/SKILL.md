@@ -138,6 +138,17 @@ mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeo
   floor (spawn does **not** snap to the ground: a pig dropped 120 -> 111), keep the whole
   spawn-assert sequence in one `-c` batch (one round trip, sub-second), and re-check the entity
   count with `scan.findEntities` before concluding anything.
+- **Slow transformations — fast-forward, don't wait in real time**: for anything that takes MC
+  minutes/days (crop growth, machines with long recipes, environment-driven conversion), use
+  `mcdebug wait until "<pred>" --timeout-ticks 72000 --sprint`: the server requests a vanilla
+  `/tick sprint` budget (timeout + slack) and runs its own ticks at full speed; the sprint stops
+  automatically on match, timeout or disconnect. Manual variants through the same vanilla
+  engine: `raw server.runCommand '{"command":"/tick sprint 3d"}'` (bounded burst, auto-stops;
+  `"/tick sprint stop"` ends early) or `"/tick rate 200"` for a sustained rate (**no
+  auto-revert** — restore with `/tick rate 20`). `server health` shows the real TPS while
+  accelerated (cap follows the target rate). Only tick-driven state accelerates: wall-clock
+  mod cooldowns (`System.currentTimeMillis`-style) do not; don't mix manual `/tick sprint` with
+  `--sprint`; on an integrated server the game must not be paused.
 - `inv.setSlot --nbt` writes 1.21.1 **item components**: a raw tag ends up under
   `components."minecraft:custom_data"` and `inv.getSlot` echoes exactly that back, so "it round
   tripped" does not prove the mod read it. Assert through the API that matters (the GUI, the
