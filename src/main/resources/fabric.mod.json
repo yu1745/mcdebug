@@ -15,13 +15,11 @@
 	"entrypoints": {
 		"server": [
 			{
-				"adapter": "kotlin",
 				"value": "com.mcdebug.McDebugMod"
 			}
 		],
 		"client": [
 			{
-				"adapter": "kotlin",
 				"value": "com.mcdebug.client.McDebugClientMod"
 			}
 		]

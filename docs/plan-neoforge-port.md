@@ -376,7 +376,7 @@
 3. **`supportsInsertion/supportsExtraction`**：NeoForge 侧**流体**按**当前**罐状态推导（未满→可注、非空→可抽；`capacity<=0` 视为容量未知而不是“已满”）、**能量**取 `canReceive()/canExtract()`、**物品恒为 `true`**（`IItemHandler` 没有 capability 标志，逐槽 `isItemValid` 又依赖具体物品，硬猜反而误导）；Fabric 侧三个标志是 Transfer API / Team Reborn 的**能力标志**。所以 NeoForge 的这两个字段描述的是“现在能不能”，空罐会报 `supportsExtraction:false`、满罐会报 `supportsInsertion:false`——跨 loader 比较这两个字段没有意义（`storage --help` 与 skill 都写了这一点）。
 4. **`reflect.*` 短类名**：NeoForge 只支持 FQN；名字相同时没有 `mojangClass` 字段。
 5. **物品承载的 item 存储**：两个 loader 都返回 null（`storage.*` 不暴露 item-in-item），行为一致。
-6. **Kotlin 运行时**：NeoForge 版需要 `mods/` 里有 **KotlinForForge 5.12.x**（Fabric 版需要 fabric-language-kotlin）——两者都不是自包含 jar。CLI 的 `mcdebug jar --loader neoforge` 只写 mcdebug 自己的 jar。
+6. **Kotlin 运行时**：两端 jar 现均内嵌 kotlin-stdlib（不重定位），无需 KotlinForForge / Fabric Language Kotlin。入口使用普通 class 与默认语言加载器。
 7. **`gui.hotswap` 的字节来源**：Fabric 用 Knot 的 pre-mixin 流水线（`getClassByteArray(name, true)`）；NeoForge 直接读 classpath 副本，mixin 由 `Hotswap` 显式 `transformClassBytes` 施加一次。结构改动免重启的边界（标准 HotSpot 只能改方法体）两端一致。审查补充：NeoForge 这条是普通 classloader 资源查找，**没有校验拿到的就是被加载的那份**；查找失败会退化成“用调用方给的文件字节”，可能与被加载的类不一致——dev 已验，生产环境属未验的脆弱点。
 8. **`gui.stop` 的触发时机**：21.1 没有客户端停止事件，NeoForge 侧是 JVM shutdown hook（跑在新线程、客户端可能已在拆），Fabric 侧是 `CLIENT_STOPPING`（客户端线程）。现在 shutdown hook 先 `Minecraft.getInstance().execute{}` 到客户端线程执行清理（最多等 2 秒），超时/客户端线程已死才就地执行一次，失败写 WARN——不再静默 no-op。
 9. **能量单位现在有协议字段**：同一个 `teamreborn:energy` 句柄，Fabric 侧是 Team Reborn Energy（E），NeoForge 侧是 `IEnergyStorage` 的 FE；`server.status.energyUnit` 报 `E`/`FE`（与 `fluidUnit` 同一模式，用户批准后新增的**加性**字段）。跨 loader 比能量数值前先读它。

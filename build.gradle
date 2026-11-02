@@ -59,12 +59,16 @@ loom {
 sourceSets.test.compileClasspath += sourceSets.client.output
 sourceSets.test.runtimeClasspath += sourceSets.client.output
 
+// Bundle only stdlib, without relocation or loader-specific Kotlin adapters.
+configurations { shadedKotlin { transitive = false } }
+
 dependencies {
+	shadedKotlin "org.jetbrains.kotlin:kotlin-stdlib:${kotlin_version}"
+	implementation "org.jetbrains.kotlin:kotlin-stdlib:${kotlin_version}"
 	minecraft "com.mojang:minecraft:${project.minecraft_version}"
 	mappings loom.officialMojangMappings()
 	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
 	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
-	modImplementation "net.fabricmc:fabric-language-kotlin:${project.fabric_kotlin_version}"
 	testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
 	testRuntimeOnly "org.junit.platform:junit-platform-launcher"
 }
@@ -141,6 +145,10 @@ java {
 }
 
 jar {
+	from({ configurations.shadedKotlin.collect { zipTree(it) } }) {
+		exclude 'META-INF/MANIFEST.MF', 'META-INF/*.SF', 'META-INF/*.RSA', 'META-INF/*.DSA'
+		exclude 'module-info.class', 'META-INF/versions/**/module-info.class'
+	}
 	def projectName = project.archives_base_name
 	inputs.property "projectName", projectName
 	from("LICENSE") { rename { "${it}_$projectName" } }
@@ -158,6 +166,9 @@ tasks.register('verifyJarSelfContained') {
 	doLast {
 		def jarFile = jarTask.get().archiveFile.get().asFile
 		def required = [
+			'kotlin/jvm/internal/Intrinsics.class',
+			'kotlin/collections/CollectionsKt.class',
+			'kotlin/enums/EnumEntriesKt.class',
 			'com/mcdebug/McDebugMod.class',                        // server entrypoint
 			'com/mcdebug/client/McDebugClientMod.class',           // client entrypoint
 			'com/mcdebug/client/GuiOps.class',                     // gui.* handlers

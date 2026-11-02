@@ -16,16 +16,9 @@ cp gradlew gradlew.bat "$F/consumer/"
 mkdir -p "$F/consumer/gradle/wrapper"
 cp gradle/wrapper/gradle-wrapper.jar gradle/wrapper/gradle-wrapper.properties "$F/consumer/gradle/wrapper/"
 
-# 被测 jar（发布形态）+ KotlinForForge（NeoForge 侧 Kotlin 运行时，来自 mods/ 而非构建依赖）
+# 被测 jar 已内嵌 Kotlin 标准库，无需安装 KotlinForForge。
 java -jar "$REPO/mcdebug-cli.jar" jar --loader neoforge --output "$F/consumer/run/mods"
-for j in $(find ~/.gradle/caches/modules-2/files-2.1/thedarkcolour -name '*5.12.0.jar' | grep -v sources); do
-  cp "$j" "$F/consumer/run/mods/"
-done
 
-# ↑ 必须四个一起拷：KotlinForForge 5.x 把 language provider 拆在 kffmod/kfflib/kfflang 里，
-#   只放 kotlinforforge-*.jar 会在启动时失败：
-#     Mod File …/mcdebug-neoforge-0.8.0.jar needs language provider kotlinforforge:5.10 or above
-#     We have found -            ← 这行“空的已找到列表”就是 KFF 没加载的特征（真机踩过）
 printf 'eula=true\nonline-mode=false\nserver-port=0\nspawn-protection=0\nmax-players=1\n' > "$F/consumer/run/eula.txt"
 printf 'eula=true\nonline-mode=false\nserver-port=0\nspawn-protection=0\nmax-players=1\n' > "$F/consumer/run/server.properties"
 
@@ -39,7 +32,7 @@ Notes:
 - Good for a **server** instance (no display, cheap) and for a **client** instance that also hosts the
   integrated server plane (single-player, `--quickPlaySingleplayer <save>` via the project's
   `programArguments`, or driven by `mcdebug session start`).
-- Kotlin runtime: the mcdebug jar does **not** ship Kotlin; NeoForge needs KotlinForForge in `mods/`
-  (Fabric needs fabric-language-kotlin). Two mcdebug jars in one `mods/` directory abort mod loading —
+- Both loader jars bundle Kotlin stdlib; no Kotlin language mod is required.
+  Two mcdebug jars in one `mods/` directory abort mod loading —
   `mcdebug jar --loader …` deletes the other loader's jar for you.
 - Do not commit a copy of this directory with `run/` in it; the point is a fresh temporary instance.

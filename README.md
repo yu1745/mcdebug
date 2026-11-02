@@ -67,8 +67,8 @@ mcdebug jar --loader neoforge --output .../run/mods             # NeoForge: mcde
 ```
 
 Either mode also deletes the *other* loader's jar from that directory (same `modId`, so two
-copies abort mod loading). Kotlin runtime: the Fabric jar needs **fabric-language-kotlin**, the
-NeoForge jar needs **KotlinForForge 5.12.x** — neither ships inside the mcdebug jar.
+copies abort mod loading). Both jars bundle Kotlin stdlib without relocation; neither Fabric Language Kotlin nor
+KotlinForForge is required by mcdebug.
 
 A single-player client runs both planes in one process, so `world.*`/`be.*`/`inv.*` and
 `gui.*` are both available against the same integrated server.

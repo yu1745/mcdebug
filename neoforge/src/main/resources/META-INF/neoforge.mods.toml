@@ -1,5 +1,5 @@
-modLoader="kotlinforforge"
-loaderVersion="[5.10,)"
+modLoader="javafml"
+loaderVersion="[4,)"
 license="MIT"
 
 [[mods]]
@@ -23,13 +23,6 @@ side="BOTH"
 modId="minecraft"
 type="required"
 versionRange="[1.21.1,1.21.2)"
-ordering="NONE"
-side="BOTH"
-
-[[dependencies.mcdebug]]
-modId="kotlinforforge"
-type="required"
-versionRange="[5.10,)"
 ordering="NONE"
 side="BOTH"
 

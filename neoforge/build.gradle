@@ -16,7 +16,6 @@ java { toolchain { languageVersion = JavaLanguageVersion.of(21) } }
 repositories {
 	mavenCentral()
 	maven { name = 'NeoForged'; url = 'https://maven.neoforged.net/releases' }
-	maven { name = 'KotlinForForge'; url = 'https://thedarkcolour.github.io/KotlinForForge/' }
 }
 
 neoForge {
@@ -66,11 +65,12 @@ sourceSets.main.java.srcDir(sharedDir)
 tasks.named('compileKotlin') { dependsOn 'syncShared' }
 tasks.named('compileJava') { dependsOn 'syncShared' }
 
+// Bundle only stdlib, without relocation or loader-specific Kotlin adapters.
+configurations { shadedKotlin { transitive = false } }
+
 dependencies {
-	// KotlinForForge：按它自己的文档用 implementation 引入（会带出 kffmod/kfflang/kfflib，
-	// 其中 kffmod 声明 kotlinforforge 这个 mod、kfflang 注册 Kotlin 语言加载器）。
-	// 生产环境由 mods/ 里的 KFF 提供同一份运行时，见 README。
-	implementation "thedarkcolour:kotlinforforge-neoforge:${kff_version}"
+	shadedKotlin "org.jetbrains.kotlin:kotlin-stdlib:${kotlin_version}"
+	implementation "org.jetbrains.kotlin:kotlin-stdlib:${kotlin_version}"
 }
 
 tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
@@ -95,6 +95,10 @@ processResources {
 // 与 Fabric 侧（Loom 直接重映射注解值）结论一致。
 
 jar {
+	from({ configurations.shadedKotlin.collect { zipTree(it) } }) {
+		exclude 'META-INF/MANIFEST.MF', 'META-INF/*.SF', 'META-INF/*.RSA', 'META-INF/*.DSA'
+		exclude 'module-info.class', 'META-INF/versions/**/module-info.class'
+	}
 	manifest {
 		attributes 'Implementation-Title': 'mcdebug-neoforge', 'Implementation-Version': project.version
 	}
@@ -110,6 +114,9 @@ tasks.register('verifyJarSelfContained') {
 	dependsOn jarTask
 	doLast {
 		def required = [
+			'kotlin/jvm/internal/Intrinsics.class',
+			'kotlin/collections/CollectionsKt.class',
+			'kotlin/enums/EnumEntriesKt.class',
 			'META-INF/neoforge.mods.toml',
 			'mcdebug.client.mixins.json',
 			'mcdebug.mixins.json',

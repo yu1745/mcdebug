@@ -16,7 +16,7 @@ import net.neoforged.fml.common.Mod
  * common seam is installed here too when it is still missing.
  */
 @Mod(value = McDebug.MOD_ID, dist = [Dist.CLIENT])
-object McDebugNeoForgeClient {
+class McDebugNeoForgeClient {
     init {
         if (!Loader.installed) Loader.install(NeoForgeLoaderApi())
         ClientLoader.install(NeoForgeClientLoaderApi())

@@ -17,11 +17,10 @@ import net.neoforged.fml.common.Mod
  * The client plane (`gui.*`) lives in [McDebugNeoForgeClient] (`dist = Dist.CLIENT`), which
  * NeoForge only loads in a client.
  *
- * Kotlin note: this is a Kotlin `object`, which requires KotlinForForge (declared as
- * `modLoader="kotlinforforge"` in `neoforge.mods.toml`).
+ * JavaFML constructs this ordinary class; Kotlin stdlib is bundled in the mod jar.
  */
 @Mod(McDebug.MOD_ID)
-object McDebugNeoForge {
+class McDebugNeoForge {
     init {
         Loader.install(NeoForgeLoaderApi())
         RpcEnv.gameDir = { Loader.api.gameDir }

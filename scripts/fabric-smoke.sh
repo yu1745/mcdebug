@@ -17,7 +17,6 @@ CACHE_DIR=${MCDEBUG_SMOKE_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/mcdebug-fab
 MC_VERSION=1.21.1
 LOADER_VERSION=0.19.5
 API_VERSION=0.116.17+1.21.1
-FKL_VERSION=1.13.9+kotlin.2.3.10
 CLI_JAR=${CLI_JAR:-mcdebug-cli.jar}
 [[ -f "$CLI_JAR" ]] || { echo "fabric-smoke: mcdebug-cli.jar not found" >&2; exit 2; }
 
@@ -34,10 +33,8 @@ fetch() {
 mkdir -p "$CACHE_DIR"
 LAUNCHER="$CACHE_DIR/fabric-server-${MC_VERSION}-${LOADER_VERSION}-1.1.2.jar"
 API_JAR="$CACHE_DIR/fabric-api-${API_VERSION}.jar"
-FKL_JAR="$CACHE_DIR/fabric-language-kotlin-${FKL_VERSION}.jar"
 fetch "https://meta.fabricmc.net/v2/versions/loader/${MC_VERSION}/${LOADER_VERSION}/1.1.2/server/jar" "$LAUNCHER"
 fetch "https://maven.fabricmc.net/net/fabricmc/fabric-api/fabric-api/${API_VERSION}/fabric-api-${API_VERSION}.jar" "$API_JAR"
-fetch "https://maven.fabricmc.net/net/fabricmc/fabric-language-kotlin/${FKL_VERSION}/fabric-language-kotlin-${FKL_VERSION}.jar" "$FKL_JAR"
 
 SERVER_DIR=$(mktemp -d "${TMPDIR:-/tmp}/mcdebug-fabric-smoke.XXXXXX")
 LOG="$SERVER_DIR/server.log"
@@ -57,7 +54,7 @@ trap cleanup EXIT INT TERM
 
 mkdir -p "$SERVER_DIR/mods"
 cp "$LAUNCHER" "$SERVER_DIR/fabric-server-launch.jar"
-cp "$API_JAR" "$FKL_JAR" "$MOD_JAR" "$SERVER_DIR/mods/"
+cp "$API_JAR" "$MOD_JAR" "$SERVER_DIR/mods/"
 printf 'eula=true\n' > "$SERVER_DIR/eula.txt"
 printf 'online-mode=false\nserver-port=0\nspawn-protection=0\nmax-players=1\nview-distance=4\nsync-chunk-writes=false\n' > "$SERVER_DIR/server.properties"
 

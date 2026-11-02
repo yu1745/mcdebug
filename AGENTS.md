@@ -66,7 +66,7 @@ mcdebug/
 │   │   ├── wait/WaitOps.kt       # wait.until — 被动观察
 │   │   └── util/{NbtJson,ServerContext,Mappings}.kt   # Mappings：reflect.* 的 intermediary↔Mojang 名字翻译
 │   └── resources/
-│       ├── fabric.mod.json       # environment "*" + server/client 两个 entrypoint（Kotlin 需 "adapter": "kotlin"）
+│       ├── fabric.mod.json       # environment "*" + server/client 两个 entrypoint（普通 Java adapter，入口为可实例化 class）
 │       ├── mcdebug.mixins.json   # 服务端 mixin 配置（当前为空占位）
 │       └── modid.mixins.json     # ← Fabric 模板遗留，别删也别用
 └── src/client/                   # 客户端平面（gui.*），由 client entrypoint 加载，见 §14
@@ -85,7 +85,7 @@ mcdebug/
 | 插件 | Fabric Loom 1.15 + Kotlin | ModDevGradle 2.0.148 + Kotlin 2.3.10 |
 | 源码 | `src/main` + `src/client` 原处 | `Sync` 到 `neoforge/build/generated/shared` 再编译：`src/main/kotlin`（去掉 `McDebugMod.kt` 与 `loader/fabric/**`）+ `src/client/kotlin`（去掉 `McDebugClientMod.kt` 与 `client/loader/fabric/**`）+ `src/client/java`（去掉 `MixinTargets.java`）+ `contract/src/main/kotlin` |
 | 元数据 | `fabric.mod.json`（两个 entrypoint） | `META-INF/neoforge.mods.toml`（`@Mod` 两个类 + `[[mixins]]` 引用**同一份** `mcdebug.client.mixins.json`） |
-| Kotlin 运行时 | fabric-language-kotlin 0.19.x | KotlinForForge 5.12.x（`modLoader="kotlinforforge"`，`@Mod object`） |
+| Kotlin 运行时 | jar 内嵌 kotlin-stdlib（不重定位），无 FLK 前置 | jar 内嵌 kotlin-stdlib（不重定位），`modLoader="javafml"`，`@Mod class`，无 KFF 前置 |
 | 命名空间 | dev=Mojang、生产=intermediary（要映射表） | dev 与生产都是 **Mojang 官方名**（`reflect.*` 不需要表，短类名不支持） |
 | 任务 | `./gradlew build\|runServer\|runClient` | `./gradlew :neoforge:build\|:neoforge:runServer\|:neoforge:runClient`（= 进 `neoforge/` 跑同名任务） |
 | 冒烟 | `scripts/fabric-smoke.sh`（51 条断言） | `scripts/neoforge-smoke.sh`（45 条断言 + 契约 79/79） |
@@ -166,7 +166,7 @@ java -jar mcdebug-cli.jar --help    # 查看所有 CLI 命令
 java -jar mcdebug-cli.jar status    # 调用 server.status RPC（unix socket，本机）
 java -jar mcdebug-cli.jar --tcp <host>:25580 status   # 跨机访问（TCP）
 java -jar mcdebug-cli.jar jar --output ../consumer/run/mods            # Fabric 版（默认），并删掉同目录另一种 jar
-java -jar mcdebug-cli.jar jar --loader neoforge --output ../consumer/run/mods  # NeoForge 版（需要 mods/ 里另有 KotlinForForge）
+java -jar mcdebug-cli.jar jar --loader neoforge --output ../consumer/run/mods  # NeoForge 版（已内嵌 Kotlin 标准库）
 ```
 
 > 反编译 MC / Fabric API 源码（参考用，不参与编译、不进仓库）：`./gradlew genSources`，
@@ -261,7 +261,7 @@ node scripts/set-version.mjs X.Y.Z
 - `NbtJson.fromJson` 有损：JSON 数字统一成 `NbtInt`，无法区分 byte/short/int/long；某些 BE 字段（byte 标志位、long 坐标）需要精确类型时可能出错
 - MCP adapter 没做（对话中"Layer 4"）
 - 自定义 storage adapter SPI 没做；特殊资源类型后续扩展
-- **跨 loader 语义差异**（同一个 CLI 打两种实例时会遇到，完整表见 `docs/plan-neoforge-port.md` §11.4）：① 流体单位 Fabric=`droplet`（1 桶 81000）vs NeoForge=`mb`（1 桶 1000），读 `server.status.fluidUnit`；② `fluid.*` 的 `--index` 在 NeoForge 只能“选定并报告”那个罐，注/抽由 `IFluidHandler` 自己路由；③ `storage.get` 的 `supportsInsertion/Extraction`：Fabric 是能力标志，NeoForge 是**当前状态**推导（满罐→`supportsInsertion:false`、空罐→`supportsExtraction:false`），跨 loader 不要比；④ `reflect.*` 在 NeoForge 只吃 FQN 类名（没有映射表可查短名），且名字相同时不返回 `mojangClass` 字段；⑤ NeoForge 版需要 `mods/` 里有 KotlinForForge（Fabric 版需要 fabric-language-kotlin）；⑥ 能量单位有协议字段了：`server.status.energyUnit` = `E`（Fabric）/`FE`（NeoForge），与 `fluidUnit` 同一模式
+- **跨 loader 语义差异**（同一个 CLI 打两种实例时会遇到，完整表见 `docs/plan-neoforge-port.md` §11.4）：① 流体单位 Fabric=`droplet`（1 桶 81000）vs NeoForge=`mb`（1 桶 1000），读 `server.status.fluidUnit`；② `fluid.*` 的 `--index` 在 NeoForge 只能“选定并报告”那个罐，注/抽由 `IFluidHandler` 自己路由；③ `storage.get` 的 `supportsInsertion/Extraction`：Fabric 是能力标志，NeoForge 是**当前状态**推导（满罐→`supportsInsertion:false`、空罐→`supportsExtraction:false`），跨 loader 不要比；④ `reflect.*` 在 NeoForge 只吃 FQN 类名（没有映射表可查短名），且名字相同时不返回 `mojangClass` 字段；⑤ 两端 jar 均内嵌 Kotlin 标准库，无需 Kotlin 前置；⑥ 能量单位有协议字段了：`server.status.energyUnit` = `E`（Fabric）/`FE`（NeoForge），与 `fluidUnit` 同一模式
 - `modid.mixins.json` 是 Fabric 模板遗留；`mcdebug.mixins.json` 仍是空占位，真正在用的 mixin 位于客户端侧的 `mcdebug.client.mixins.json`（GUI 矩形访问器、渲染调度/新帧屏障、失焦策略/虚拟光标，见 §14）。三个配置文件都不要当成"没用的模板"删掉
 - `inv.*` 与 `storage.*` 有重叠：`inv.getSlot/setSlot` 是槽位级访问（storage 没有对应），保留；`inv.insert/extract` 和 `fluid.*` 是 `storage.*` 的特例，帮助文本已指向 storage，ic2 测试仍在用所以没删
 - 坐标参数在 CLI 有三种写法（`--x/--y/--z`、`--from "x,y,z"`、chunk 的 `--cx/--cz`），RPC 侧统一是 `[x,y,z]` 数组；没统一 CLI 是因为会破坏现有脚本

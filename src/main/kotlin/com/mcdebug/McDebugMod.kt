@@ -28,7 +28,7 @@ import net.fabricmc.api.DedicatedServerModInitializer
  * `com.mcdebug.loader.neoforge.McDebugNeoForge` instead; every other file in this source
  * tree is shared between the loaders (see [Loader]).
  */
-object McDebugMod : DedicatedServerModInitializer {
+class McDebugMod : DedicatedServerModInitializer {
     override fun onInitializeServer() {
         Loader.install(FabricLoaderApi())
         RpcEnv.gameDir = { Loader.api.gameDir }
