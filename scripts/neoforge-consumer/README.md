@@ -17,6 +17,7 @@ mkdir -p "$F/consumer/gradle/wrapper"
 cp gradle/wrapper/gradle-wrapper.jar gradle/wrapper/gradle-wrapper.properties "$F/consumer/gradle/wrapper/"
 
 # 被测 jar 已内嵌 Kotlin 标准库，无需安装 KotlinForForge。
+mkdir -p "$F/consumer/run/mods"
 java -jar "$REPO/mcdebug-cli.jar" jar --loader neoforge --output "$F/consumer/run/mods"
 
 printf 'eula=true\nonline-mode=false\nserver-port=0\nspawn-protection=0\nmax-players=1\n' > "$F/consumer/run/eula.txt"

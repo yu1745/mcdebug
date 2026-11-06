@@ -1030,11 +1030,14 @@ internal object WorldPlayerActions {
 
             FakePlayerPool.withFakePlayer(server, world, gamemode) { fakePlayer ->
                 val oldArmor = installArmor(server, fakePlayer, p)
+                var heldModifiers: com.google.common.collect.Multimap<Holder<Attribute>, AttributeModifier> =
+                    LinkedHashMultimap.create()
 
                 try {
                     fakePlayer.setItemInHand(InteractionHand.MAIN_HAND, itemBefore.copy())
                     primeStackForGameplay(world, fakePlayer, fakePlayer.getItemInHand(InteractionHand.MAIN_HAND), 0, true)
-                    addMainHandModifiers(fakePlayer, fakePlayer.getItemInHand(InteractionHand.MAIN_HAND))
+                    heldModifiers = mainHandModifierMultimap(fakePlayer.getItemInHand(InteractionHand.MAIN_HAND))
+                    fakePlayer.getAttributes().addTransientAttributeModifiers(heldModifiers)
                     primeAttackCooldown(fakePlayer)
 
                     val playerFacing = p.getDirectionOrNull("playerFacing") ?: Direction.SOUTH
@@ -1064,7 +1067,8 @@ internal object WorldPlayerActions {
 
                     itemAfter = fakePlayer.getItemInHand(InteractionHand.MAIN_HAND).copy()
                 } finally {
-                    removeMainHandModifiers(fakePlayer, fakePlayer.getItemInHand(InteractionHand.MAIN_HAND))
+                    // The attack may break the stack or change its dynamic modifiers. Remove what we installed.
+                    fakePlayer.getAttributes().removeAttributeModifiers(heldModifiers)
                     fakePlayer.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY)
                     restoreArmor(fakePlayer, oldArmor)
                     fakePlayer.isShiftKeyDown = false
@@ -1155,28 +1159,15 @@ internal object WorldPlayerActions {
         old.forEach { (slot, stack) -> player.setItemSlot(slot, stack) }
     }
 
-    //1.21: ItemStack#getAttributeModifiers(EquipmentSlot) is gone; the attribute component lives on the item.
-    // `Item#getDefaultAttributeModifiers` is @Deprecated in 1.21.1 but is still what vanilla's own
-    // ItemStack#forEachModifier uses, so keep the identical source of modifiers on purpose.
-    @Suppress("DEPRECATION")
+    // Use the same stack-aware path as real equipment: components, dynamic item hooks and enchantments.
     private fun mainHandModifierMultimap(stack: ItemStack): com.google.common.collect.Multimap<Holder<Attribute>, AttributeModifier> {
         val multimap = LinkedHashMultimap.create<Holder<Attribute>, AttributeModifier>()
-        stack.item.getDefaultAttributeModifiers().forEach(EquipmentSlot.MAINHAND) { attribute, modifier ->
-            multimap.put(attribute, modifier)
+        if (!stack.isEmpty) {
+            stack.forEachModifier(EquipmentSlot.MAINHAND) { attribute, modifier ->
+                multimap.put(attribute, modifier)
+            }
         }
         return multimap
-    }
-
-    private fun addMainHandModifiers(player: ServerPlayer, stack: ItemStack) {
-        if (!stack.isEmpty) {
-            player.getAttributes().addTransientAttributeModifiers(mainHandModifierMultimap(stack))
-        }
-    }
-
-    private fun removeMainHandModifiers(player: ServerPlayer, stack: ItemStack) {
-        if (!stack.isEmpty) {
-            player.getAttributes().removeAttributeModifiers(mainHandModifierMultimap(stack))
-        }
     }
 
     private fun primeAttackCooldown(player: ServerPlayer) {

@@ -116,6 +116,9 @@ with its own and warns on stderr when they differ.
 
 Use `mcdebug raw <namespace.method> <json>` for anything without a dedicated command.
 
+`world.attackEntity` equips its fake player through the stack's native attribute iteration, including data components
+and dynamic item attributes. It removes the originally installed modifiers afterwards even if the attack breaks or changes the stack.
+
 | namespace | purpose |
 |---|---|
 | `world.*` | blocks, regions, use/attack/interact, forceload |
