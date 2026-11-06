@@ -167,6 +167,7 @@ java -jar mcdebug-cli.jar status    # 调用 server.status RPC（unix socket，�
 java -jar mcdebug-cli.jar --tcp <host>:25580 status   # 跨机访问（TCP）
 java -jar mcdebug-cli.jar jar --output ../consumer/run/mods            # Fabric 版（默认），并删掉同目录另一种 jar
 java -jar mcdebug-cli.jar jar --loader neoforge --output ../consumer/run/mods  # NeoForge 版（已内嵌 Kotlin 标准库）
+java -jar mcdebug-cli.jar skill --name neoforge-fabric-port  # 从本次构建安装 port skill 及 references；默认 skill 仍为 mcdebug
 ```
 
 > 反编译 MC / Fabric API 源码（参考用，不参与编译、不进仓库）：`./gradlew genSources`，

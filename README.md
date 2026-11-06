@@ -41,9 +41,11 @@ NeoForge 21.1.x is built by an independent nested build over the **same sources*
 `scripts/neoforge-smoke.sh`. See `docs/plan-neoforge-port.md` for the architecture, verified results and loader differences.
 
 For coding agents there is a Claude Code skill (workflow and pitfalls; the CLI's own `--help`
-stays the command reference). The CLI carries the one matching its version:
+stays the command reference). The CLI carries the skills matching its version:
 `mcdebug skill` writes `~/.agents/skills/mcdebug/SKILL.md` (`--output DIR`, `--print`); source in
 `skills/mcdebug/`.
+`mcdebug skill --name neoforge-fabric-port` installs the bundled port skill with its reference files under
+`~/.agents/skills/neoforge-fabric-port/` (also supports `--output DIR`).
 
 Below, `mcdebug` stands for `java -jar mcdebug-cli.jar` or the native binary (`mdb`, see
 [Native-image distribution](#native-image-distribution)). Tagged releases attach

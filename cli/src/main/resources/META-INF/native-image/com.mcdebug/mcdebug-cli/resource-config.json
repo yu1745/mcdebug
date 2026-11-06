@@ -2,7 +2,7 @@
   "resources": {
     "includes": [
       { "pattern": "\\QMETA-INF/mcdebug/mod.jar\\E" },
-      { "pattern": "\\QMETA-INF/mcdebug/skill/SKILL.md\\E" }
+      { "pattern": "\\QMETA-INF/mcdebug/skills/\\E.*" }
     ]
   }
 }

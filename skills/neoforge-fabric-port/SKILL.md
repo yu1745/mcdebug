@@ -35,6 +35,7 @@ description: 基于已知源码，将 Minecraft 1.21.x NeoForge 模组自动移�
 读目标仓库的开发约束与现有移植记录，确定并记下：
 
 - 上游源码路径、版本/commit、许可证；目标仓库、分支和允许修改的目录。
+- 依赖链：目标模组依赖的、同样需要移植的库，先读基线声明的依赖版本，按基线实际编译所对的版本/分支取源，库与模组的固定版本成对记录；换基线时整套更换，不拿别的版本线的库顶替。
 - 精确 Minecraft 小版本、JDK、映射、加载器和 API 版本。默认保持同一 MC 小版本，避免把版本升级和加载器迁移混成一项工作。
 - 已移植范围、这轮要接通的用户行为、非目标、允许的平台差异和验收证据。
 - 实际构建任务、源码集、资源生成方式、运行目录、测试存档与显示环境。
@@ -102,6 +103,8 @@ mdb 已验证的双加载器环境是 **Minecraft 1.21.1 / NeoForge 21.1.x / Fab
 - 客户端统一用 `mdb session start` 启动 owned session，结束用 `session stop`；不手写裸客户端启动器，不按进程名批量杀 Java/Gradle。
 - session 后端需要可用的 Gradle wrapper 和 `runClient`。NeoForge 的启动参数交给 session 适配，不手工用 `--args` 覆盖其启动参数文件。
 - 截图需要真实客户端、可用显示服务和 GL；只有专用服务器拿不到像素。无显示环境时记录阻塞，不用数据 JSON 冒充视觉验收。
+- 启动前显式选择并验证显示（如 `glxinfo -B` 看渲染器与 direct rendering），优先硬件加速；代理 shell 继承的 `DISPLAY` 可能不可用。软件渲染得到的截图不能充当视觉基线，证据里记录所用显示。
+- **截图前关闭原版遮挡提示**：每个测试 gameDir 启动前将 `options.txt` 的 `tutorialStep` 设为 `none`，避免新世界的 WASD/鼠标教程；已启动时用客户端原生 `Minecraft.getInstance().getTutorial().setStep(TutorialSteps.NONE)` 立即关闭并保存。每次连接本地离线测试服后，用客户端原生 `SystemToast.forceHide(Minecraft.getInstance().getToasts(), SystemToast.SystemToastId.UNSECURE_SERVER_WARNING)` 定点关闭“不安全聊天 / original message”提示。通过 mdb 客户端反射调用即可；`demand`/`gui-only` 下不要靠等待其自动消失。随后强制新帧并读图确认 GUI 无遮挡，不通过裁图、隐藏整个 HUD 或修改发布模组来掩盖这些测试环境提示。
 
 以下路径、任务、存档名是占位符，须按目标项目替换：
 
@@ -116,6 +119,8 @@ mdb --sessions-dir /abs/experiment/sessions --session port-target gui status --b
 `--world` 指已有 `saves/` 子目录名，不是显示名。没有测试世界时先进入标题页，通过游戏 UI 创建隔离世界；不伪造存档或删除锁。确认 `world_ready`、`inWorld`、实际加载的版本/jarPath 和窗口尺寸，socket 文件存在不算就绪。
 
 需要原版行为对照时，用同样方式为原源码或独立参考消费者建立 NeoForge 会话。只有参考服务端时只能证明服务端行为；拿不到原版画面时明确标记视觉基线缺失。
+
+**原版端默认不可信。** 参考实现若是第三方或自动化产物，先过三道门才可作行为基线：客户端启动到主菜单且 0 ERROR；进入世界且 0 ERROR；跑满一段 tick 且配方/标签/网络等同步正常。缺陷逐个作为针对固定提交的编号补丁保存，并写明目标端移植要如何处理同一处代码。缺陷持续增长而无收敛时，停止修补，带证据上报并重选基线或改用能正常运行的官方版本做行为对照，不要悄悄变成基线的维护者。
 
 `--session NAME` 自动选择服务端/客户端平面。显式连接时，服务端用 `--socket`/`--tcp`，客户端用 `--client-socket`/`--client-tcp`；不能拿服务端 socket 请求截图。独立多人服不冒充 session 的集成服务器。
 
@@ -208,3 +213,7 @@ worker 交付只进入“待审查”，主代理按真实 diff 和原始证据�
 结束或阻塞时，保存日志与失败夹具，正常停止自己启动的 owned sessions，核对状态及对应进程退出；附加会话不停止，锁文件不手删，共享 Gradle daemon 不清杀。长期记录保留当前 commit、最后一轮结果与下一条可执行动作。
 
 若版本不支持、缺少依赖/显示环境、无法取得必要基线，或修复将超出授权边界：停止相关分支并给出**证据、已尝试路径、具体阻塞和所需输入**；可继续互不依赖的已授权切片，不用降低验收标准换取完成。
+
+## 7. 跨 Minecraft 版本的补充参考
+
+涉及 1.20 → 1.21，或同版移植的输入基线可能遗留旧版实现时，阅读 [Minecraft 1.20 → 1.21 版本迁移陷阱](references/minecraft-1.20-to-1.21-pitfalls.md)。这是独立的版本差异清单，不把其中问题误归为加载器差异。

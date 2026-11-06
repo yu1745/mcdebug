@@ -33,6 +33,27 @@ application {
 	mainClass = 'com.mcdebug.cli.MainKt'
 }
 
+// Keep the complete skill trees in normal resources too (tests/installDist and the fat jar).
+def bundledSkills = ['mcdebug', 'neoforge-fabric-port']
+tasks.named('processResources') {
+	bundledSkills.each { skill ->
+		from(rootProject.file("skills/${skill}")) {
+			into "META-INF/mcdebug/skills/${skill}"
+		}
+	}
+	doLast {
+		bundledSkills.each { skill ->
+			def sourceDir = rootProject.file("skills/${skill}").toPath()
+			def paths = rootProject.fileTree(sourceDir).files.collect {
+				sourceDir.relativize(it.toPath()).toString().replace('\\', '/')
+			}.sort()
+			def index = new File(destinationDir, "META-INF/mcdebug/skills/${skill}.files")
+			index.parentFile.mkdirs()
+			index.text = paths.join('\n') + '\n'
+		}
+	}
+}
+
 // The mod jar of this same build travels inside the CLI (`mcdebug jar` writes it out): versions
 // always match and nothing is downloaded. The root project is evaluated first, so remapJar exists.
 def modJar = rootProject.tasks.named('remapJar')
@@ -68,10 +89,6 @@ tasks.shadowJar {
 		} finally {
 			zip.close()
 		}
-	}
-	// The agent skill of the same version (`mcdebug skill` installs it).
-	from(rootProject.file('skills/mcdebug')) {
-		into 'META-INF/mcdebug/skill'
 	}
 	manifest {
 		attributes 'Main-Class': application.mainClass.get()

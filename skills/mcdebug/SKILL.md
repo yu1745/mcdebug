@@ -38,6 +38,7 @@ Releases before v0.6.3 have no `mcdebug-cli.jar` asset. From a source checkout i
 loaders** and this skill, all of its own version: `mcdebug jar --output <gameDir>/mods` installs
 the Fabric mod, `mcdebug jar --loader neoforge --output <gameDir>/mods` the NeoForge one (each
 removes the other/older jars), `mcdebug skill` refreshes this skill to match the CLI.
+`mcdebug skill --name neoforge-fabric-port` installs the bundled port workflow and all its reference files.
 
 Below, `mcdebug` means whichever of these you found.
 
