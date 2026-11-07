@@ -27,6 +27,7 @@ import java.util.concurrent.CompletableFuture
 
 object ScreenOps : RpcHandlerGroup {
     private val sessions = LinkedHashMap<String, ScreenSession>()
+    private const val MAX_SESSIONS = 256
 
     override fun methods(): Map<String, RpcHandler> = mapOf(
         "openBlock" to ::openBlock,
@@ -83,6 +84,12 @@ object ScreenOps : RpcHandlerGroup {
             val title = factory?.displayName ?: state.block.name
             val session = ScreenSession(id, player, handler, title, world.dimension().location().toString(), pos)
             sessions[id] = session
+            // sessions a client never closed (it crashed or forgot) would keep their fake players forever: the
+            // oldest are closed past MAX_SESSIONS
+            while (sessions.size > MAX_SESSIONS) {
+                val oldest = sessions.keys.first()
+                sessions.remove(oldest)?.let { runCatching { closeSession(it) } }
+            }
             screenSnapshot(session).apply { addProperty("openedBy", openedBy) }
         }
 

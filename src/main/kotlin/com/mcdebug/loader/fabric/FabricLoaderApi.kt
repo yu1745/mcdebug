@@ -52,6 +52,11 @@ class FabricLoaderApi : LoaderApi {
         ServerTickEvents.END_SERVER_TICK.register { server -> callback(server) }
     }
 
+    override fun releaseConnection(handler: net.minecraft.server.network.ServerGamePacketListenerImpl) {
+        // endSession only untracks the addon; handleDisconnect would also fire mods' disconnect events
+        runCatching { net.fabricmc.fabric.impl.networking.server.ServerNetworkingImpl.getAddon(handler).endSession() }
+    }
+
     override fun modJarPath(): String? = try {
         FabricLoaderApi::class.java.protectionDomain?.codeSource?.location?.toURI()?.let { Path.of(it).toString() }
     } catch (_: Throwable) {

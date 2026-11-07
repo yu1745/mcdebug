@@ -80,6 +80,13 @@ interface LoaderApi {
      */
     fun modJarPath(): String? = null
 
+    /**
+     * A fake player's no-op connection is being dropped without a disconnect: release what the loader tracks per
+     * connection. Fabric networking keeps every play handler's addon in a global set until the connection
+     * disconnects, so each discarded session player (and its advancement tracker) would stay reachable forever.
+     */
+    fun releaseConnection(handler: net.minecraft.server.network.ServerGamePacketListenerImpl) {}
+
     fun fireUseEntity(
         player: Player,
         level: Level,

@@ -228,6 +228,32 @@ internal object FakePlayerPool {
         if (!player.isRemoved && w is ServerLevel) {
             w.removePlayerImmediately(player, Entity.RemovalReason.DISCARDED)
         }
+        releasePlayerData(player)
+    }
+
+    /**
+     * What a real logout does besides leaving the world: the advancement tracker stops listening on the criteria
+     * triggers, and the server's per-UUID caches (advancements, stats) drop the player. Session players get a fresh
+     * UUID each, so without this every screen session leaks a full advancement tracker (thousands of sessions run the
+     * server out of heap). The caches are private maps of PlayerList: found by type, not by (mapping-dependent) name.
+     */
+    private fun releasePlayerData(player: ServerPlayer) {
+        runCatching { player.advancements.stopListening() }
+        runCatching { com.mcdebug.loader.Loader.api.releaseConnection(player.connection) }
+        val list = player.server.playerList
+        var c: Class<*>? = list.javaClass
+        while (c != null && c != Any::class.java) {
+            for (f in c.declaredFields) {
+                if (!java.util.Map::class.java.isAssignableFrom(f.type) || java.lang.reflect.Modifier.isStatic(f.modifiers)) continue
+                runCatching {
+                    f.isAccessible = true
+                    val m = f.get(list) as? MutableMap<*, *> ?: return@runCatching
+                    val v = m[player.uuid]
+                    if (v != null && v !is ServerPlayer) (m as MutableMap<Any?, Any?>).remove(player.uuid)
+                }
+            }
+            c = c.superclass
+        }
     }
 
     /** Register the keepalive tick through the loader seam. */
