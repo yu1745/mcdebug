@@ -229,8 +229,8 @@ internal object WorldPlayerActions {
      *      held tick (crossbow loading, bow draw) — driven here by reflecting
      *      LivingEntity.tickActiveItemStack, the exact same method the server
      *      calls from LivingEntity.tick() every tick.
-     *   3. Player.stopUsingItem() — the "release". This calls
-     *      Item.onStoppedUsing (bow fires, crossbow finishes loading).
+     *   3. Player.releaseUsingItem() — the "release". This calls
+     *      Item.releaseUsing (bow fires, crossbow finishes loading), then clears use state.
      *
      * Projectiles are real entities spawned into the world; they fly on normal
      * server ticks and can be observed with find-entities / wait-until.
@@ -397,7 +397,7 @@ internal object WorldPlayerActions {
                                 invokeTickActiveItemStack(fakePlayer)
                             }
                             // 3. Release: onStoppedUsing (bow fires, crossbow loads).
-                            fakePlayer.stopUsingItem()
+                            fakePlayer.releaseUsingItem()
                             cycleJson.addProperty("stopped", true)
                         } else {
                             cycleJson.addProperty("stopped", false)
