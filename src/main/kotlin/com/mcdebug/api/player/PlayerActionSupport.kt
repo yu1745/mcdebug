@@ -105,7 +105,8 @@ internal object PlayerActionSupport {
     }
     
     internal val LAST_ATTACKED_TICKS_FIELD by lazy {
-        listOf("lastAttackedTicks", "field_6273", "aQ").firstNotNullOfOrNull { name ->
+        // Yarn, intermediary, obfuscated, Mojang (NeoForge/dev runtime), SRG (Forge 1.20 runtime)
+        listOf("lastAttackedTicks", "field_6273", "aQ", "attackStrengthTicker", "f_20922_").firstNotNullOfOrNull { name ->
             findDeclaredField(Player::class.java, name)
         } ?: error("Unable to resolve Player lastAttackedTicks field")
     }
