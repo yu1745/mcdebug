@@ -143,7 +143,7 @@ internal object FakePlayerPool {
         val oldGameMode = player.gameMode.gameModeForPlayer
         try {
             applyGameMode(player, gamemode)
-            clearItemCooldowns(player)
+            resetTransientState(player)
             block(player)
         } finally {
             oldAbilities.restore(player)
@@ -186,6 +186,17 @@ internal object FakePlayerPool {
      * use of that item PASS. Each action starts from a clean state. The map field is found by type
      * so it works under any mapping.
      */
+    /**
+     * Start each action from a clean fake player: without a connection it never runs Player.tick, so state an
+     * earlier action left (item cooldowns, fire, status effects from counterattacks) would never wear off and
+     * would change every later action (e.g. "attacker on fire" conditions).
+     */
+    fun resetTransientState(player: ServerPlayer) {
+        clearItemCooldowns(player)
+        player.clearFire()
+        player.removeAllEffects()
+    }
+
     fun clearItemCooldowns(player: ServerPlayer) {
         runCatching {
             val field = ItemCooldownsMapField ?: return
