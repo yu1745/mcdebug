@@ -141,6 +141,7 @@ internal object FakePlayerPool {
         val oldGameMode = player.gameMode.gameModeForPlayer
         try {
             applyGameMode(player, gamemode)
+            clearItemCooldowns(player)
             block(player)
         } finally {
             oldAbilities.restore(player)
@@ -174,6 +175,26 @@ internal object FakePlayerPool {
         player.setGameMode(mode)
         player.abilities.mayBuild = true
         ensureProtected(player)
+    }
+
+    /**
+     * Drop item cooldowns left by an earlier action. Without a connection the fake player never runs
+     * Player.tick (ServerPlayer.doTick is driven by the network handler), so ItemCooldowns never
+     * advance and one cooldown (shield block, ender pearl, a modded ability) would make every later
+     * use of that item PASS. Each action starts from a clean state. The map field is found by type
+     * so it works under any mapping.
+     */
+    fun clearItemCooldowns(player: ServerPlayer) {
+        runCatching {
+            val field = ItemCooldownsMapField ?: return
+            (field.get(player.cooldowns) as MutableMap<*, *>).clear()
+        }
+    }
+
+    private val ItemCooldownsMapField: java.lang.reflect.Field? by lazy {
+        net.minecraft.world.item.ItemCooldowns::class.java.declaredFields
+            .firstOrNull { java.util.Map::class.java.isAssignableFrom(it.type) }
+            ?.apply { isAccessible = true }
     }
 
     /** Keep the spawned fake player from dying, falling or drifting. */

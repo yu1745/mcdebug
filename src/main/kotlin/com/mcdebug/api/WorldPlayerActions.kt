@@ -229,7 +229,7 @@ internal object WorldPlayerActions {
      *      held tick (crossbow loading, bow draw) — driven here by reflecting
      *      LivingEntity.tickActiveItemStack, the exact same method the server
      *      calls from LivingEntity.tick() every tick.
-     *   3. Player.stopUsingItem() — the "release". This calls
+     *   3. Player.releaseUsingItem() — the "release". This calls
      *      Item.onStoppedUsing (bow fires, crossbow finishes loading).
      *
      * Projectiles are real entities spawned into the world; they fly on normal
@@ -397,7 +397,7 @@ internal object WorldPlayerActions {
                                 invokeTickActiveItemStack(fakePlayer)
                             }
                             // 3. Release: onStoppedUsing (bow fires, crossbow loads).
-                            fakePlayer.stopUsingItem()
+                            fakePlayer.releaseUsingItem()
                             cycleJson.addProperty("stopped", true)
                         } else {
                             cycleJson.addProperty("stopped", false)
@@ -1216,7 +1216,7 @@ internal object WorldPlayerActions {
     private val TICK_ACTIVE_ITEM_STACK_METHOD: java.lang.reflect.Method? by lazy {
         // LivingEntity.updatingUsingItem() is protected: intermediary name in production,
         // Mojang name in a Loom dev run.
-        findDeclaredMethod(LivingEntity::class.java, "method_6076", "updatingUsingItem")
+        findDeclaredMethod(LivingEntity::class.java, "method_6076", "updatingUsingItem", "m_21329_")
     }
 
     private fun findDeclaredMethod(type: Class<*>, vararg names: String): java.lang.reflect.Method? {
