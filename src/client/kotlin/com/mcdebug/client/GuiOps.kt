@@ -308,7 +308,9 @@ object GuiOps : ClientRpcGroup {
         // Passive delay, client hops, render wait and encoding share ONE deadline
         // and settlement. A second wrapper timeout could report failure after the
         // capture had already published its PNG-click transform.
-        Capture.screenshot(client, CaptureOptions.parse(params))
+        GuiInputModifiers.holding(params?.get("heldModifiers")?.takeIf { !it.isJsonNull }?.asInt) {
+            Capture.screenshot(client, CaptureOptions.parse(params))
+        }
 
     // ----------------------------------------------------------------- close
 

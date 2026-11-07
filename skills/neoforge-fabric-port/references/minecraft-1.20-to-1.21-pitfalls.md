@@ -37,3 +37,19 @@ float u = sprite.getU(x);
 **典型症状：** 不崩溃、不报解析错误；预填物品取出后为空，配方查看器把不同状态的物品判成重复（如出现“duplicate items”告警），进度永远无法达成。
 
 **核实与验证：** 对每一种序列化格式，列出全部写入器和读取器，并 grep 旧键名，Java 与 `data/**/*.json` 都要查。每个写入器都要做“写入 → 原生读取”往返，比较读出的数量和类型，不只看 NBT 是否存在。数据文件里的谓词，用真实写入路径产出的物品触发一次，不要手写理想化的 NBT。开发阶段没有旧存档兼容要求时，统一成一种格式即可，不要为旧键名补读取分支。
+
+## 3. 注册表 codec 配合裸 `NbtOps`/`JsonOps` 静默失败
+
+**边界：** 1.21 的附魔、伤害类型、纹饰等改为数据驱动注册表，`ItemEnchantments.CODEC` 这类 codec 的键走 `RegistryFixedCodec`，只有 `RegistryOps` 才能编解码。1.20 时代用裸 `NbtOps.INSTANCE` 做“快照再恢复”或手工序列化的代码照搬过来后，`encodeStart`/`parse` 返回 `DataResult.error`；再配上 `.result().orElse(...)` 回退，错误被吞掉，结果是空值。
+
+**典型症状：** 不报错；临时改写后恢复的数据被清空（例如挖掘时临时叠加附魔，恢复后工具原有附魔全部丢失），同步/存档的字段读出为空。
+
+**核实与验证：** grep `NbtOps.INSTANCE`、`JsonOps.INSTANCE` 与 `.result().orElse`/`orElseGet` 的组合，确认 codec 是否含注册表引用。只是在内存里暂存时，直接保留不可变的组件值；必须序列化时用 `provider.createSerializationContext(ops)`。验证要用“非空”的输入：空集合往往能编码成功，掩盖问题。
+
+## 4. `getDefaultTooltipHideFlags` 消失后 tooltip 重复
+
+**边界：** 1.20 Forge 的 `IItemExtension#getDefaultTooltipHideFlags` 在 1.21 被移除，隐藏改由 `ATTRIBUTE_MODIFIERS`/`ENCHANTMENTS` 组件的 `showInTooltip` 决定。自绘属性列表或依赖按键（shift/ctrl）切换视图的模组，原覆盖方法变成无人调用的死代码。
+
+**典型症状：** 不报错；物品 tooltip 同时出现模组自己的属性行和原版 "When in Main Hand"/附魔行。常规视图可能看起来正常，只有按住 shift/ctrl 的视图才重复。
+
+**核实与验证：** grep `HideFlags`/`getDefaultTooltipHideFlags`/`TooltipPart`，确认是否仍有调用方。在目标平台按 1.20 的掩码语义接管 `ItemStack#addAttributeTooltips` 和对应组件的 tooltip，按键相关时要在每次绘制时求值，不能写进组件。验收要真实按住修饰键截图：合成的按键事件不一定改变 GLFW 键状态，截图前确认 tooltip 确实切换了视图。

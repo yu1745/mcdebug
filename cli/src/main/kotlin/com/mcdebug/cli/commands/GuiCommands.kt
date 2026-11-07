@@ -229,6 +229,7 @@ class GuiScreenshotCmd : CliktCommand(
 - `--annotate` - also write `*.annotated.png`: numbered cyan boxes = slot indices, magenta boxes = widget indices (`gui click --slot N` / `--widget N`); the legend is in `annotations`
 - `--draw-log` - include `drawLog`: every blit (texture, texel UV, sprite), fill, string, item and tooltip of that frame with its GUI-unit rect
 - `--hash-only` - no PNG/file, only `pixelHash` + transform: cheap "did the picture change?" polling
+- `--hold-shift` / `--hold-ctrl` / `--hold-alt` - hold these modifiers while the captured frame renders (Screen.hasShiftDown() & co. answer true), e.g. a shift/ctrl tooltip variant; released afterwards
 - `--hide-cursor` - render the captured frame with the cursor parked off-screen (no hover highlight, tooltip or carried stack; the next frame is normal again): goldens that do not depend on where the last click left the cursor
 
 **Pitfalls**
@@ -247,13 +248,15 @@ class GuiScreenshotCmd : CliktCommand(
     private val drawLog by option("--draw-log", help = "include the frame's GuiGraphics draw calls (drawLog)").flag()
     private val hashOnly by option("--hash-only", help = "no PNG: only pixelHash + transform (change detection)").flag()
     private val hideCursor by option("--hide-cursor", help = "render this frame with the cursor off-screen: no hover highlight, tooltip or carried stack").flag()
+    private val held by HeldModifierOptions()
 
     override fun run() = withGuiApi { api ->
         if (hashOnly && (annotate || inline || out != null || pathOnly)) {
             throw UsageError("--hash-only writes no PNG; it cannot be combined with --annotate/--inline/--out/--path-only")
         }
         val r = api.gui.screenshot(ScreenshotOptions(mode = mode, format = if (hashOnly) "none" else "png", annotate = annotate,
-            drawLog = drawLog, inline = inline, name = name, delayTicks = delayTicks, cursor = if (hideCursor) "hide" else null))
+            drawLog = drawLog, inline = inline, name = name, delayTicks = delayTicks, cursor = if (hideCursor) "hide" else null,
+            heldModifiers = held.mask()))
         val o = r.asJsonObject
         var printed = o.get("path")?.asString ?: ""
         out?.let { target ->

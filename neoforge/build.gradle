@@ -71,6 +71,9 @@ configurations { shadedKotlin { transitive = false } }
 dependencies {
 	shadedKotlin "org.jetbrains.kotlin:kotlin-stdlib:${kotlin_version}"
 	implementation "org.jetbrains.kotlin:kotlin-stdlib:${kotlin_version}"
+	// Dev runs load the mod from build/classes, not from the jar that bundles stdlib: hand stdlib to the
+	// game as a runtime library, otherwise runServer/runClient fail with NoClassDefFoundError kotlin/...
+	additionalRuntimeClasspath "org.jetbrains.kotlin:kotlin-stdlib:${kotlin_version}"
 }
 
 tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {

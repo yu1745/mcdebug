@@ -110,8 +110,12 @@ internal object WorldPlayerActions {
 
             val stack = ItemStack(blockItem, 1)
             val nbtEl = p.get("nbt")
+            val componentsEl = p.get("components")
             if (nbtEl != null && !nbtEl.isJsonNull) {
                 ServerContext.stackSetNbt(stack, NbtJson.fromJson(nbtEl) as? CompoundTag)
+            }
+            if (componentsEl != null && !componentsEl.isJsonNull) {
+                stack.applyComponents(ServerContext.componentsFromJson(server, componentsEl))
             }
 
             val gamemode = FakePlayerPool.gameModeFrom(p)
@@ -178,7 +182,7 @@ internal object WorldPlayerActions {
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val itemId = p.requireString("item")
             val count = p.getIntOr("count", 1)
-            val itemBefore = ServerContext.itemStackFromJson(server, itemId, count, p.get("nbt"))
+            val itemBefore = ServerContext.itemStackFromJson(server, itemId, count, p.get("nbt"), p.get("components"))
 
             val sneaking = p.getBoolOrFalse("sneaking")
             val gamemode = FakePlayerPool.gameModeFrom(p)
@@ -271,7 +275,7 @@ internal object WorldPlayerActions {
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val itemId = p.requireString("item")
             val count = p.getIntOr("count", 1)
-            val itemBefore = ServerContext.itemStackFromJson(server, itemId, count, p.get("nbt"))
+            val itemBefore = ServerContext.itemStackFromJson(server, itemId, count, p.get("nbt"), p.get("components"))
             val holdTicks = p.getIntOr("holdTicks", 20)
             val repeat = p.getIntOr("repeat", 1)
             val ammoCount = p.getIntOr("ammoCount", 64)
@@ -522,7 +526,8 @@ internal object WorldPlayerActions {
                 val itemId = p.requireString("item")
                 val count = p.getIntOr("count", 1)
                 val nbtEl = p.get("nbt")
-                ServerContext.itemStackFromJson(server, itemId, count, nbtEl)
+                val componentsEl = p.get("components")
+                ServerContext.itemStackFromJson(server, itemId, count, nbtEl, componentsEl)
             } else {
                 ItemStack.EMPTY
             }
@@ -703,7 +708,8 @@ internal object WorldPlayerActions {
                 val itemId = p.requireString("item")
                 val count = p.getIntOr("count", 1)
                 val nbtEl = p.get("nbt")
-                ServerContext.itemStackFromJson(server, itemId, count, nbtEl)
+                val componentsEl = p.get("components")
+                ServerContext.itemStackFromJson(server, itemId, count, nbtEl, componentsEl)
             } else {
                 ItemStack.EMPTY
             }
@@ -763,7 +769,8 @@ internal object WorldPlayerActions {
                 val itemId = p.requireString("item")
                 val count = p.getIntOr("count", 1)
                 val nbtEl = p.get("nbt")
-                ServerContext.itemStackFromJson(server, itemId, count, nbtEl)
+                val componentsEl = p.get("components")
+                ServerContext.itemStackFromJson(server, itemId, count, nbtEl, componentsEl)
             } else {
                 ItemStack.EMPTY
             }
@@ -887,7 +894,8 @@ internal object WorldPlayerActions {
                 val itemId = p.requireString("item")
                 val count = p.getIntOr("count", 1)
                 val nbtEl = p.get("nbt")
-                ServerContext.itemStackFromJson(server, itemId, count, nbtEl)
+                val componentsEl = p.get("components")
+                ServerContext.itemStackFromJson(server, itemId, count, nbtEl, componentsEl)
             } else {
                 ItemStack.EMPTY
             }
@@ -1016,7 +1024,8 @@ internal object WorldPlayerActions {
                 val itemId = p.requireString("item")
                 val count = p.getIntOr("count", 1)
                 val nbtEl = p.get("nbt")
-                ServerContext.itemStackFromJson(server, itemId, count, nbtEl)
+                val componentsEl = p.get("components")
+                ServerContext.itemStackFromJson(server, itemId, count, nbtEl, componentsEl)
             } else {
                 ItemStack.EMPTY
             }
@@ -1133,7 +1142,7 @@ internal object WorldPlayerActions {
             val stackObject = stackElement.asJsonObject
             val item = stackObject.getStringOrNull("item") ?: "minecraft:air"
             val count = stackObject.getIntOr("count", 1)
-            val stack = ServerContext.itemStackFromJson(server, item, count, stackObject.get("nbt"))
+            val stack = ServerContext.itemStackFromJson(server, item, count, stackObject.get("nbt"), stackObject.get("components"))
             player.setItemSlot(slot, stack)
             primeStackForGameplay(player.level() as ServerLevel, player, stack, slot.getIndex(), false)
         }

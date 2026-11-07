@@ -18,6 +18,10 @@ import net.minecraft.server.level.ServerPlayer
 import net.minecraft.network.chat.Component
 import net.minecraft.core.BlockPos
 import net.minecraft.core.Direction
+import net.minecraft.world.InteractionHand
+import net.minecraft.world.item.ItemStack
+import net.minecraft.world.phys.BlockHitResult
+import net.minecraft.world.phys.Vec3
 import java.util.UUID
 import java.util.concurrent.CompletableFuture
 
@@ -29,6 +33,7 @@ object ScreenOps : RpcHandlerGroup {
         "snapshot" to ::snapshot,
         "setPlayerSlot" to ::setPlayerSlot,
         "clickSlot" to ::clickSlot,
+        "clickButton" to ::clickButton,
         "quickMove" to ::quickMove,
         "close" to ::close,
     )
@@ -48,24 +53,37 @@ object ScreenOps : RpcHandlerGroup {
             val side = StorageOps.parseSide(p.getObjectOrNull("opts")?.getStringOrNull("side") ?: p.getStringOrNull("side"))
             val state = world.getBlockState(pos)
             val factory = state.getMenuProvider(world, pos)
-                ?: throwScreenNotFound("no screen handler factory at $pos", null)
 
             val sessionUuid = UUID.randomUUID()
             val player = FakePlayerPool.create(server, world, GameProfile(sessionUuid, "[mcdebug_screen]"))
             positionPlayerForScreen(player, pos, side)
 
             closeSessionsForPlayer(player)
-            val opened = player.openMenu(factory)
-            if (opened.isEmpty) {
-                throwScreenNotFound("screen handler factory returned empty at $pos", null)
+            // Direct path: the block's MenuProvider. Loaders reject some providers here (Fabric extended screen handlers
+            // need the factory the block builds in its own use handler; NeoForge menus that write extra data likewise),
+            // so any failure falls back to the real interaction path: an empty-handed right click on the block.
+            var openedBy = "menu_provider"
+            val direct = factory?.let { f -> runCatching { player.openMenu(f) } }
+            if (direct == null || direct.isFailure || direct.getOrNull()?.isEmpty != false) {
+                if (player.containerMenu !== player.inventoryMenu) player.closeContainer()
+                openedBy = "use_block"
+                val face = side ?: Direction.NORTH
+                val hit = BlockHitResult(Vec3.atCenterOf(pos).relative(face, 0.5), face, pos, false)
+                player.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY)
+                player.gameMode.useItemOn(player, world, ItemStack.EMPTY, InteractionHand.MAIN_HAND, hit)
+                if (player.containerMenu === player.inventoryMenu) {
+                    val why = direct?.exceptionOrNull()?.let { "${it.javaClass.simpleName}: ${it.message}" }
+                        ?: if (factory == null) "no menu provider" else "menu provider returned empty"
+                    throwScreenNotFound("no screen opened at $pos (direct: $why; use_block opened nothing)", null)
+                }
             }
 
             val handler = player.containerMenu
             val id = UUID.randomUUID().toString()
-            val title = factory.displayName ?: Component.empty()
+            val title = factory?.displayName ?: state.block.name
             val session = ScreenSession(id, player, handler, title, world.dimension().location().toString(), pos)
             sessions[id] = session
-            screenSnapshot(session)
+            screenSnapshot(session).apply { addProperty("openedBy", openedBy) }
         }
 
     private fun snapshot(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
@@ -101,6 +119,22 @@ object ScreenOps : RpcHandlerGroup {
             session.handler.clicked(slot, button, actionType, session.player)
             session.handler.sendAllDataToRemote()
             screenSnapshot(session)
+        }
+
+    /**
+     * Vanilla menu button: AbstractContainerMenu.clickMenuButton(player, id), exactly what the server does for
+     * ServerboundContainerButtonClickPacket (stonecutter recipe, loom pattern, enchanting option, lectern page and
+     * any modded menu using the same mechanism). `accepted` is the menu's own answer.
+     */
+    private fun clickButton(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
+        RpcContext.onServer(server) {
+            val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
+            val session = session(p)
+            val button = p.requireLong("button").toInt()
+            requireUsable(session)
+            val accepted = session.handler.clickMenuButton(session.player, button)
+            if (accepted) session.handler.broadcastChanges()
+            screenSnapshot(session).apply { addProperty("accepted", accepted) }
         }
 
     private fun quickMove(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
@@ -237,6 +271,7 @@ object ScreenOps : RpcHandlerGroup {
             obj.getStringOrNull("item") ?: "minecraft:air",
             obj.getIntOr("count", 0),
             obj.get("nbt"),
+            obj.get("components"),
         )
 
     private fun throwScreenNotFound(message: String, screenId: String?): Nothing {

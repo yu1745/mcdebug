@@ -602,7 +602,7 @@ object StorageOps : RpcHandlerGroup {
         }
         val item = resource.getStringOrNull("item") ?: resource.getStringOrNull("id")
             ?: throw RpcException(RpcErrors.INVALID_PARAMS, "item resource requires item")
-        val stack = ServerContext.itemStackFromJson(server, item, count, resource.get("nbt"))
+        val stack = ServerContext.itemStackFromJson(server, item, count, resource.get("nbt"), resource.get("components"))
         if (stack.isEmpty) throw RpcException(RpcErrors.INVALID_PARAMS, "item resource must not be empty")
         return stack
     }
@@ -610,7 +610,7 @@ object StorageOps : RpcHandlerGroup {
     private fun targetStack(server: MinecraftServer, stackJson: JsonObject): ItemStack {
         val item = stackJson.getStringOrNull("item") ?: "minecraft:air"
         val count = stackJson.getIntOr("count", 0)
-        return ServerContext.itemStackFromJson(server, item, count, stackJson.get("nbt"))
+        return ServerContext.itemStackFromJson(server, item, count, stackJson.get("nbt"), stackJson.get("components"))
     }
 
     private fun resolveFluid(server: MinecraftServer, id: String): Fluid {

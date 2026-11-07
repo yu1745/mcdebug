@@ -227,6 +227,11 @@ object GuiPointerOps : ClientRpcGroup {
 
     private fun hover(client: Minecraft, params: JsonObject?): CompletableFuture<JsonElement> {
         val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required: ${GuiTargets.USAGE}")
+        // heldModifiers: shift/ctrl/alt held for the rendered frame (tooltip variants), released afterwards
+        return GuiInputModifiers.holding(p.get("heldModifiers")?.takeIf { !it.isJsonNull }?.asInt) { hoverHeld(client, p) }
+    }
+
+    private fun hoverHeld(client: Minecraft, p: JsonObject): CompletableFuture<JsonElement> {
         val moved = GuiTargets.prepare(client, p).thenCompose { q -> ClientTasks.onClient(client) {
             val screen = client.screen ?: throw noScreen()
             val target = GuiTargets.resolve(client, q)

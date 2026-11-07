@@ -44,6 +44,25 @@ import com.mcdebug.rpc.RpcException
  * via the leaf-resolver callback supplied by WaitOps.
  */
 internal object PredicateExpr {
+    /** Dotted path into a JSON tree; numeric segments index arrays. Missing → JSON null. */
+    fun jsonPath(root: com.google.gson.JsonElement, path: String): JsonElement {
+        if (path.isEmpty()) return root
+        var cur: com.google.gson.JsonElement = root
+        for (seg in path.split('.')) {
+            cur = when {
+                cur.isJsonObject -> cur.asJsonObject.get(seg) ?: return com.google.gson.JsonNull.INSTANCE
+                cur.isJsonArray -> {
+                    val i = seg.toIntOrNull() ?: return com.google.gson.JsonNull.INSTANCE
+                    val arr = cur.asJsonArray
+                    if (i !in 0 until arr.size()) return com.google.gson.JsonNull.INSTANCE
+                    arr.get(i)
+                }
+                else -> return com.google.gson.JsonNull.INSTANCE
+            }
+        }
+        return cur
+    }
+
 
     // ---- public API ----
 
@@ -354,7 +373,7 @@ internal object PredicateExpr {
                 TokKind.LPAREN -> parseGroupedOrArith()
                 TokKind.IDENT -> when (t.text.lowercase()) {
                     "sum", "count" -> parseAggregate()
-                    "be", "inv", "block", "tick" -> parseSourceRef()
+                    "be", "inv", "block", "tick", "storage" -> parseSourceRef()
                     else -> throw RpcException(RpcErrors.INVALID_PREDICATE,
                         "unknown identifier '${t.text}' at ${t.pos}")
                 }

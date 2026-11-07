@@ -27,11 +27,12 @@ fun parseTargetArg(target: String?, x: Int?, y: Int?, z: Int?, dim: String?, wha
 
 private const val TARGET_HELP = "target JSON '{\"kind\":\"block\",\"pos\":[x,y,z]}' or @file; or omit it (or 'block') and give --x/--y/--z"
 
-fun parseResourceArg(resource: String?, item: String?, fluid: String?, energy: Boolean, nbt: String?): JsonElement {
+fun parseResourceArg(resource: String?, item: String?, fluid: String?, energy: Boolean, nbt: String?, components: String? = null): JsonElement {
     if (resource != null) return parseJsonArg(resource)
     val nbtEl = nbt?.let { parseJsonArg(it) }
+    val componentsEl = components?.let { parseJsonArg(it) }
     return when {
-        item != null -> gson.toJsonTree(mapOf("kind" to "item", "item" to item, "nbt" to nbtEl))
+        item != null -> gson.toJsonTree(mapOf("kind" to "item", "item" to item, "nbt" to nbtEl, "components" to componentsEl))
         fluid != null -> gson.toJsonTree(mapOf("kind" to "fluid", "fluid" to fluid, "nbt" to nbtEl))
         energy -> gson.toJsonTree(mapOf("kind" to "energy"))
         else -> throw IllegalArgumentException("resource required: use --resource, --item, --fluid, or --energy")
@@ -93,10 +94,11 @@ class StorageInsertCmd : CliktCommand(name = "insert", help = "insert item/fluid
     private val fluid by option("--fluid")
     private val energy by option("--energy").flag()
     private val nbt by option("--nbt")
+    private val components by option("--components", help = COMPONENTS_HELP)
     private val simulate by option("--simulate").flag()
 
     override fun run() = withApi { api ->
-        val res = parseResourceArg(resource, item, fluid, energy, nbt)
+        val res = parseResourceArg(resource, item, fluid, energy, nbt, components)
         printJson(api.storage.insert(
             parseTargetArg(target, x, y, z, dim, "storage insert"),
             handle ?: defaultHandleFor(res), res, amount.toLong(), normalizeSide(side), simulate,
@@ -118,10 +120,11 @@ class StorageExtractCmd : CliktCommand(name = "extract", help = "extract item/fl
     private val fluid by option("--fluid")
     private val energy by option("--energy").flag()
     private val nbt by option("--nbt")
+    private val components by option("--components", help = COMPONENTS_HELP)
     private val simulate by option("--simulate").flag()
 
     override fun run() = withApi { api ->
-        val res = parseResourceArg(resource, item, fluid, energy, nbt)
+        val res = parseResourceArg(resource, item, fluid, energy, nbt, components)
         printJson(api.storage.extract(
             parseTargetArg(target, x, y, z, dim, "storage extract"),
             handle ?: defaultHandleFor(res), res, amount.toLong(), normalizeSide(side), simulate,
@@ -141,6 +144,7 @@ class StorageTransferCmd : CliktCommand(name = "transfer", help = "move resource
     private val fluid by option("--fluid")
     private val energy by option("--energy").flag()
     private val nbt by option("--nbt")
+    private val components by option("--components", help = COMPONENTS_HELP)
     private val amount by option("--amount").int().required()
     private val fromSide by option("--from-side")
     private val toSide by option("--to-side")
@@ -151,7 +155,7 @@ class StorageTransferCmd : CliktCommand(name = "transfer", help = "move resource
         val toPos = parseTriplet(to, "to")
         val fromEl = fromTarget?.let { parseJsonArg(it) } ?: gson.toJsonTree(mapOf("kind" to "block", "pos" to fromPos, "dim" to fromDim))
         val toEl = toTarget?.let { parseJsonArg(it) } ?: gson.toJsonTree(mapOf("kind" to "block", "pos" to toPos, "dim" to toDim))
-        val res = parseResourceArg(resource, item, fluid, energy, nbt)
+        val res = parseResourceArg(resource, item, fluid, energy, nbt, components)
         printJson(api.storage.transfer(fromEl, toEl, res, amount.toLong(), normalizeSide(fromSide), normalizeSide(toSide), simulate))
     }
 }

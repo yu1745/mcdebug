@@ -52,7 +52,7 @@ object InventoryOps : RpcHandlerGroup {
             val itemId = p.getStringOrNull("item") ?: "minecraft:air"
             val count = p.getIntOr("count", 0)
             val nbtJson = p.get("nbt")
-            val stack = ServerContext.itemStackFromJson(server, itemId, count, nbtJson)
+            val stack = ServerContext.itemStackFromJson(server, itemId, count, nbtJson, p.get("components"))
             inv.setItem(slot, stack)
             inv.setChanged()
             JsonObject().apply { addProperty("ok", true) }
@@ -68,7 +68,7 @@ object InventoryOps : RpcHandlerGroup {
             val simulate = p.getBoolOrFalse("simulate")
             val targetSlot = p.getIntOrNull("slot")?.also { requireSlot(inv, it) }
 
-            val stack = ServerContext.itemStackFromJson(server, itemId, count, nbtJson)
+            val stack = ServerContext.itemStackFromJson(server, itemId, count, nbtJson, p.get("components"))
             val original = stack.count
             var remaining = stack.count
             if (targetSlot != null) {

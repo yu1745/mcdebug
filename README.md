@@ -127,7 +127,7 @@ and dynamic item attributes. It removes the originally installed modifiers after
 | `storage.*` | unified item/fluid/energy access for blocks, entities, item stacks |
 | `fluid.*` / `craft.*` / `scan.*` / `entity.*` / `fixture.*` | per-tank fluids (generic form: `storage.*` with `fabric:fluid`), recipes, searches, entities, region fixtures |
 | `snapshot.*` / `trace.*` | capture + diff state; record frames on natural ticks |
-| `screen.*` | open/drive server-side menus (`AbstractContainerMenu`) with a fake player (**slot JSON, no pixels**) |
+| `screen.*` | open/drive server-side menus (`AbstractContainerMenu`) with a fake player (**slot JSON, no pixels**); `openBlock` falls back to an empty-hand right click when the loader rejects the block's `MenuProvider`; `clickButton` = vanilla `clickMenuButton` |
 | `gui.*` | **client plane**: real GUI screenshots + Screen clicks (see below) |
 | `redstone.*` | read power, set/pulse levers, neighbor updates |
 | `wait.until` | wait for a predicate on natural server ticks (never drives ticks; `--sprint` fast-forwards via the vanilla tick manager) |
@@ -193,10 +193,12 @@ mcdebug raw scan.findEntities '{"box":{"from":[0,64,0],"to":[0,64,0]}}'   # enti
 mcdebug raw reflect.resolve '{"class":"BlockEntity"}'   # runtimeClass + mojangClass
 mcdebug raw reflect.get '{"root":"server","path":"tickCount"}'
 mcdebug raw reflect.get '{"root":"be","pos":[0,64,0],"path":"items[0]"}'
+mcdebug raw inv.setSlot '{"pos":[0,64,0],"slot":0,"item":"minecraft:diamond_sword","count":1,"components":{"minecraft:enchantments":{"levels":{"minecraft:sharpness":5}}}}'
+mcdebug raw screen.clickButton '{"screenId":"<id from screen.openBlock>","button":0}'
 mcdebug raw reflect.set '{"root":"be","pos":[0,64,0],"field":"litTime","value":200}'
 mcdebug raw reflect.call '{"root":"level","method":"getBlockState","args":[{"new":"BlockPos","args":[0,64,0]}]}'
 mcdebug reflect get --client --root screen --path 'children[0].message.string'   # client plane
-``` The predicate DSL (`be[x,y,z].<path> <op> <value>`, `AND/OR/NOT`, `sum(...)`,
+``` The predicate DSL (`be[x,y,z].<path> <op> <value>`, `storage[x,y,z].fluid.tanks.0.amount`, `AND/OR/NOT`, `sum(...)`,
 comparisons) is documented in `mcdebug --help` under `wait-until` and in AGENTS.md §7.
 
 ## Managed sessions (Linux, local clients)

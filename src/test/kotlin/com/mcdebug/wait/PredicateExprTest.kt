@@ -47,6 +47,25 @@ class PredicateExprTest {
     }
 
     @Test
+    fun `storage source parses kind and path`() {
+        val c = assertInstanceOf(Node.Comparison::class.java, parse("""storage[1,2,3].fluid.tanks.0.amount >= 81000"""))
+        val lhs = assertInstanceOf(SourceRef::class.java, c.left)
+        assertEquals("storage", lhs.source)
+        assertEquals(Triple(1, 2, 3), lhs.pos)
+        assertEquals("fluid.tanks.0.amount", lhs.path)
+    }
+
+    @Test
+    fun `jsonPath walks objects and arrays`() {
+        val root = com.google.gson.JsonParser.parseString("""{"tanks":[{"amount":5},{"amount":7}],"x":{"y":true}}""")
+        assertEquals(JsonPrimitive(7), PredicateExpr.jsonPath(root, "tanks.1.amount"))
+        assertEquals(JsonPrimitive(true), PredicateExpr.jsonPath(root, "x.y"))
+        assertEquals(JsonNull.INSTANCE, PredicateExpr.jsonPath(root, "tanks.2.amount"))
+        assertEquals(JsonNull.INSTANCE, PredicateExpr.jsonPath(root, "tanks.a"))
+        assertEquals(root, PredicateExpr.jsonPath(root, ""))
+    }
+
+    @Test
     fun `v1 tick comparison`() {
         val n = parse("""tick >= 100""")
         val c = assertInstanceOf(Node.Comparison::class.java, n)

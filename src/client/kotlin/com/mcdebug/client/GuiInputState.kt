@@ -115,11 +115,30 @@ object GuiInputModifiers {
         }
     }
 
-    @JvmStatic fun controlDown(osx: Boolean): Boolean? = current.get()?.let {
+    /**
+     * Modifiers held across rendered frames (not tied to one synthetic event), e.g. so a screenshot shows the
+     * shift/ctrl variant of a tooltip. Client thread only; set and cleared by the RPC that requested it.
+     * While set it also overrides the desktop keyboard for Screen.hasShiftDown() & co.
+     */
+    @Volatile
+    var held: Int? = null
+
+    fun <T> holding(mask: Int?, future: () -> java.util.concurrent.CompletableFuture<T>): java.util.concurrent.CompletableFuture<T> {
+        if (mask == null) return future()
+        GuiInputValidation.modifiers(mask)
+        val previous = held
+        held = mask
+        val result = try { future() } catch (t: Throwable) { held = previous; throw t }
+        return result.whenComplete { _, _ -> held = previous }
+    }
+
+    private fun mask(): Int? = current.get() ?: held
+
+    @JvmStatic fun controlDown(osx: Boolean): Boolean? = mask()?.let {
         it and (if (osx) GuiInputValidation.SUPER else GuiInputValidation.CONTROL) != 0
     }
-    @JvmStatic fun shiftDown(): Boolean? = current.get()?.let { it and GuiInputValidation.SHIFT != 0 }
-    @JvmStatic fun altDown(): Boolean? = current.get()?.let { it and GuiInputValidation.ALT != 0 }
+    @JvmStatic fun shiftDown(): Boolean? = mask()?.let { it and GuiInputValidation.SHIFT != 0 }
+    @JvmStatic fun altDown(): Boolean? = mask()?.let { it and GuiInputValidation.ALT != 0 }
 }
 
 /** Client-thread confined. Claim release BEFORE calling arbitrary Screen code, including throwing code. */

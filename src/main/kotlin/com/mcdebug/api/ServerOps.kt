@@ -73,6 +73,17 @@ object ServerOps : RpcHandlerGroup {
                 addProperty("protocolVersion", 1)
                 add("dims", dims)
                 addProperty("players", server.playerCount)
+                // real (non-fake) players: name/uuid/position, so commands taking --uuid can address them
+                add("playerList", com.google.gson.JsonArray().apply {
+                    server.playerList.players.forEach { pl ->
+                        add(JsonObject().apply {
+                            addProperty("name", pl.gameProfile.name)
+                            addProperty("uuid", pl.stringUUID)
+                            addProperty("dim", pl.level().dimension().location().toString())
+                            add("pos", com.google.gson.JsonArray().apply { add(pl.x); add(pl.y); add(pl.z) })
+                        })
+                    }
+                })
                 addProperty("dayTime", dayTime)
                 addProperty("tick", server.tickCount)
             }

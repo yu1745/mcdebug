@@ -66,7 +66,9 @@ internal fun JsonObject.pos(): BlockPos {
     throw RpcException(RpcErrors.INVALID_PARAMS, "pos [x,y,z] (or x/y/z) is required")
 }
 
-internal fun itemJson(stack: ItemStack): JsonObject = ServerContext.itemStackToJson(stack)
+// Client holders belong to the client registries; the server plane's registries (if any) cannot encode them.
+internal fun itemJson(stack: ItemStack): JsonObject =
+    ServerContext.itemStackToJson(stack, net.minecraft.client.Minecraft.getInstance().level?.registryAccess())
 
 internal fun screenType(screen: Screen?): String = when {
     screen == null -> "none"

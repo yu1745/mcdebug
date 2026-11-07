@@ -58,7 +58,7 @@ object EntityOps : RpcHandlerGroup {
             if (entity is ItemEntity && p.has("stack") && !p.get("stack").isJsonNull) {
                 val stackObj = p.requireObject("stack")
                 val itemId = stackObj.getStringOrNull("item") ?: "minecraft:air"
-                entity.setItem(ServerContext.itemStackFromJson(server, itemId, stackObj.getIntOr("count", 0), stackObj.get("nbt")))
+                entity.setItem(ServerContext.itemStackFromJson(server, itemId, stackObj.getIntOr("count", 0), stackObj.get("nbt"), stackObj.get("components")))
             }
             val spawned = world.addFreshEntity(entity)
             JsonObject().apply {

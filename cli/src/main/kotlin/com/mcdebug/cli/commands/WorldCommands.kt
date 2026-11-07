@@ -105,6 +105,7 @@ class PlaceAsPlayerCmd : CliktCommand(name = "place-as-player", help = "place a 
     private val neighbor by option("--neighbor", help = "x,y,z of the block the face belongs to")
     private val playerFacing by option("--player-facing", help = "up|down|north|south|east|west (default: looking at the clicked face)")
     private val nbt by option("--nbt", help = "block entity NBT JSON or @file — NOT IMPLEMENTED YET: currently ignored by the server (no error, no effect)")
+    private val components by option("--components", help = COMPONENTS_HELP)
     private val dim by option("--dim")
 
     override fun run() = withApi { api ->
@@ -113,8 +114,7 @@ class PlaceAsPlayerCmd : CliktCommand(name = "place-as-player", help = "place a 
             neighbor = neighbor?.let { parseTriplet(it, "neighbor") },
             playerFacing = playerFacing,
             nbt = nbt?.let { parseJsonArg(it) },
-            dim = dim,
-        ))
+            dim = dim, components = components?.let { parseJsonArg(it) }))
     }
 }
 
@@ -199,13 +199,14 @@ class UseOnBlockCmd : CliktCommand(name = "use-on-block", help = "simulate right
     private val item by option("--item")
     private val count by option("--count").int()
     private val nbt by option("--nbt", help = "item NBT JSON or @file")
+    private val components by option("--components", help = COMPONENTS_HELP)
     private val sneaking by option("--sneaking").flag()
     private val playerFacing by option("--player-facing", help = "up|down|north|south|east|west (default: looking at the clicked face)")
     private val gamemode by option("--gamemode", help = "survival|creative (default: survival)")
     private val dim by option("--dim")
 
     override fun run() = withApi { api ->
-        printJson(api.world.useOnBlock(listOf(x, y, z), face, item, count, nbt?.let { parseJsonArg(it) }, sneaking, playerFacing, gamemode, dim))
+        printJson(api.world.useOnBlock(listOf(x, y, z), face, item, count, nbt?.let { parseJsonArg(it) }, sneaking, playerFacing, gamemode, dim, components = components?.let { parseJsonArg(it) }))
     }
 }
 
@@ -213,11 +214,12 @@ class UseItemCmd : CliktCommand(name = "use-item", help = "simulate right-clicki
     private val item by option("--item").required()
     private val count by option("--count").int()
     private val nbt by option("--nbt")
+    private val components by option("--components", help = COMPONENTS_HELP)
     private val sneaking by option("--sneaking").flag()
     private val dim by option("--dim")
 
     override fun run() = withApi { api ->
-        printJson(api.world.useItem(item, count, nbt?.let { parseJsonArg(it) }, sneaking, dim))
+        printJson(api.world.useItem(item, count, nbt?.let { parseJsonArg(it) }, sneaking, dim, components = components?.let { parseJsonArg(it) }))
     }
 }
 
@@ -225,6 +227,7 @@ class UseItemHoldCmd : CliktCommand(name = "use-item-hold", help = "right-click 
     private val item by option("--item").required()
     private val count by option("--count").int()
     private val nbt by option("--nbt")
+    private val components by option("--components", help = COMPONENTS_HELP)
     private val ammo by option("--ammo")
     private val ammoCount by option("--ammo-count").int()
     private val targetUuid by option("--target-uuid", help = "aim at this entity (then --player-pos is optional: the fake player stands 5 blocks in front of it)")
@@ -243,8 +246,7 @@ class UseItemHoldCmd : CliktCommand(name = "use-item-hold", help = "right-click 
         }
         printJson(api.world.useItemHold(
             item, count, nbt?.let { parseJsonArg(it) }, ammo, ammoCount, targetUuid,
-            direction, holdTicks, repeat, pos, dim,
-        ))
+            direction, holdTicks, repeat, pos, dim, components = components?.let { parseJsonArg(it) }))
     }
 }
 
@@ -256,12 +258,13 @@ class AttackBlockCmd : CliktCommand(name = "attack-block", help = "simulate left
     private val item by option("--item")
     private val count by option("--count").int()
     private val nbt by option("--nbt")
+    private val components by option("--components", help = COMPONENTS_HELP)
     private val armor by option("--armor", help = "armor JSON ({\"head\":{\"item\":\"...\"}}) or @file")
     private val gamemode by option("--gamemode", help = "survival|creative")
     private val dim by option("--dim")
 
     override fun run() = withApi { api ->
-        printJson(api.world.attackBlock(listOf(x, y, z), face, item, count, nbt?.let { parseJsonArg(it) }, armor?.let { parseJsonArg(it) }, gamemode, dim))
+        printJson(api.world.attackBlock(listOf(x, y, z), face, item, count, nbt?.let { parseJsonArg(it) }, armor?.let { parseJsonArg(it) }, gamemode, dim, components = components?.let { parseJsonArg(it) }))
     }
 }
 
@@ -270,12 +273,13 @@ class InteractEntityCmd : CliktCommand(name = "interact-entity", help = "simulat
     private val item by option("--item")
     private val count by option("--count").int()
     private val nbt by option("--nbt")
+    private val components by option("--components", help = COMPONENTS_HELP)
     private val sneaking by option("--sneaking").flag()
     private val playerFacing by option("--player-facing", help = "up|down|north|south|east|west (default: south)")
     private val dim by option("--dim")
 
     override fun run() = withApi { api ->
-        printJson(api.world.interactEntity(uuid, item, count, nbt?.let { parseJsonArg(it) }, sneaking, playerFacing, dim))
+        printJson(api.world.interactEntity(uuid, item, count, nbt?.let { parseJsonArg(it) }, sneaking, playerFacing, dim, components = components?.let { parseJsonArg(it) }))
     }
 }
 
@@ -284,12 +288,13 @@ class AttackEntityCmd : CliktCommand(name = "attack-entity", help = "simulate le
     private val item by option("--item")
     private val count by option("--count").int()
     private val nbt by option("--nbt")
+    private val components by option("--components", help = COMPONENTS_HELP)
     private val armor by option("--armor", help = "armor JSON or @file")
     private val playerFacing by option("--player-facing", help = "up|down|north|south|east|west (default: south)")
     private val dim by option("--dim")
 
     override fun run() = withApi { api ->
-        printJson(api.world.attackEntity(uuid, item, count, nbt?.let { parseJsonArg(it) }, armor?.let { parseJsonArg(it) }, playerFacing, dim))
+        printJson(api.world.attackEntity(uuid, item, count, nbt?.let { parseJsonArg(it) }, armor?.let { parseJsonArg(it) }, playerFacing, dim, components = components?.let { parseJsonArg(it) }))
     }
 }
 

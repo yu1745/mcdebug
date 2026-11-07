@@ -42,10 +42,11 @@ class InvSetSlotCmd : CliktCommand(name = "set-slot", help = "write one slot, 0-
     private val item by option("--item", help = "item id, or 'null' to clear")
     private val count by option("--count").int().default(1)
     private val nbt by option("--nbt")
+    private val components by option("--components", help = COMPONENTS_HELP)
     private val dim by option("--dim")
 
     override fun run() = withApi { api ->
-        printJson(api.inv.setSlot(listOf(x, y, z), slot, item?.takeIf { it != "null" }, count, nbt?.let { parseJsonArg(it) }, dim))
+        printJson(api.inv.setSlot(listOf(x, y, z), slot, item?.takeIf { it != "null" }, count, nbt?.let { parseJsonArg(it) }, dim, components = components?.let { parseJsonArg(it) }))
     }
 }
 
@@ -57,11 +58,12 @@ class InvInsertCmd : CliktCommand(name = "insert", help = "insert items into a v
     private val count by option("--count").int().required()
     private val slot by option("--slot").int()
     private val nbt by option("--nbt")
+    private val components by option("--components", help = COMPONENTS_HELP)
     private val simulate by option("--simulate").flag()
     private val dim by option("--dim")
 
     override fun run() = withApi { api ->
-        printJson(api.inv.insert(listOf(x, y, z), item, count, slot, nbt?.let { parseJsonArg(it) }, simulate, dim))
+        printJson(api.inv.insert(listOf(x, y, z), item, count, slot, nbt?.let { parseJsonArg(it) }, simulate, dim, components = components?.let { parseJsonArg(it) }))
     }
 }
 

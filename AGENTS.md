@@ -271,6 +271,8 @@ node scripts/set-version.mjs X.Y.Z
 
 ## 11b. 已完成变更记录（v2 → 0.6.x）
 
+- **通用玩法驱动补强（未发版，来自 Tinkers 1.21 移植的真实玩法回归）**：①`screen.openBlock` 先走 `MenuProvider`，被 loader 拒绝（Fabric 扩展 screen handler、写额外开屏数据的菜单）或为空时，改为空手右键方块的真实交互路径，回答带 `openedBy`；②新 RPC `screen.clickButton`（原版 `clickMenuButton`，切石机/织布机/附魔台/模组选择器）；③物品参数统一支持 `components`（原版 `DataComponentPatch` JSON，RegistryOps；`ServerContext.itemStackFromJson/itemStackToJson`），输出逐组件编码、失败列入 `#errors`，`nbt` 仍只表示 custom_data；客户端平面用客户端 level 的注册表编码；④`wait.until` 新源 `storage[x,y,z].<item|fluid|energy|inventory>.<path>`（复用 `storage.get` 的 JSON，`PredicateExpr.jsonPath`）；⑤`server.status.playerList`；⑥客户端 `gui.hover`/`gui.screenshot` 的 `heldModifiers`（`GuiInputModifiers.held`，只在该次渲染期间生效，CLI `--hold-shift/--hold-ctrl/--hold-alt`）。⑦修复 NeoForge dev 运行（`runServer`/`neoforge-smoke.sh`）自 `67626bb` 起缺 Kotlin stdlib：`additionalRuntimeClasspath` 补上（发布 jar 本就内嵌，不受影响）。
+
 - **0.8.0 快进/时间压缩**：不新增 tick 驱动 RPC，加速一律复用原版 tick-rate manager。①`server.health.tps` 的 `coerceAtMost(20)` 改为 rate-aware 上限（sprint→10000，否则 `max(20, tickrate)`），加速下不再恒报 20；②`wait.until` 新增 `sprint:true`（CLI `--sprint`）：申请原版 sprint 预算 `timeout+pollInterval+20`，命中/超时/求值异常/断连/uninstall 时自动 `stopSprinting()`，`SprintOwnership` 纯状态机（单测 `SprintOwnershipTest`）保证并发 wait 只有最后一个结束才停全局 sprint；`timeoutTicks=0`（无限等）+sprint 拒绝 `-32602`。③手动加速直通 `server.runCommand` + 原版 `/tick rate`/`/tick sprint`（README/SKILL 记录工作流）。双端冒烟各 +6 断言（sprint 启停、health tps>20、`wait --sprint` 1200 ticks 墙钟 <30s、命中后油门已收）。
 
 - **reflect 补齐（未发版）**：`api/ReflectCore.kt`（与平面无关：ref 表、path、重载、参数转换、JSON）+ `ReflectOps`（服务端 root）。

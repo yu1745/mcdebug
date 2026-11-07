@@ -150,10 +150,27 @@ mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeo
   accelerated (cap follows the target rate). Only tick-driven state accelerates: wall-clock
   mod cooldowns (`System.currentTimeMillis`-style) do not; don't mix manual `/tick sprint` with
   `--sprint`; on an integrated server the game must not be paused.
-- `inv.setSlot --nbt` writes 1.21.1 **item components**: a raw tag ends up under
-  `components."minecraft:custom_data"` and `inv.getSlot` echoes exactly that back, so "it round
-  tripped" does not prove the mod read it. Assert through the API that matters (the GUI, the
-  behaviour) like any other NBT.
+- Item arguments: `--nbt` is the **`minecraft:custom_data` compound only** (`inv.getSlot` echoes
+  it back, so "it round tripped" does not prove the mod read it). Registry-backed or vanilla data
+  (enchantments, stored enchantments, potion contents, damage, custom name...) goes through
+  `--components` / `"components"`, the vanilla patch form:
+  `--components '{"minecraft:enchantments":{"levels":{"minecraft:unbreaking":3}}}'`, `"!minecraft:id":{}`
+  removes a default. Every item-taking command has it (`world use-on-block/use-item/attack-block/...`,
+  `inv set-slot/insert`, `storage insert/extract/transfer --item`, armor/stack JSON objects), and
+  every returned stack shows its non-default components under `components` (custom data stays
+  under `nbt`; components that cannot be encoded are listed under `components."#errors"`).
+- Players: `status` lists real players (`playerList`: name, uuid, dim, pos) — use the uuid for
+  `entity teleport/get-nbt`.
+- Server-side menus (`screen open-block`) first try the block's `MenuProvider`; when the loader
+  rejects it (Fabric extended screen handlers, menus that write extra open data) mdb right-clicks
+  the block with an empty hand like a player, and the answer says `openedBy: menu_provider|use_block`.
+  `screen click-button --button N` presses a menu button (vanilla `clickMenuButton`: stonecutter
+  recipes, loom patterns, enchanting options, modded recipe/fluid selectors); `accepted` is the
+  menu's answer. Together with `inv set-slot` + `screen quick-move` a whole crafting-table-style
+  flow runs headless.
+- `wait until` can watch any storage: `storage[x,y,z].<item|fluid|energy|inventory>.<path into the
+  storage get answer>`, e.g. `'storage[0,64,0].fluid.tanks.0.amount >= 81000'`. Note `slots` lists
+  only non-empty slots (match on `slots.N.index`/`stack.item`, not on position).
 - **Verifying pixels against a scene**: a container/UI screen can be pinned down (`--mode gui` crops
   to the GUI, `gui screen` gives slot rectangles), but a *world* frame cannot be cropped to a
   region (no region flag) and weather/entity animation makes two unedited frames differ by tens of
@@ -249,6 +266,7 @@ mcdebug gui screenshot --mode gui --annotate             # *.annotated.png: cyan
 mcdebug gui screen --brief                               # slots + widgets as JSON (GUI units)
 mcdebug gui click --slot 0 --shot gui                    # click -> settle -> screenshot, one round trip
 mcdebug gui hover --slot 0                               # tooltips really drawn that frame
+mcdebug gui hover --slot 0 --hold-shift                  # same, with shift held for that frame ("Hold Shift for ..." variants)
 mcdebug gui screenshot --mode gui --draw-log             # every blit/fill/text with GUI rect + texture UV
 mcdebug gui problems --brief                             # WARN/ERROR log + caught render faults
 ```

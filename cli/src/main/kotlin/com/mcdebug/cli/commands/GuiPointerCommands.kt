@@ -39,6 +39,16 @@ class TargetOptions : OptionGroup("Target (pick one)") {
     }
 }
 
+/** `--hold-shift/--hold-ctrl/--hold-alt`: modifiers held while the frame renders (Screen.hasShiftDown() & co.). */
+class HeldModifierOptions : OptionGroup("Held modifiers (for the rendered frame only)") {
+    val shift by option("--hold-shift", help = "hold shift while rendering (e.g. 'Hold Shift for stats' tooltips)").flag()
+    val ctrl by option("--hold-ctrl", help = "hold control (command on macOS) while rendering").flag()
+    val alt by option("--hold-alt", help = "hold alt while rendering").flag()
+
+    /** GLFW modifier mask, or null when nothing is held. */
+    fun mask(): Int? = ((if (shift) 1 else 0) or (if (ctrl) 2 else 0) or (if (alt) 4 else 0)).takeIf { it != 0 }
+}
+
 class GuiHoverCmd : CliktCommand(
     name = "hover",
     help = "move the cursor onto a slot/widget/point, render one frame and report the tooltips actually drawn",
@@ -58,13 +68,15 @@ class GuiHoverCmd : CliktCommand(
 
 **Note**
 - the cursor stays there: later screenshots show the hover until something moves it; use `gui screenshot --hide-cursor` for a hover-free picture
+- `--hold-shift`/`--hold-ctrl`/`--hold-alt` hold modifiers only while that frame renders, so `tooltips` shows the shift/ctrl variant; a later screenshot needs the same flags
 """.trimIndent(),
 ) {
     private val target by TargetOptions()
+    private val held by HeldModifierOptions()
     private val follow by FollowUpOptions()
 
     override fun run() {
-        val params = target.params()
+        val params = target.params() + ("heldModifiers" to held.mask())
         follow.validate()
         withGuiApi { api -> printJson(follow.run(api, "hover", params) ?: api.gui.hover(params)) }
     }

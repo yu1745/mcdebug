@@ -2,6 +2,12 @@ package com.mcdebug.util
 
 import com.mcdebug.rpc.RpcErrors
 import com.mcdebug.rpc.RpcException
+import com.google.gson.JsonElement
+import com.mojang.serialization.Codec
+import com.mojang.serialization.DynamicOps
+import com.mojang.serialization.JsonOps
+import net.minecraft.core.HolderLookup
+import net.minecraft.core.component.DataComponentPatch
 import net.minecraft.world.level.block.Block
 import net.minecraft.world.level.block.state.BlockState
 import net.minecraft.world.level.block.entity.BlockEntity
@@ -157,7 +163,58 @@ object ServerContext {
         stack.set(DataComponents.CUSTOM_DATA, nbt?.let(CustomData::of))
     }
 
-    fun itemStackToJson(stack: ItemStack): com.google.gson.JsonObject {
+    /**
+     * Registry access used to (de)serialize data components. Set when the server starts so that
+     * [itemStackToJson] (called from many places without a server handle) can encode registry-backed
+     * components such as enchantments. Null before start / after stop: components are then omitted.
+     */
+    @Volatile
+    var registries: HolderLookup.Provider? = null
+
+    private fun componentOps(provider: HolderLookup.Provider?): DynamicOps<JsonElement> =
+        provider?.createSerializationContext(JsonOps.INSTANCE) ?: JsonOps.INSTANCE
+
+    /**
+     * The stack's component patch (differences from the item's defaults) in the vanilla
+     * `{"minecraft:id": value, "!minecraft:removed": {}}` form, without `minecraft:custom_data`
+     * (already reported as `nbt`). Each component is encoded separately so one component without a
+     * codec (transient) or failing to encode does not hide the others; failures are listed under
+     * `"#errors"`. Null when there is nothing to report.
+     */
+    fun componentsToJson(stack: ItemStack, provider: HolderLookup.Provider? = registries): com.google.gson.JsonObject? {
+        val patch = stack.componentsPatch
+        if (patch.isEmpty) return null
+        val ops = componentOps(provider)
+        val out = com.google.gson.JsonObject()
+        val errors = com.google.gson.JsonObject()
+        for ((type, value) in patch.entrySet()) {
+            if (type == DataComponents.CUSTOM_DATA) continue
+            val id = BuiltInRegistries.DATA_COMPONENT_TYPE.getKey(type)?.toString() ?: type.toString()
+            if (!value.isPresent) {
+                out.add("!$id", com.google.gson.JsonObject())
+                continue
+            }
+            val codec = type.codec()
+            if (codec == null) {
+                errors.addProperty(id, "transient component (no codec)")
+                continue
+            }
+            @Suppress("UNCHECKED_CAST")
+            (codec as Codec<Any>).encodeStart(ops, value.get())
+                .ifSuccess { out.add(id, it) }
+                .ifError { errors.addProperty(id, it.message()) }
+        }
+        if (errors.size() > 0) out.add("#errors", errors)
+        return if (out.size() == 0) null else out
+    }
+
+    /** Parses a vanilla component patch (`{"minecraft:enchantments": {...}, "!minecraft:food": {}}`). */
+    fun componentsFromJson(server: MinecraftServer, json: JsonElement): DataComponentPatch =
+        DataComponentPatch.CODEC.parse(componentOps(server.registryAccess()), json)
+            .getOrThrow { RpcException(RpcErrors.INVALID_PARAMS, "invalid components: $it") }
+
+    /** [provider]: registries that own the stack's holders (the client plane passes the client level's). */
+    fun itemStackToJson(stack: ItemStack, provider: HolderLookup.Provider? = registries): com.google.gson.JsonObject {
         val obj = com.google.gson.JsonObject()
         if (stack.isEmpty) {
             obj.add("item", com.google.gson.JsonNull.INSTANCE)
@@ -168,15 +225,30 @@ object ServerContext {
         obj.addProperty("count", stack.count)
         val nbt = stackNbt(stack)
         if (nbt != null) obj.add("nbt", NbtJson.toJson(nbt))
+        componentsToJson(stack, provider)?.let { obj.add("components", it) }
         return obj
     }
 
-    fun itemStackFromJson(server: MinecraftServer, item: String, count: Int, nbtJson: com.google.gson.JsonElement?): ItemStack {
+    /**
+     * Builds a stack from RPC fields. `nbt` is the custom-data compound (see [stackNbt]); `components`
+     * is an optional vanilla component patch applied afterwards, for registry-backed data that
+     * custom data cannot express (enchantments, potion contents, damage, custom name...).
+     */
+    fun itemStackFromJson(
+        server: MinecraftServer,
+        item: String,
+        count: Int,
+        nbtJson: JsonElement?,
+        componentsJson: JsonElement? = null,
+    ): ItemStack {
         if (item == "minecraft:air" || item.isEmpty()) return ItemStack.EMPTY
         val it = itemById(server, item)
         val stack = ItemStack(it, count)
         if (nbtJson != null && !nbtJson.isJsonNull) {
             stackSetNbt(stack, NbtJson.fromJson(nbtJson) as? CompoundTag)
+        }
+        if (componentsJson != null && !componentsJson.isJsonNull) {
+            stack.applyComponents(componentsFromJson(server, componentsJson))
         }
         return stack
     }

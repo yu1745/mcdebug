@@ -1,5 +1,6 @@
 package com.mcdebug.wait
 
+import com.mcdebug.api.StorageOps
 import com.google.gson.JsonElement
 import com.google.gson.JsonNull
 import com.google.gson.JsonObject
@@ -248,9 +249,33 @@ object WaitOps : RpcHandlerGroup {
                 if (inv == null) JsonNull.INSTANCE
                 else evaluateInvPath(inv, ref.path)
             }
+            "storage" -> {
+                // storage[x,y,z].<item|fluid|energy|inventory>.<path into the `storage get` answer>,
+                // e.g. storage[0,64,0].fluid.tanks.0.amount (loader units, see server.status.fluidUnit)
+                val w = ServerContext.world(srv, null)
+                val kind = ref.path.substringBefore('.')
+                val handle = STORAGE_KIND_HANDLES[kind] ?: throw RpcException(
+                    RpcErrors.INVALID_PREDICATE,
+                    "storage path must start with one of ${STORAGE_KIND_HANDLES.keys}, got '${ref.path}'",
+                )
+                val json = try {
+                    StorageOps.getHandleJson(w, pos!!, null, handle)
+                } catch (e: RpcException) {
+                    return JsonNull.INSTANCE   // no such storage (yet): the predicate just does not match
+                }
+                PredicateExpr.jsonPath(json, ref.path.substringAfter('.', ""))
+            }
             else -> throw RpcException(RpcErrors.INVALID_PREDICATE, "unknown source: ${ref.source}")
         }
     }
+
+    private val STORAGE_KIND_HANDLES = linkedMapOf(
+        "item" to StorageOps.HANDLE_FABRIC_ITEM,
+        "fluid" to StorageOps.HANDLE_FABRIC_FLUID,
+        "energy" to StorageOps.HANDLE_TEAM_REBORN_ENERGY,
+        "inventory" to StorageOps.HANDLE_VANILLA_INVENTORY,
+    )
+
 
     /**
      * Resolve an aggregate (sum/count) over every slot of an inventory.

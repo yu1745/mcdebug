@@ -213,7 +213,8 @@ object CraftingOps : RpcHandlerGroup {
             if (itemId == null || itemId == "minecraft:air") continue
             val count = obj.getIntOr("count", 1)
             val nbtEl = obj.get("nbt")
-            stacks[i] = ServerContext.itemStackFromJson(server, itemId, count, nbtEl)
+            val componentsEl = obj.get("components")
+            stacks[i] = ServerContext.itemStackFromJson(server, itemId, count, nbtEl, componentsEl)
         }
         return stacks
     }

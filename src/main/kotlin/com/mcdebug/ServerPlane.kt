@@ -1,5 +1,6 @@
 package com.mcdebug
 
+import com.mcdebug.util.ServerContext
 import com.mcdebug.api.BlockEntityOps
 import com.mcdebug.api.CraftingOps
 import com.mcdebug.api.EntityOps
@@ -82,6 +83,7 @@ object ServerPlane {
             McDebug.LOGGER.warn("server plane already running; ignoring duplicate server-started event")
             return
         }
+        ServerContext.registries = server.registryAccess()
 
         val d = RpcDispatcher().apply {
             registerGroup("world", WorldOps)
@@ -119,6 +121,7 @@ object ServerPlane {
     }
 
     private fun onServerStopping(server: MinecraftServer) {
+        ServerContext.registries = null
         try {
             WaitOps.uninstall()
             TraceOps.uninstall()

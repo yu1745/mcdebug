@@ -54,6 +54,15 @@ class ScreenClickSlotCmd : CliktCommand(name = "click-slot", help = "click a slo
     }
 }
 
+class ScreenClickButtonCmd : CliktCommand(name = "click-button", help = "press a menu button by id (vanilla clickMenuButton, the server side of a container button click: stonecutter recipe, loom pattern, enchanting option, modded menus using the same packet); prints accepted + the new snapshot") {
+    private val screenId by option("--screen-id").required()
+    private val button by option("--button", help = "button id as the menu defines it").int().required()
+
+    override fun run() = withApi { api ->
+        printJson(api.screen.clickButton(screenId, button))
+    }
+}
+
 class ScreenQuickMoveCmd : CliktCommand(name = "quick-move", help = "shift-click a slot") {
     private val screenId by option("--screen-id").required()
     private val slot by option("--slot").int().required()
@@ -137,7 +146,7 @@ class RedstoneNotifyNeighborsCmd : CliktCommand(name = "notify-neighbors", help 
 
 fun screenSubcommands() = listOf(
     ScreenOpenBlockCmd(), ScreenSnapshotCmd(), ScreenSetPlayerSlotCmd(),
-    ScreenClickSlotCmd(), ScreenQuickMoveCmd(), ScreenCloseCmd(),
+    ScreenClickSlotCmd(), ScreenClickButtonCmd(), ScreenQuickMoveCmd(), ScreenCloseCmd(),
 )
 
 fun redstoneSubcommands() = listOf(

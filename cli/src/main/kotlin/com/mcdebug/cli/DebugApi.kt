@@ -49,10 +49,10 @@ class WorldApi(private val rpc: RpcClient) {
     fun clearBox(box: Box, flags: Int? = null, dim: String? = null, maxBlocks: Int? = null): JsonElement =
         rpc.call("world.clearBox", params { p("box", box); p("flags", flags); p("dim", dim); p("maxBlocks", maxBlocks) })
 
-    fun placeAsPlayer(pos: Pos, block: String, face: String, neighbor: Pos? = null, playerFacing: String? = null, nbt: Any? = null, dim: String? = null): JsonElement =
+    fun placeAsPlayer(pos: Pos, block: String, face: String, neighbor: Pos? = null, playerFacing: String? = null, nbt: Any? = null, dim: String? = null, components: Any? = null): JsonElement =
         rpc.call("world.placeAsPlayer", params {
             p("pos", pos); p("block", block); p("face", face)
-            p("neighbor", neighbor); p("playerFacing", playerFacing); p("nbt", nbt); p("dim", dim)
+            p("neighbor", neighbor); p("playerFacing", playerFacing); p("nbt", nbt); p("components", components); p("dim", dim)
         })
 
     fun getRegion(box: Box, includeNbt: Boolean? = null, dim: String? = null): JsonElement =
@@ -71,37 +71,37 @@ class WorldApi(private val rpc: RpcClient) {
     fun unforceloadChunk(cx: Int, cz: Int, dim: String? = null): JsonElement =
         rpc.call("world.unforceloadChunk", params { p("chunk", listOf(cx, cz)); p("dim", dim) })
 
-    fun useOnBlock(pos: Pos, face: String, item: String? = null, count: Int? = null, nbt: Any? = null, sneaking: Boolean? = null, playerFacing: String? = null, gamemode: String? = null, dim: String? = null): JsonElement =
+    fun useOnBlock(pos: Pos, face: String, item: String? = null, count: Int? = null, nbt: Any? = null, sneaking: Boolean? = null, playerFacing: String? = null, gamemode: String? = null, dim: String? = null, components: Any? = null): JsonElement =
         rpc.call("world.useOnBlock", params {
-            p("pos", pos); p("face", face); p("item", item); p("count", count); p("nbt", nbt)
+            p("pos", pos); p("face", face); p("item", item); p("count", count); p("nbt", nbt); p("components", components)
             p("sneaking", sneaking); p("playerFacing", playerFacing); p("gamemode", gamemode); p("dim", dim)
         })
 
-    fun useItem(item: String, count: Int? = null, nbt: Any? = null, sneaking: Boolean? = null, dim: String? = null): JsonElement =
-        rpc.call("world.useItem", params { p("item", item); p("count", count); p("nbt", nbt); p("sneaking", sneaking); p("dim", dim) })
+    fun useItem(item: String, count: Int? = null, nbt: Any? = null, sneaking: Boolean? = null, dim: String? = null, components: Any? = null): JsonElement =
+        rpc.call("world.useItem", params { p("item", item); p("count", count); p("nbt", nbt); p("components", components); p("sneaking", sneaking); p("dim", dim) })
 
-    fun useItemHold(item: String, count: Int? = null, nbt: Any? = null, ammo: String? = null, ammoCount: Int? = null, targetUuid: String? = null, direction: String? = null, holdTicks: Int? = null, repeat: Int? = null, playerPos: Pos? = null, dim: String? = null): JsonElement =
+    fun useItemHold(item: String, count: Int? = null, nbt: Any? = null, ammo: String? = null, ammoCount: Int? = null, targetUuid: String? = null, direction: String? = null, holdTicks: Int? = null, repeat: Int? = null, playerPos: Pos? = null, dim: String? = null, components: Any? = null): JsonElement =
         rpc.call("world.useItemHold", params {
-            p("item", item); p("count", count); p("nbt", nbt); p("ammo", ammo); p("ammoCount", ammoCount)
+            p("item", item); p("count", count); p("nbt", nbt); p("components", components); p("ammo", ammo); p("ammoCount", ammoCount)
             p("targetUuid", targetUuid); p("direction", direction); p("holdTicks", holdTicks)
             p("repeat", repeat); p("playerPos", playerPos); p("dim", dim)
         })
 
-    fun attackBlock(pos: Pos, face: String, item: String? = null, count: Int? = null, nbt: Any? = null, armor: Any? = null, gamemode: String? = null, dim: String? = null): JsonElement =
+    fun attackBlock(pos: Pos, face: String, item: String? = null, count: Int? = null, nbt: Any? = null, armor: Any? = null, gamemode: String? = null, dim: String? = null, components: Any? = null): JsonElement =
         rpc.call("world.attackBlock", params {
-            p("pos", pos); p("face", face); p("item", item); p("count", count); p("nbt", nbt)
+            p("pos", pos); p("face", face); p("item", item); p("count", count); p("nbt", nbt); p("components", components)
             p("armor", armor); p("gamemode", gamemode); p("dim", dim)
         })
 
-    fun interactEntity(entityUuid: String, item: String? = null, count: Int? = null, nbt: Any? = null, sneaking: Boolean? = null, playerFacing: String? = null, dim: String? = null): JsonElement =
+    fun interactEntity(entityUuid: String, item: String? = null, count: Int? = null, nbt: Any? = null, sneaking: Boolean? = null, playerFacing: String? = null, dim: String? = null, components: Any? = null): JsonElement =
         rpc.call("world.interactEntity", params {
-            p("entityUuid", entityUuid); p("item", item); p("count", count); p("nbt", nbt)
+            p("entityUuid", entityUuid); p("item", item); p("count", count); p("nbt", nbt); p("components", components)
             p("sneaking", sneaking); p("playerFacing", playerFacing); p("dim", dim)
         })
 
-    fun attackEntity(entityUuid: String, item: String? = null, count: Int? = null, nbt: Any? = null, armor: Any? = null, playerFacing: String? = null, dim: String? = null): JsonElement =
+    fun attackEntity(entityUuid: String, item: String? = null, count: Int? = null, nbt: Any? = null, armor: Any? = null, playerFacing: String? = null, dim: String? = null, components: Any? = null): JsonElement =
         rpc.call("world.attackEntity", params {
-            p("entityUuid", entityUuid); p("item", item); p("count", count); p("nbt", nbt)
+            p("entityUuid", entityUuid); p("item", item); p("count", count); p("nbt", nbt); p("components", components)
             p("armor", armor); p("playerFacing", playerFacing); p("dim", dim)
         })
 }
@@ -131,11 +131,11 @@ class InvApi(private val rpc: RpcClient) {
     fun getSlot(pos: Pos, slot: Int, dim: String? = null): JsonElement =
         rpc.call("inv.getSlot", params { p("pos", pos); p("slot", slot); p("dim", dim) })
 
-    fun setSlot(pos: Pos, slot: Int, item: String?, count: Int, nbt: Any? = null, dim: String? = null): JsonElement =
-        rpc.call("inv.setSlot", params { p("pos", pos); p("slot", slot); p("item", item); p("count", count); p("nbt", nbt); p("dim", dim) })
+    fun setSlot(pos: Pos, slot: Int, item: String?, count: Int, nbt: Any? = null, dim: String? = null, components: Any? = null): JsonElement =
+        rpc.call("inv.setSlot", params { p("pos", pos); p("slot", slot); p("item", item); p("count", count); p("nbt", nbt); p("components", components); p("dim", dim) })
 
-    fun insert(pos: Pos, item: String, count: Int, slot: Int? = null, nbt: Any? = null, simulate: Boolean? = null, dim: String? = null): JsonElement =
-        rpc.call("inv.insert", params { p("pos", pos); p("item", item); p("count", count); p("slot", slot); p("nbt", nbt); p("simulate", simulate); p("dim", dim) })
+    fun insert(pos: Pos, item: String, count: Int, slot: Int? = null, nbt: Any? = null, simulate: Boolean? = null, dim: String? = null, components: Any? = null): JsonElement =
+        rpc.call("inv.insert", params { p("pos", pos); p("item", item); p("count", count); p("slot", slot); p("nbt", nbt); p("components", components); p("simulate", simulate); p("dim", dim) })
 
     fun extract(pos: Pos, item: String, count: Int, slot: Int? = null, simulate: Boolean? = null, dim: String? = null): JsonElement =
         rpc.call("inv.extract", params { p("pos", pos); p("item", item); p("count", count); p("slot", slot); p("simulate", simulate); p("dim", dim) })
@@ -189,6 +189,9 @@ class ScreenApi(private val rpc: RpcClient) {
 
     fun clickSlot(screenId: String, slot: Int, button: Int, actionType: String): JsonElement =
         rpc.call("screen.clickSlot", params { p("screenId", screenId); p("slot", slot); p("button", button); p("actionType", actionType) })
+
+    fun clickButton(screenId: String, button: Int): JsonElement =
+        rpc.call("screen.clickButton", params { p("screenId", screenId); p("button", button) })
 
     fun quickMove(screenId: String, slot: Int): JsonElement =
         rpc.call("screen.quickMove", params { p("screenId", screenId); p("slot", slot) })
@@ -475,10 +478,13 @@ data class ScreenshotOptions(
     val delayTicks: Int? = null,
     /** `hide`: render the captured frame with the cursor off-screen (no hover/tooltip/carried stack). */
     val cursor: String? = null,
+    /** Modifier mask (1 shift, 2 ctrl, 4 alt, 8 super) held while the captured frame renders, e.g. shift tooltips. */
+    val heldModifiers: Int? = null,
 ) {
     fun toJson(): JsonElement = params {
         p("mode", mode); p("format", format); p("annotate", annotate); p("drawLog", drawLog)
         p("inline", inline); p("name", name); p("delayTicks", delayTicks); p("cursor", cursor)
+        p("heldModifiers", heldModifiers)
     }
 }
 

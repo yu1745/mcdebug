@@ -51,3 +51,8 @@ fun parseJsonArg(s: String): JsonElement {
 fun printJson(el: JsonElement) {
     println(gson.toJson(el))
 }
+
+/** Shared help for item options that take a vanilla data-component patch. */
+const val COMPONENTS_HELP = "item data components (vanilla patch JSON or @file), applied after --nbt, e.g. " +
+    "'{\"minecraft:enchantments\":{\"levels\":{\"minecraft:unbreaking\":3}}}'; '!minecraft:id' removes a default component. " +
+    "--nbt stays the minecraft:custom_data compound"
