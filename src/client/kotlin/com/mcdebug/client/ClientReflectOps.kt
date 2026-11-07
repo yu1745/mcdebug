@@ -157,7 +157,7 @@ object ClientReflectOps : ClientRpcGroup {
             val last = t.steps.last().asJsonObject
             (last.get("field") ?: last.get("method"))?.let { add("resolvedTo", it) }
             add("steps", t.steps)
-            add("value", c.toJson(t.instance.takeUnless { t.isNull }))
+            add("value", c.toJson(t.instance.takeUnless { t.isNull }, ReflectCore.Window.of(p)))
         }
     }
 
@@ -194,7 +194,7 @@ object ClientReflectOps : ClientRpcGroup {
             addProperty("resolvedTo", m.name)
             addProperty("declaringClass", m.declaringClass.name)
             addProperty("signature", m.parameterTypes.joinToString(",", "(", ")") { it.name })
-            add("value", if (m.returnType == Void.TYPE) JsonNull.INSTANCE else c.toJson(value))
+            add("value", if (m.returnType == Void.TYPE) JsonNull.INSTANCE else c.toJson(value, ReflectCore.Window.of(p)))
         }
     }
 

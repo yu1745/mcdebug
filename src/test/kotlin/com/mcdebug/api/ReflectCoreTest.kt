@@ -68,6 +68,35 @@ class ReflectCoreTest {
     }
 
     @Test
+    fun `a window pages through plain lists, object lists and maps`() {
+        val c = core()
+        val plain = (0 until 450).toList()
+        val first = c.toJson(plain).asJsonArray
+        assertEquals(201, first.size())
+        assertEquals(250, first[200].asJsonObject.get("\$truncated").asInt)
+        val page = c.toJson(plain, ReflectCore.Window(offset = 400, limit = 100)).asJsonArray
+        assertEquals(50, page.size())
+        assertEquals(400, page[0].asInt)
+        val all = c.toJson(plain, ReflectCore.Window(limit = 1000)).asJsonArray
+        assertEquals(450, all.size())
+
+        val objs = (0 until 30).map(::Inner)
+        val tail = c.toJson(objs, ReflectCore.Window(offset = 25, limit = 10)).asJsonObject
+        assertEquals(5, tail.getAsJsonArray("items").size())
+        assertEquals(25, tail.get("offset").asInt)
+        assertFalse(tail.has("truncated"))
+        val mid = c.toJson(objs, ReflectCore.Window(offset = 5, limit = 10)).asJsonObject
+        assertTrue(mid.get("truncated").asBoolean)
+        assertEquals(10, mid.get("returned").asInt)
+
+        val map = (0 until 30).associate { "k$it" to it }
+        val keys = c.toJson(map, ReflectCore.Window(offset = 28, limit = 5)).asJsonObject.getAsJsonObject("items")
+        assertEquals(setOf("k28", "k29"), keys.keySet())
+        assertThrows<RpcException> { ReflectCore.Window.of(params("""{"limit":0}""")) }
+        assertThrows<RpcException> { ReflectCore.Window.of(params("""{"offset":-1}""")) }
+    }
+
+    @Test
     fun `both ref and dollar-ref name an object`() {
         val c = core()
         val inner = Inner(4)

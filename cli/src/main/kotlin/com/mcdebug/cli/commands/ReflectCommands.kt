@@ -57,6 +57,17 @@ class ReflectTarget : OptionGroup("Target (one of --root/--ref/--class, then --p
     }
 }
 
+/** `--offset`/`--limit`: page through a large collection, array or map in the answer. */
+class ReflectWindow : OptionGroup("Large values") {
+    val offset by option("--offset", help = "skip this many elements/entries of a collection, array or map value").int()
+    val limit by option("--limit", help = "return up to N elements/entries (1..10000) instead of the default 200 inline values / 20 summaries").int()
+
+    fun into(obj: MutableMap<String, Any?>) {
+        offset?.let { obj["offset"] = it }
+        limit?.let { obj["limit"] = it }
+    }
+}
+
 /** `reflect.*` (server plane) or `gui.reflect.*` (--client, same core in the client JVM). */
 private fun CliktCommand.reflectCall(target: ReflectTarget, suffix: String, obj: MutableMap<String, Any?>) {
     val method = if (target.client) "gui.reflect.$suffix" else "reflect.$suffix"
@@ -77,10 +88,12 @@ class ReflectResolveCmd : CliktCommand(name = "resolve", help = "class of the ta
 class ReflectGetCmd : CliktCommand(name = "get", help = "read the value at --path (and/or --field); e.g. reflect get --root server --path tickCount") {
     private val target by ReflectTarget()
     private val field by option("--field", help = "last segment, kept for compatibility: same as appending .field to --path")
+    private val window by ReflectWindow()
 
     override fun run() {
         val obj = target.params()
         field?.let { obj["field"] = it }
+        window.into(obj)
         reflectCall(target, "get", obj)
     }
 }
@@ -129,9 +142,11 @@ class ReflectCallCmd : CliktCommand(name = "call", help = "invoke a method on th
     private val method by option("--method").required()
     private val args by option("--args", help = "args array JSON or @file; an arg may be {\"ref\":N} or {\"root\":..,\"path\":..}")
     private val argTypes by option("--arg-types", help = "comma-separated parameter types to pick an overload, e.g. int,long")
+    private val window by ReflectWindow()
 
     override fun run() {
         val obj = target.params()
+        window.into(obj)
         obj["method"] = method
         obj["args"] = args?.let { parseJsonArg(it) }
         argTypes?.let { t -> obj["argTypes"] = t.split(",").map(String::trim) }

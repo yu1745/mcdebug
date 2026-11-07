@@ -372,15 +372,43 @@ class ReflectCore(
 
     // ------------------------------------------------------------ JSON out
 
-    fun toJson(value: Any?): JsonElement {
+    /**
+     * Which slice of a collection, array or map [toJson] returns. The default answers the first
+     * [LIST_LIMIT] plain values inline, or a ref with the first [SUMMARY_LIMIT] summaries; an
+     * explicit [limit] (up to [MAX_LIMIT]) pages through either form from [offset].
+     */
+    data class Window(val offset: Int = 0, val limit: Int? = null) {
+        val listLimit get() = limit ?: LIST_LIMIT
+        val summaryLimit get() = limit ?: SUMMARY_LIMIT
+
+        companion object {
+            val DEFAULT = Window()
+
+            /** Reads the optional `offset`/`limit` RPC params. */
+            fun of(p: JsonObject): Window {
+                val offset = p.get("offset")?.takeUnless { it.isJsonNull }?.asInt ?: 0
+                val limit = p.get("limit")?.takeUnless { it.isJsonNull }?.asInt
+                if (offset < 0) throw RpcException(RpcErrors.INVALID_PARAMS, "offset must be >= 0")
+                if (limit != null && limit !in 1..MAX_LIMIT) throw RpcException(RpcErrors.INVALID_PARAMS, "limit must be 1..$MAX_LIMIT")
+                return Window(offset, limit)
+            }
+        }
+    }
+
+    fun toJson(value: Any?, window: Window = Window.DEFAULT): JsonElement {
         if (value == null) return JsonObject().apply { addProperty("\$null", true) }
         val v = unwrapOptional(value) ?: return JsonPrimitive("<empty Optional>")
         simpleJson(v)?.let { return it }
         (itemSummary(v))?.let { return it }
+        val off = window.offset
+        val take = maxOf(window.listLimit, window.summaryLimit) + 1
         val elements: List<Any?>? = when {
-            v is Collection<*> -> v.take(LIST_LIMIT + 1)
-            v is Array<*> -> v.take(LIST_LIMIT + 1)
-            v.javaClass.isArray -> (0 until minOf(java.lang.reflect.Array.getLength(v), LIST_LIMIT + 1)).map { java.lang.reflect.Array.get(v, it) }
+            v is Collection<*> -> v.asSequence().drop(off).take(take).toList()
+            v is Array<*> -> v.asSequence().drop(off).take(take).toList()
+            v.javaClass.isArray -> {
+                val n = java.lang.reflect.Array.getLength(v)
+                (minOf(off, n) until minOf(n, off + take)).map { java.lang.reflect.Array.get(v, it) }
+            }
             else -> null
         }
         val size = when {
@@ -389,16 +417,17 @@ class ReflectCore(
             v.javaClass.isArray -> java.lang.reflect.Array.getLength(v)
             else -> -1
         }
+        val rest = maxOf(0, size - off)
         // A collection of plain values is returned inline; one holding objects becomes a
         // ref with a summary (one ref for the collection, not one per element: reach an
         // element with a path such as `[3]`).
         if (elements != null && elements.all { it == null || simpleJson(it) != null }) {
             return JsonArray().apply {
-                elements.take(LIST_LIMIT).forEach { add(it?.let(::simpleJson) ?: JsonNull.INSTANCE) }
-                if (size > LIST_LIMIT) add(JsonObject().apply { addProperty("\$truncated", size - LIST_LIMIT) })
+                elements.take(window.listLimit).forEach { add(it?.let(::simpleJson) ?: JsonNull.INSTANCE) }
+                if (rest > window.listLimit) add(JsonObject().apply { addProperty("\$truncated", rest - window.listLimit) })
             }
         }
-        if (v is Map<*, *> && v.size <= LIST_LIMIT && v.values.all { it == null || simpleJson(it) != null }) {
+        if (v is Map<*, *> && off == 0 && window.limit == null && v.size <= LIST_LIMIT && v.values.all { it == null || simpleJson(it) != null }) {
             return JsonObject().apply { v.forEach { (k, x) -> add(k.toString(), x?.let(::simpleJson) ?: JsonNull.INSTANCE) } }
         }
         return JsonObject().apply {
@@ -407,18 +436,19 @@ class ReflectCore(
             Mappings.mojangClassName(v.javaClass)?.takeIf { it != v.javaClass.name }?.let { addProperty("mojangClass", it) }
             if (size >= 0) {
                 addProperty("size", size)
-                val returned = minOf(size, SUMMARY_LIMIT)
+                val returned = minOf(rest, window.summaryLimit)
+                if (off > 0) addProperty("offset", off)
                 // Say it out loud: a truncated summary used to look like "the rest does not exist"
                 // (a 1060-key map answered with 20 entries and no marker).
-                if (size > returned) {
+                if (off + returned < size) {
                     addProperty("truncated", true)
                     addProperty("returned", returned)
                 }
                 add("items", when {
                     v is Map<*, *> -> JsonObject().apply {
-                        v.entries.take(SUMMARY_LIMIT).forEach { (k, x) -> add(k.toString(), summary(x)) }
+                        v.entries.asSequence().drop(off).take(window.summaryLimit).forEach { (k, x) -> add(k.toString(), summary(x)) }
                     }
-                    else -> JsonArray().apply { elements!!.take(SUMMARY_LIMIT).forEach { add(summary(it)) } }
+                    else -> JsonArray().apply { elements!!.take(window.summaryLimit).forEach { add(summary(it)) } }
                 })
             } else {
                 addProperty("toString", safeToString(v))
@@ -523,6 +553,7 @@ class ReflectCore(
     companion object {
         const val LIST_LIMIT = 200
         const val SUMMARY_LIMIT = 20
+        const val MAX_LIMIT = 10000
 
         private val PRIMITIVES: Map<String, Class<*>> = mapOf(
             "int" to Integer.TYPE, "long" to java.lang.Long.TYPE, "short" to java.lang.Short.TYPE,

@@ -195,7 +195,7 @@ object ReflectOps : RpcHandlerGroup {
             val last = t.steps.last().asJsonObject
             (last.get("field") ?: last.get("method"))?.let { add("resolvedTo", it) }
             add("steps", t.steps)
-            add("value", core.toJson(t.instance.takeUnless { t.isNull }))
+            add("value", core.toJson(t.instance.takeUnless { t.isNull }, ReflectCore.Window.of(p)))
         }
     }
 
@@ -232,7 +232,7 @@ object ReflectOps : RpcHandlerGroup {
             addProperty("resolvedTo", m.name)
             addProperty("declaringClass", m.declaringClass.name)
             addProperty("signature", m.parameterTypes.joinToString(",", "(", ")") { it.name })
-            add("value", if (m.returnType == Void.TYPE) com.google.gson.JsonNull.INSTANCE else core.toJson(value))
+            add("value", if (m.returnType == Void.TYPE) com.google.gson.JsonNull.INSTANCE else core.toJson(value, ReflectCore.Window.of(p)))
         }
     }
 

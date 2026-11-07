@@ -128,7 +128,10 @@ mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeo
   writes `dayTime` on `overworld`), and `--field` is the direct form. Big collections come back
   summarised: a ref answer carries `size` and, when the summary was cut, `truncated:true` +
   `returned:N`; an inline plain-value array appends a final `{"$truncated":<how many more>}`
-  element. Read `size` before concluding a key does not exist.
+  element. Read `size` before concluding a key does not exist. Page through the rest with `--limit N` (1..10000) and
+  `--offset M` on `reflect get`/`call`: e.g. every recipe id is
+  `reflect get --root server --path 'recipeManager.byName.keySet()' --limit 10000`. To keep mobs still between reflect
+  calls (AI moves them every tick), run `/tick freeze` first and `/tick unfreeze` after.
   `inserted`/`extracted` can be far below `amount`: the block's own transfer limit applies, and
   it is usually **per tick**, so repeating the call within the same tick (a tight loop, `--batch`)
   gets 0. `remaining` is about this call only; read the result back with `storage get`. To fill

@@ -192,6 +192,7 @@ mcdebug raw snapshot.diff '{"before":{"tick":1,"blocks":[]},"after":{"tick":9,"b
 mcdebug raw scan.findEntities '{"box":{"from":[0,64,0],"to":[0,64,0]}}'   # entities in that one block
 mcdebug raw reflect.resolve '{"class":"BlockEntity"}'   # runtimeClass + mojangClass
 mcdebug raw reflect.get '{"root":"server","path":"tickCount"}'
+mcdebug reflect get --root server --path 'recipeManager.byName.keySet()' --limit 10000   # page large values (--offset)
 mcdebug raw reflect.get '{"root":"be","pos":[0,64,0],"path":"items[0]"}'
 mcdebug raw inv.setSlot '{"pos":[0,64,0],"slot":0,"item":"minecraft:diamond_sword","count":1,"components":{"minecraft:enchantments":{"levels":{"minecraft:sharpness":5}}}}'
 mcdebug raw screen.clickButton '{"screenId":"<id from screen.openBlock>","button":0}'
