@@ -29,6 +29,7 @@ object ScreenOps : RpcHandlerGroup {
         "snapshot" to ::snapshot,
         "setPlayerSlot" to ::setPlayerSlot,
         "clickSlot" to ::clickSlot,
+        "clickButton" to ::clickButton,
         "quickMove" to ::quickMove,
         "close" to ::close,
     )
@@ -101,6 +102,17 @@ object ScreenOps : RpcHandlerGroup {
             session.handler.clicked(slot, button, actionType, session.player)
             session.handler.sendAllDataToRemote()
             screenSnapshot(session)
+        }
+
+    private fun clickButton(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
+        RpcContext.onServer(server) {
+            val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
+            val session = session(p)
+            val button = p.requireLong("button").toInt()
+            requireUsable(session)
+            val accepted = session.handler.clickMenuButton(session.player, button)
+            if (accepted) session.handler.broadcastChanges()
+            screenSnapshot(session).apply { addProperty("accepted", accepted) }
         }
 
     private fun quickMove(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
