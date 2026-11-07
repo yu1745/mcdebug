@@ -198,7 +198,7 @@ mdb --session port-target gui problems --brief
 
 ## 6. 验收与结束
 
-具体验收表见 [references/verification.md](references/verification.md)。按当前切片风险选择，涉及的行为必须有证据；未跑项明确写“未验证”，不伪装为通过。可选执行其中的“NeoForge 存档 → Fabric 加载”互操作测试，同时验证服务端状态与截图中的机器表现。
+具体验收表见 [references/verification.md](references/verification.md)。存在可信的行为基线时，按 [references/behavior-oracle.md](references/behavior-oracle.md) 在两台服务器上自动生成大规模对照场景（分层顺序、场景生成、规范化、差异分诊、测试设施陷阱、并行提速）。按当前切片风险选择，涉及的行为必须有证据；未跑项明确写“未验证”，不伪装为通过。可选执行其中的“NeoForge 存档 → Fabric 加载”互操作测试，同时验证服务端状态与截图中的机器表现。
 
 完成至少意味着：
 
