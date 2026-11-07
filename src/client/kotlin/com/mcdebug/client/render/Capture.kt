@@ -1,4 +1,12 @@
-package com.mcdebug.client
+package com.mcdebug.client.render
+
+import com.mcdebug.client.ClientTasks
+import com.mcdebug.client.bool
+import com.mcdebug.client.int
+import com.mcdebug.client.reason
+import com.mcdebug.client.string
+
+import com.mcdebug.client.input.GuiWidgets
 
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement

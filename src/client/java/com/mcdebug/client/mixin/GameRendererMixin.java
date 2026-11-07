@@ -2,8 +2,8 @@ package com.mcdebug.client.mixin;
 
 import com.llamalad7.mixinextras.injector.wrapoperation.Operation;
 import com.llamalad7.mixinextras.injector.wrapoperation.WrapOperation;
-import com.mcdebug.client.RenderControl;
-import com.mcdebug.client.ScreenGuard;
+import com.mcdebug.client.render.RenderControl;
+import com.mcdebug.client.devloop.ScreenGuard;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.screens.Screen;

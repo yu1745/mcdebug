@@ -1,4 +1,12 @@
-package com.mcdebug.client
+package com.mcdebug.client.input
+
+import com.mcdebug.client.ClientRpcGroup
+import com.mcdebug.client.ClientRpcHandler
+import com.mcdebug.client.ClientTasks
+import com.mcdebug.client.GuiCursor
+import com.mcdebug.client.reason
+
+import com.mcdebug.client.render.Capture
 
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject

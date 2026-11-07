@@ -1,6 +1,6 @@
 package com.mcdebug.client.mixin;
 
-import com.mcdebug.client.WidgetFrames;
+import com.mcdebug.client.render.WidgetFrames;
 import net.minecraft.client.gui.GuiGraphics;
 import net.minecraft.client.gui.components.AbstractWidget;
 import org.spongepowered.asm.mixin.Mixin;

@@ -1,4 +1,9 @@
-package com.mcdebug.client
+package com.mcdebug.client.input
+
+import com.mcdebug.client.bool
+import com.mcdebug.client.int
+import com.mcdebug.client.pair
+import com.mcdebug.client.string
 
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject

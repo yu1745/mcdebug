@@ -1,5 +1,9 @@
 package com.mcdebug.client
 
+import com.mcdebug.client.input.GuiInputGestureState
+import com.mcdebug.client.input.GuiInputModifiers
+import com.mcdebug.client.input.GuiInputValidation
+
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import java.util.concurrent.CompletableFuture

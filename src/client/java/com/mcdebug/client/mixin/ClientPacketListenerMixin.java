@@ -1,6 +1,6 @@
 package com.mcdebug.client.mixin;
 
-import com.mcdebug.client.GuiSettle;
+import com.mcdebug.client.input.GuiSettle;
 import net.minecraft.client.multiplayer.ClientPacketListener;
 import net.minecraft.network.protocol.game.ClientboundCommandSuggestionsPacket;
 import org.spongepowered.asm.mixin.Mixin;

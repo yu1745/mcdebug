@@ -1,4 +1,4 @@
-package com.mcdebug.client
+package com.mcdebug.client.input
 
 /** Pure, GL/Minecraft-free input validation and gesture bookkeeping. GLFW 3 key values. */
 object GuiInputValidation {

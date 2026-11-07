@@ -1,5 +1,7 @@
 package com.mcdebug.client
 
+import com.mcdebug.client.render.CaptureGeometry
+
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 

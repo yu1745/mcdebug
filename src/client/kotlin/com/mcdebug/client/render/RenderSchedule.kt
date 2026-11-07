@@ -1,4 +1,4 @@
-package com.mcdebug.client
+package com.mcdebug.client.render
 
 /** Explicit runtime policies, not alternate/legacy Minecraft implementations. */
 enum class RenderMode(val id: String) {

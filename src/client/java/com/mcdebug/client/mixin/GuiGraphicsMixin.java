@@ -1,6 +1,6 @@
 package com.mcdebug.client.mixin;
 
-import com.mcdebug.client.DrawRecorder;
+import com.mcdebug.client.render.DrawRecorder;
 import java.util.ArrayList;
 import java.util.List;
 import net.minecraft.client.gui.Font;

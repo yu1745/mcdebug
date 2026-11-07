@@ -1,5 +1,13 @@
 package com.mcdebug.client
 
+import com.mcdebug.client.devloop.ClientConfig
+import com.mcdebug.client.devloop.ProblemLog
+import com.mcdebug.client.devloop.ScreenGuard
+import com.mcdebug.client.input.GuiInputOps
+import com.mcdebug.client.input.GuiSettle
+import com.mcdebug.client.render.Capture
+import com.mcdebug.client.render.RenderControl
+
 import com.mcdebug.McDebug
 import com.mcdebug.ServerPlane
 import com.mcdebug.client.loader.ClientLoader

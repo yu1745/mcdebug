@@ -1,4 +1,12 @@
-package com.mcdebug.client
+package com.mcdebug.client.devloop
+
+import com.mcdebug.client.noScreen
+import com.mcdebug.client.reason
+import com.mcdebug.client.stringArray
+
+import com.mcdebug.client.input.GuiWidgets
+import com.mcdebug.client.input.ScreenArgs
+import com.mcdebug.client.input.ScreenFactory
 
 import com.google.gson.JsonObject
 import com.mcdebug.McDebug

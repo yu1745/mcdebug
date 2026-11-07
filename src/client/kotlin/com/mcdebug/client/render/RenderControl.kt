@@ -1,4 +1,6 @@
-package com.mcdebug.client
+package com.mcdebug.client.render
+
+import com.mcdebug.client.devloop.ClientConfig
 
 import com.google.gson.JsonObject
 import com.mcdebug.McDebug

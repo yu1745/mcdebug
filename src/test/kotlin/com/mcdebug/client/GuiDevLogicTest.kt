@@ -1,5 +1,14 @@
 package com.mcdebug.client
 
+import com.mcdebug.client.devloop.ClassScan
+import com.mcdebug.client.devloop.ProblemBuffer
+import com.mcdebug.client.devloop.SchemaDiff
+import com.mcdebug.client.input.QuietTracker
+import com.mcdebug.client.render.Annotator
+import com.mcdebug.client.render.CaptureOptions
+import com.mcdebug.client.render.DrawRecorder
+import com.mcdebug.client.render.PixelCanvas
+
 import com.google.gson.JsonObject
 import com.mcdebug.rpc.RpcException
 import org.joml.Matrix4f

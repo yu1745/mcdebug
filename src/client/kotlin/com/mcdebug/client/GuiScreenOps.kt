@@ -1,5 +1,11 @@
 package com.mcdebug.client
 
+import com.mcdebug.client.devloop.ScreenGuard
+import com.mcdebug.client.input.GuiTargets
+import com.mcdebug.client.input.GuiWidgets
+import com.mcdebug.client.render.DrawRecorder
+import com.mcdebug.client.render.WidgetFrames
+
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject

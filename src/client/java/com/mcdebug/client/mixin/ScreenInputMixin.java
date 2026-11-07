@@ -1,6 +1,6 @@
 package com.mcdebug.client.mixin;
 
-import com.mcdebug.client.GuiInputModifiers;
+import com.mcdebug.client.input.GuiInputModifiers;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.screens.Screen;
 import org.spongepowered.asm.mixin.Mixin;

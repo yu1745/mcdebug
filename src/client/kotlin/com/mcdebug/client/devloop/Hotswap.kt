@@ -1,4 +1,7 @@
-package com.mcdebug.client
+package com.mcdebug.client.devloop
+
+import com.mcdebug.client.reason
+import com.mcdebug.client.stringArray
 
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject

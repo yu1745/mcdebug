@@ -1,5 +1,8 @@
 package com.mcdebug.client
 
+import com.mcdebug.client.render.CaptureGeometry
+import com.mcdebug.client.render.RenderControl
+
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import com.mcdebug.rpc.RpcErrors

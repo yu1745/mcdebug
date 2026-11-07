@@ -1,5 +1,16 @@
 package com.mcdebug.client
 
+import com.mcdebug.client.devloop.Hotswap
+import com.mcdebug.client.devloop.ProblemLog
+import com.mcdebug.client.devloop.ScreenGuard
+import com.mcdebug.client.input.GuiClickOps
+import com.mcdebug.client.input.GuiInputModifiers
+import com.mcdebug.client.input.GuiInputOps
+import com.mcdebug.client.input.GuiPointerOps
+import com.mcdebug.client.render.Capture
+import com.mcdebug.client.render.CaptureOptions
+import com.mcdebug.client.render.RenderControl
+
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject

@@ -138,8 +138,8 @@ tasks.register('verifyJarSelfContained') {
 			'com/mcdebug/api/FluidOps.class',
 			'com/mcdebug/client/ClientPlane.class',
 			'com/mcdebug/client/GuiOps.class',
-			'com/mcdebug/client/Capture.class',
-			'com/mcdebug/client/RenderControl.class',
+			'com/mcdebug/client/render/Capture.class',
+			'com/mcdebug/client/render/RenderControl.class',
 			'com/mcdebug/client/loader/ClientLoaderApi.class',
 			// 客户端 mixin（含每个 loader 一份的注入点常量）
 			'com/mcdebug/client/mixin/GameRendererMixin.class',

@@ -1,5 +1,7 @@
 package com.mcdebug.client
 
+import com.mcdebug.client.render.RenderControl
+
 import com.mcdebug.rpc.RpcErrors
 import com.mcdebug.rpc.RpcException
 import com.mcdebug.client.loader.ClientLoader

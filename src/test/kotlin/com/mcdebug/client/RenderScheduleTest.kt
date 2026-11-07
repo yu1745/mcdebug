@@ -1,5 +1,10 @@
 package com.mcdebug.client
 
+import com.mcdebug.client.render.RenderCursor
+import com.mcdebug.client.render.RenderMode
+import com.mcdebug.client.render.RenderSchedule
+import com.mcdebug.client.render.RenderSettings
+
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 

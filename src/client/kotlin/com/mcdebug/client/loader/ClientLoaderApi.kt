@@ -10,7 +10,7 @@ import java.nio.file.Path
  *
  *  - client tick / started / stopping events ([ClientTasks], [com.mcdebug.client.ClientPlane]),
  *  - the game directory ([com.mcdebug.client.ClientInfo]),
- *  - pre-mixin class bytes for `gui.hotswap` ([com.mcdebug.client.Hotswap]).
+ *  - pre-mixin class bytes for `gui.hotswap` ([com.mcdebug.client.devloop.Hotswap]).
  *
  * The loader-neutral half of the seam ([com.mcdebug.loader.Loader]) is installed by the same
  * entrypoint; this one is installed by the loader's *client* entrypoint.
@@ -39,7 +39,7 @@ interface ClientLoaderApi {
      * Bytes of [name] as the loader's own classpath provides them, or null when it cannot read
      * them. [runTransformers] asks for post-transformer (i.e. post-mixin) bytes where the loader
      * can provide them; NeoForge returns the same bytes for both and lets
-     * [com.mcdebug.client.Hotswap] apply mixins explicitly.
+     * [com.mcdebug.client.devloop.Hotswap] apply mixins explicitly.
      */
     fun classBytes(name: String, runTransformers: Boolean): ByteArray?
 }

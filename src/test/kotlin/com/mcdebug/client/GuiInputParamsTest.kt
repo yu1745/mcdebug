@@ -1,5 +1,7 @@
 package com.mcdebug.client
 
+import com.mcdebug.client.input.GuiInputParams
+
 import com.google.gson.JsonParser
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test

@@ -1,4 +1,4 @@
-package com.mcdebug.client
+package com.mcdebug.client.render
 
 import net.minecraft.client.gui.components.AbstractSelectionList
 import net.minecraft.client.gui.components.AbstractWidget

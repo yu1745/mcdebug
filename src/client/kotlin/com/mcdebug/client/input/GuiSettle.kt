@@ -1,4 +1,8 @@
-package com.mcdebug.client
+package com.mcdebug.client.input
+
+import com.mcdebug.client.ClientTasks
+import com.mcdebug.client.boundedInt
+import com.mcdebug.client.string
 
 import com.google.gson.JsonObject
 import com.mcdebug.client.mixin.AbstractContainerScreenAccessor
