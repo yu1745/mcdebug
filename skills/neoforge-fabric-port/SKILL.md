@@ -106,6 +106,8 @@ mdb 已验证的双加载器环境是 **Minecraft 1.21.1 / NeoForge 21.1.x / Fab
 - 启动前显式选择并验证显示（如 `glxinfo -B` 看渲染器与 direct rendering），优先硬件加速；代理 shell 继承的 `DISPLAY` 可能不可用。软件渲染得到的截图不能充当视觉基线，证据里记录所用显示。
 - **截图前关闭原版遮挡提示**：每个测试 gameDir 启动前将 `options.txt` 的 `tutorialStep` 设为 `none`，避免新世界的 WASD/鼠标教程；已启动时用客户端原生 `Minecraft.getInstance().getTutorial().setStep(TutorialSteps.NONE)` 立即关闭并保存。每次连接本地离线测试服后，用客户端原生 `SystemToast.forceHide(Minecraft.getInstance().getToasts(), SystemToast.SystemToastId.UNSECURE_SERVER_WARNING)` 定点关闭“不安全聊天 / original message”提示。通过 mdb 客户端反射调用即可；`demand`/`gui-only` 下不要靠等待其自动消失。随后强制新帧并读图确认 GUI 无遮挡，不通过裁图、隐藏整个 HUD 或修改发布模组来掩盖这些测试环境提示。
 
+- **新区块的世界截图需要地形渲染预热**：传送或首次加载区块后，`demand` 下少量截图帧可能只画出天空、粒子或实体，地形网格仍在编译/上传；不能据此判定方块模型缺失，也不能把服务端生成计数当视觉通过。必要时临时恢复连续正常渲染，确认客户端区块已收到、网格队列完成并读图看到实际地形，再采证；结束恢复原渲染策略。GUI 截图与世界地形截图分别核实。
+
 以下路径、任务、存档名是占位符，须按目标项目替换：
 
 ```bash
