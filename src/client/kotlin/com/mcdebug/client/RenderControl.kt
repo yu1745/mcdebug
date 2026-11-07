@@ -2,7 +2,6 @@ package com.mcdebug.client
 
 import com.google.gson.JsonObject
 import com.mcdebug.McDebug
-import net.minecraft.client.DeltaTracker
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen
@@ -37,11 +36,11 @@ object RenderControl {
     }
 
     private fun safeToThrottle(client: Minecraft): Boolean =
-        client.isGameLoadFinished && client.getOverlay() == null && client.level != null && client.player != null &&
+        true && client.getOverlay() == null && client.level != null && client.player != null &&
             (client.screen == null || client.screen is AbstractContainerScreen<*>)
 
     @JvmStatic
-    fun renderFrame(renderer: GameRenderer, delta: DeltaTracker, renderWorld: Boolean) {
+    fun renderFrame(renderer: GameRenderer, partialTick: Float, nanoTime: Long, renderWorld: Boolean) {
         val client = Minecraft.getInstance()
         val changed = client.screen !== lastScreen
         virtualCursor.observe(client.screen)
@@ -70,7 +69,7 @@ object RenderControl {
         var drawLog: com.google.gson.JsonObject? = null
         WidgetFrames.beginFrame()
         try {
-            renderer.render(delta, renderWorld && mode != RenderMode.GUI_ONLY)
+            renderer.render(partialTick, nanoTime, renderWorld && mode != RenderMode.GUI_ONLY)
         } finally {
             hideCursor = false
             if (recordDraws) drawLog = DrawRecorder.end()

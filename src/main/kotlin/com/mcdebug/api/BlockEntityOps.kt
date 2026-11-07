@@ -41,7 +41,7 @@ object BlockEntityOps : RpcHandlerGroup {
             val pos = p.requirePos("pos")
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val be = ServerContext.blockEntity(world, pos)
-            val nbt = be.saveWithoutMetadata(world.registryAccess())
+            val nbt = be.saveWithoutMetadata()
             JsonObject().apply { add("nbt", NbtJson.toJson(nbt)) }
         }
 
@@ -65,7 +65,7 @@ object BlockEntityOps : RpcHandlerGroup {
             val path = p.requireString("path")
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val be = ServerContext.blockEntity(world, pos)
-            val nbt = be.saveWithoutMetadata(world.registryAccess())
+            val nbt = be.saveWithoutMetadata()
             val value = NbtJson.getByPathAsJson(nbt, path)
             JsonObject().apply { add("value", value) }
         }
@@ -78,7 +78,7 @@ object BlockEntityOps : RpcHandlerGroup {
             val valueJson = p.get("value") ?: throw RpcException(RpcErrors.INVALID_PARAMS, "value required")
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             val be = ServerContext.blockEntity(world, pos)
-            val nbt = be.saveWithoutMetadata(world.registryAccess())
+            val nbt = be.saveWithoutMetadata()
             val oldValue = NbtJson.getByPath(nbt, path)
             var newValue = NbtJson.fromJson(valueJson)
             // 未标注 #nbt 的 JSON 数字一律是 NbtInt；字段已存在且是别的数值类型时按原类型写，
@@ -88,7 +88,7 @@ object BlockEntityOps : RpcHandlerGroup {
             }
             NbtJson.setByPath(nbt, path, newValue)
             applyBeNbt(world, pos, be, nbt)
-            val after = NbtJson.getByPath(be.saveWithoutMetadata(world.registryAccess()), path)
+            val after = NbtJson.getByPath(be.saveWithoutMetadata(), path)
             JsonObject().apply {
                 if (after == newValue) {
                     addProperty("ok", true)
@@ -131,7 +131,7 @@ object BlockEntityOps : RpcHandlerGroup {
      * limitation; this helper covers the common inventory/comparator case.
      */
     private fun applyBeNbt(world: ServerLevel, pos: BlockPos, be: BlockEntity, nbt: CompoundTag) {
-        be.loadWithComponents(nbt, world.registryAccess())
+        be.load(nbt)
         be.setChanged()
         val state = world.getBlockState(pos)
         world.sendBlockUpdated(pos, state, state, 3)

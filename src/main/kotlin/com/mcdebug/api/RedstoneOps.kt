@@ -129,7 +129,7 @@ object RedstoneOps : RpcHandlerGroup {
         val before = state.getValue(LeverBlock.POWERED)
         //1.21: togglePower returns void and mutates the world; read the resulting state back
         val afterState = if (before != powered) {
-            lever.pull(state, world, pos, null)
+            lever.pull(state, world, pos)
             world.getBlockState(pos)
         } else state
         if (before == powered) world.updateNeighborsAt(pos, afterState.block)

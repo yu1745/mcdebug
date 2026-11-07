@@ -9,15 +9,16 @@ import com.mcdebug.rpc.RpcException
 import com.mcdebug.rpc.RpcHandler
 import com.mcdebug.rpc.RpcHandlerGroup
 import com.mcdebug.util.ServerContext
+import net.minecraft.world.inventory.CraftingContainer
 import net.minecraft.world.item.ItemStack
 import net.minecraft.world.item.crafting.CraftingRecipe
 import net.minecraft.world.item.crafting.Recipe
-import net.minecraft.world.item.crafting.RecipeHolder
-import net.minecraft.world.item.crafting.CraftingInput
+import net.minecraft.world.entity.player.StackedContents
+import net.minecraft.core.RegistryAccess
 import net.minecraft.server.MinecraftServer
+import net.minecraft.world.level.Level
 import net.minecraft.resources.ResourceLocation
 import net.minecraft.core.NonNullList
-import net.minecraft.world.level.Level
 import java.util.concurrent.CompletableFuture
 
 
@@ -57,7 +58,7 @@ object CraftingOps : RpcHandlerGroup {
      *               If omitted, the first crafting recipe whose matches() returns
      *               true is used. If multiple match, the first (in iteration order)
      *               wins — pass recipeId to disambiguate.
-     *   dim         optional  dimension used for Level in matches(). Mostly cosmetic
+     *   dim         optional  dimension used for World in matches(). Mostly cosmetic
      *               for crafting; only some recipes read world state. Default
      *               minecraft:overworld.
      *
@@ -86,31 +87,30 @@ object CraftingOps : RpcHandlerGroup {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
             val stacks = parseGridWith(server, p)
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
-            //create() trims to the occupied bounding box and ignores empty cells, exactly like a real 3x3 grid
-            val input = CraftingInput.of(3, 3, stacks)
+            val inv = GridInput(stacks)
 
-            val entry: RecipeHolder<Recipe<CraftingInput>>? = pickRecipe(server, p, input, world)
-            if (entry == null) {
+            val recipe: Recipe<CraftingContainer>? = pickRecipe(server, p, inv, world)
+            if (recipe == null) {
                 return@onServer JsonObject().apply {
                     addProperty("matched", false)
                     add("candidates", JsonArray().apply { /* intentionally empty */ })
                 }
             }
-            val recipe = entry.value
 
-            val resultStack: ItemStack = recipe.assemble(input, world.registryAccess())
+            val registryManager: RegistryAccess = world.registryAccess()
+            val resultStack: ItemStack = recipe.assemble(inv, registryManager)
             val remainder: NonNullList<ItemStack> = try {
-                recipe.getRemainingItems(input)
+                recipe.getRemainingItems(inv)
             } catch (e: Exception) {
                 // Some non-vanilla recipes throw on getRemainder; fall back to "leave slots as-is".
                 val fb = NonNullList.withSize(9, ItemStack.EMPTY)
-                for (i in 0 until 9) fb[i] = input.getItem(i).copy()
+                for (i in 0 until 9) fb[i] = inv.getItem(i).copy()
                 fb
             }
 
             JsonObject().apply {
                 addProperty("matched", true)
-                addProperty("recipeId", entry.id.toString())
+                addProperty("recipeId", recipe.id.toString())
                 addProperty("recipeType", RegistriesIdLookup.typeIdOf(recipe))
                 add("result", ServerContext.itemStackToJson(resultStack))
                 add("remainder", remainderListToJson(remainder))
@@ -130,20 +130,19 @@ object CraftingOps : RpcHandlerGroup {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
             val stacks = parseGridWith(server, p)
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
-            val input = CraftingInput.of(3, 3, stacks)
+            val inv = GridInput(stacks)
 
             val matches = JsonArray()
-            for (entry in server.recipeManager.getRecipes()) {
-                val recipe = entry.value
+            for (recipe in server.recipeManager.recipes) {
                 if (recipe !is CraftingRecipe) continue
-                if (recipe.isSpecial() || recipe.isIncomplete) continue
+                if (recipe.isSpecial || recipe.isIncomplete) continue
                 if (!recipe.canCraftInDimensions(3, 3)) continue
                 val matched = try {
-                    recipe.matches(input, world)
+                    recipe.matches(inv, world)
                 } catch (e: Exception) { false }
                 if (matched) {
                     matches.add(JsonObject().apply {
-                        addProperty("recipeId", entry.id.toString())
+                        addProperty("recipeId", recipe.id.toString())
                         addProperty("recipeType", RegistriesIdLookup.typeIdOf(recipe))
                         addProperty("output", describeItem(recipe.getResultItem(world.registryAccess())))
                     })
@@ -157,41 +156,39 @@ object CraftingOps : RpcHandlerGroup {
     private fun pickRecipe(
         server: MinecraftServer,
         p: JsonObject,
-        input: CraftingInput,
+        inv: GridInput,
         world: Level,
-    ): RecipeHolder<Recipe<CraftingInput>>? {
+    ): Recipe<CraftingContainer>? {
         val explicit = p.getStringOrNull("recipeId")
         if (explicit != null) {
-            val id = ResourceLocation.tryParse(explicit)
+            val id = net.minecraft.resources.ResourceLocation.tryParse(explicit)
                 ?: throw RpcException(RpcErrors.INVALID_PARAMS, "invalid recipeId: $explicit")
-            val found = server.recipeManager.byKey(id).orElse(null)
+            val r = server.recipeManager.byKey(id).orElse(null)
                 ?: throw RpcException(RpcErrors.INVALID_PARAMS, "no recipe with id: $explicit")
             @Suppress("UNCHECKED_CAST")
-            val r = found.value as? Recipe<CraftingInput>
+            return r as? Recipe<CraftingContainer>
                 ?: throw RpcException(
                     RpcErrors.INVALID_PARAMS,
-                    "recipe $explicit is not a crafting-grid recipe (type=${RegistriesIdLookup.typeIdOf(found.value)})"
+                    "recipe $explicit is not a CraftingContainer recipe (type=${RegistriesIdLookup.typeIdOf(r)})"
                 )
-            return RecipeHolder(found.id, r)
         }
-        for (entry in server.recipeManager.getRecipes()) {
-            val recipe = entry.value
+        for (recipe in server.recipeManager.recipes) {
             if (recipe !is CraftingRecipe) continue
-            if (recipe.isSpecial() || recipe.isIncomplete) continue
+            if (recipe.isSpecial || recipe.isIncomplete) continue
             if (!recipe.canCraftInDimensions(3, 3)) continue
             val matched = try {
-                recipe.matches(input, world)
+                recipe.matches(inv, world)
             } catch (e: Exception) { false }
             if (matched) {
                 @Suppress("UNCHECKED_CAST")
-                return entry as RecipeHolder<Recipe<CraftingInput>>
+                return recipe as Recipe<CraftingContainer>
             }
         }
         return null
     }
 
     private fun parseGridWith(server: MinecraftServer, p: JsonObject): NonNullList<ItemStack> {
-        val arr = p.getArrayOrNull("grid")
+        val arr = p.getAsJsonArray("grid")
             ?: throw RpcException(RpcErrors.INVALID_PARAMS, "grid (array of 9) required")
         if (arr.size() != 9) {
             throw RpcException(
@@ -203,12 +200,7 @@ object CraftingOps : RpcHandlerGroup {
         for (i in 0 until 9) {
             val el = arr[i]
             if (el.isJsonNull) continue
-            // A string/count cell is a shape mistake, not a server fault: name the slot and the
-            // expected shape instead of letting `asJsonObject` surface as -32603.
-            val obj = el as? JsonObject ?: throw RpcException(
-                RpcErrors.INVALID_PARAMS,
-                "grid[$i] must be null or an object like {\"item\":\"minecraft:oak_log\",\"count\":1}, got ${el.toString().take(48)}",
-            )
+            val obj = el.asJsonObject
             val itemId = obj.getStringOrNull("item")
             if (itemId == null || itemId == "minecraft:air") continue
             val count = obj.getIntOr("count", 1)
@@ -226,6 +218,38 @@ object CraftingOps : RpcHandlerGroup {
 }
 
 // ---- private helpers (file-scope, not exposed in help) ----
+
+/**
+ * Minimal 3x3 CraftingContainer backed by a 9-element NonNullList. Implements
+ * only what CraftingRecipe.matches / .craft / .getRemainder actually use.
+ * `getInputStacks` returns stacks in row-major order (slot 0 = top-left).
+ */
+private class GridInput(private val stacks: NonNullList<ItemStack>) : CraftingContainer {
+    override fun getContainerSize(): Int = stacks.size
+    override fun isEmpty(): Boolean = stacks.all { it.isEmpty }
+    override fun getItem(slot: Int): ItemStack = stacks[slot]
+    override fun removeItemNoUpdate(slot: Int): ItemStack {
+        val s = stacks[slot]
+        stacks[slot] = ItemStack.EMPTY
+        return s
+    }
+    override fun removeItem(slot: Int, count: Int): ItemStack {
+        val s = stacks[slot]
+        val taken = s.split(count)
+        stacks[slot] = s
+        return taken
+    }
+    override fun setItem(slot: Int, stack: ItemStack) { stacks[slot] = stack }
+    override fun setChanged() {}
+    override fun stillValid(player: net.minecraft.world.entity.player.Player): Boolean = true
+    override fun clearContent() { for (i in 0 until stacks.size) stacks[i] = ItemStack.EMPTY }
+    override fun getHeight(): Int = 3
+    override fun getWidth(): Int = 3
+    override fun getItems(): List<ItemStack> = stacks.filter { !it.isEmpty }
+    override fun fillStackedContents(contents: StackedContents) {
+        for (s in stacks) contents.accountSimpleStack(s)
+    }
+}
 
 private object RegistriesIdLookup {
     fun typeIdOf(r: Recipe<*>): String {

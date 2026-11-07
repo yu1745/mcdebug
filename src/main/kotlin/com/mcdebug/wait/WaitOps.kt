@@ -73,9 +73,7 @@ object WaitOps : RpcHandlerGroup {
         }
         activeWaits.clear()
         // 收油门：sprint 状态随 server 实例销毁，这里只是礼貌性停止（停服期调用可能失败，忽略）
-        if (sprintOwnership.clear()) {
-            sprintServer?.let { srv -> runCatching { srv.tickRateManager().stopSprinting() } }
-        }
+        sprintOwnership.clear() // 1.20.1: no tick sprint (TickRateManager is 1.20.3+)
         sprintServer = null
     }
 
@@ -149,9 +147,7 @@ object WaitOps : RpcHandlerGroup {
     private fun endSprint(job: WaitJob) {
         if (!job.sprint) return
         if (sprintOwnership.end(job.id)) {
-            val srv = sprintServer ?: job.server ?: return
-            runCatching { srv.tickRateManager().stopSprinting() }
-                .onFailure { log.debug("stopSprinting after wait failed: {}", it.toString()) }
+            // 1.20.1: no tick sprint, nothing to stop
         }
     }
 
@@ -188,10 +184,7 @@ object WaitOps : RpcHandlerGroup {
                 if (job.sprint) {
                     sprintServer = server
                     sprintOwnership.begin(job.id)
-                    runCatching {
-                        server.tickRateManager()
-                            .requestGameToSprint(job.timeoutTicks + job.pollInterval + SPRINT_SLACK_TICKS)
-                    }.onFailure { log.warn("sprint request failed: {}", it.toString()) }
+                    log.warn("sprint requested but unsupported on 1.20.1; waiting at natural tick rate")
                 }
             }
         } catch (e: Exception) {
@@ -239,7 +232,7 @@ object WaitOps : RpcHandlerGroup {
                 val w = ServerContext.world(srv, null)
                 val be: BlockEntity? = w.getBlockEntity(pos!!)
                 if (be == null) JsonNull.INSTANCE
-                else NbtJson.getByPathAsJson(be.saveWithoutMetadata(w.registryAccess()), ref.path)
+                else NbtJson.getByPathAsJson(be.saveWithoutMetadata(), ref.path)
             }
             "inv" -> {
                 val w = ServerContext.world(srv, null)

@@ -114,7 +114,7 @@ object GuiSettle {
         var h = 1125899906842597L
         fun mix(v: Long) { h = 31 * h + v }
         fun mixStack(stack: ItemStack) {
-            mix(if (stack.isEmpty) 0 else ItemStack.hashItemAndComponents(stack).toLong())
+            mix(if (stack.isEmpty) 0 else (stack.item.hashCode() * 31 + (stack.tag?.hashCode() ?: 0)).toLong())
             mix(stack.count.toLong())
         }
         val screen = client.screen

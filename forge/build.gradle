@@ -1,0 +1,120 @@
+plugins {
+	id 'eclipse'
+	id 'idea'
+	id 'net.minecraftforge.gradle' version "${forgegradle_version}"
+	id 'org.spongepowered.mixin' version '0.7.+'
+	id 'org.jetbrains.kotlin.jvm' version "${kotlin_version}"
+}
+
+// 版本与根项目同源（gradle.properties 的 mod_version），不单独 bump
+def rootProps = new Properties()
+file('../gradle.properties').withInputStream { rootProps.load(it) }
+version = "${rootProps.getProperty('mod_version')}"
+group = rootProps.getProperty('maven_group')
+base { archivesName = 'mcdebug-forge' }
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+// dev-only GameTest harness: compiled and put on the run classpath, never shipped in the jar
+sourceSets { devtest { compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+	runtimeClasspath += sourceSets.main.output } }
+configurations { devtestImplementation.extendsFrom implementation }
+
+mixin {
+	add sourceSets.main, 'mcdebug.refmap.json'
+	config 'mcdebug.client.mixins.json'
+	config 'mcdebug.mixins.json'
+}
+
+minecraft {
+	mappings channel: 'official', version: "${minecraft_version}"
+
+	runs {
+		client {
+			workingDirectory project.file(project.findProperty('gameDir') ?: 'run-client')
+			property 'forge.logging.markers', 'REGISTRIES'
+			property 'forge.logging.console.level', 'info'
+			mods { mcdebug { source sourceSets.main } }
+		}
+		server {
+			workingDirectory project.file('run')
+			property 'forge.logging.markers', 'REGISTRIES'
+			property 'forge.logging.console.level', 'info'
+			mods { mcdebug { source sourceSets.main } }
+		}
+		gameTestServer {
+			workingDirectory project.file('run-gametest')
+			property 'forge.logging.markers', 'REGISTRIES'
+			property 'forge.logging.console.level', 'info'
+			property 'forge.enabledGameTestNamespaces', 'mcdebug'
+			if (project.hasProperty('devFlag')) property 'mcdebug.devtest.flag', project.property('devFlag')
+			arg '--world'
+			arg 'gametestworld'
+			mods { mcdebug { source sourceSets.main; source sourceSets.devtest } }
+		}
+	}
+}
+
+repositories {
+	flatDir { dirs System.getProperty('user.home') + '/server-v2/develop/tinkers-baseline-forge/downloads' }
+	mavenCentral()
+	maven { url = 'https://maven.minecraftforge.net' }
+	maven { url = 'https://repo.spongepowered.org/repository/maven-public/' }
+	maven { url = 'https://thedarkcolour.github.io/KotlinForForge/' }
+}
+
+// loader 无关的服务端平面 + 客户端平面 + contract 与 1.21.1 共享，同步进来编译（本分支为 1.20.1 回移，
+// 共享源码中 1.21 专属的 API 在本分支就地改写，不回合并）。
+tasks.register('syncShared', Sync) {
+	from('../src/main/kotlin') { exclude 'com/mcdebug/McDebugMod.kt'; exclude 'com/mcdebug/loader/fabric/**' }
+	from('../src/client/kotlin') { exclude 'com/mcdebug/client/McDebugClientMod.kt'; exclude 'com/mcdebug/client/loader/fabric/**' }
+	from('../contract/src/main/kotlin')
+	into layout.buildDirectory.dir('generated/shared')
+}
+sourceSets.main.kotlin.srcDir(layout.buildDirectory.dir('generated/shared'))
+tasks.named('compileKotlin') { dependsOn 'syncShared' }
+
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+	kotlinOptions {
+		jvmTarget = '17'
+		// 语言版本跟随编译器（共享源码用到了 Kotlin 2.2+ 特性），但 API 面锁定 1.9：
+		// 运行时 KotlinForForge 4.x 只带 Kotlin 1.9.x 标准库，禁止调用更新的标准库 API。
+		apiVersion = '1.9'
+	}
+}
+
+dependencies {
+	minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+	implementation "thedarkcolour:kotlinforforge:${kff_version}"
+	if (project.hasProperty('oracle')) { // dev-only: run the real mods (jars in the flatDir above) next to mcdebug
+		runtimeOnly fg.deobf('local:Mantle:1.20.1-1.11.115')
+		runtimeOnly fg.deobf('local:TConstruct:1.20.1-3.12.1.231')
+	}
+	annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+	compileOnly annotationProcessor('io.github.llamalad7:mixinextras-common:0.4.1')
+	implementation jarJar('io.github.llamalad7:mixinextras-forge:0.4.1') { jarJar.ranged(it, '[0.4.1,)') }
+	compileOnly 'org.slf4j:slf4j-api:2.0.9'
+}
+
+jarJar.enable()
+
+jar {
+	archiveClassifier = 'slim'
+	finalizedBy 'reobfJar'
+	manifest { attributes 'Implementation-Title': 'mcdebug-forge', 'Implementation-Version': project.version }
+}
+
+processResources {
+	inputs.property 'version', project.version
+	filesMatching('META-INF/mods.toml') { expand 'version': project.version }
+}
+
+// ForgeGradle adds `--gameDir .` itself; mdb's session launcher appends its own `--gameDir`, and
+// ModLauncher rejects the duplicate. Drop FG's copy when both are present.
+
+// The shippable jar is the jarJar one (bundles MixinExtras, which Forge 1.20.1 does not provide).
+tasks.named('jarJar') {
+	archiveClassifier = ''
+	finalizedBy 'reobfJarJar'
+}
+tasks.named('build') { dependsOn 'jarJar' }

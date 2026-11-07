@@ -350,7 +350,7 @@ object StorageOps : RpcHandlerGroup {
         for (slot in slots) {
             if (remaining <= 0) break
             val current = inv.getItem(slot)
-            if (current.isEmpty || !ItemStack.isSameItemSameComponents(current, stack)) continue
+            if (current.isEmpty || !ItemStack.isSameItemSameTags(current, stack)) continue
             if (!canInsert(inv, slot, stack, side)) continue
             val space = minOf(current.maxStackSize, inv.maxStackSize) - current.count
             if (space <= 0) continue
@@ -386,7 +386,7 @@ object StorageOps : RpcHandlerGroup {
         for (slot in slotsFor(inv, side)) {
             if (remaining <= 0) break
             val current = inv.getItem(slot)
-            if (current.isEmpty || !ItemStack.isSameItemSameComponents(current, exemplar)) continue
+            if (current.isEmpty || !ItemStack.isSameItemSameTags(current, exemplar)) continue
             if (!canExtract(inv, slot, current, side)) continue
             val moved = minOf(current.count, remaining)
             if (!simulate) {

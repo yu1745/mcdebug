@@ -18,8 +18,6 @@ import org.slf4j.LoggerFactory
 import java.util.UUID
 import java.util.concurrent.locks.ReentrantLock
 import kotlin.concurrent.withLock
-import net.minecraft.server.level.ClientInformation
-import net.minecraft.server.network.CommonListenerCookie
 import com.mcdebug.loader.Loader
 
 /**
@@ -96,7 +94,7 @@ internal object FakePlayerPool {
     // NeoForge deprecates ServerPlayer#mayfly (its own flight model); vanilla/Fabric do not.
     @Suppress("DEPRECATION")
     fun create(server: MinecraftServer, world: ServerLevel, profile: GameProfile): ServerPlayer {
-        val p = ServerPlayer(server, world, profile, ClientInformation.createDefault())
+        val p = ServerPlayer(server, world, profile)
         // Resting state: survival + protected (a spawned player must never die or drift).
         p.abilities.instabuild = false
         p.abilities.mayBuild = true
@@ -109,7 +107,7 @@ internal object FakePlayerPool {
         // Criteria.trigger() / etc. doesn't NPE on null networkHandler.
         // Packets are silently dropped — no real client receives them.
         val connection = Connection(PacketFlow.CLIENTBOUND)
-        val handler = object : ServerGamePacketListenerImpl(server, connection, p, CommonListenerCookie.createInitial(profile, false)) {
+        val handler = object : ServerGamePacketListenerImpl(server, connection, p) {
             override fun send(packet: Packet<*>) {
                 // no-op: silently drop all outbound packets
             }

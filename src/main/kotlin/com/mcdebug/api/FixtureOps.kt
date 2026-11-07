@@ -47,7 +47,7 @@ object FixtureOps : RpcHandlerGroup {
                         add(JsonObject().apply {
                             add("rel", ServerContext.posAsJson(BlockPos(pos.x - origin.x, pos.y - origin.y, pos.z - origin.z)))
                             add("state", ServerContext.blockStateToJson(state))
-                            if (includeNbt && be != null) add("nbt", NbtJson.toJson(be.saveWithoutMetadata(world.registryAccess())))
+                            if (includeNbt && be != null) add("nbt", NbtJson.toJson(be.saveWithoutMetadata()))
                         })
                     }
                 })
@@ -83,7 +83,7 @@ object FixtureOps : RpcHandlerGroup {
                 nbt.putInt("x", pos.x)
                 nbt.putInt("y", pos.y)
                 nbt.putInt("z", pos.z)
-                be.loadWithComponents(nbt, world.registryAccess())
+                be.load(nbt)
                 be.setChanged()
                 world.sendBlockUpdated(pos, world.getBlockState(pos), world.getBlockState(pos), flags)
                 blockEntities++

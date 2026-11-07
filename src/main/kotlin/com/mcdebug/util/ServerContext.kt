@@ -5,8 +5,6 @@ import com.mcdebug.rpc.RpcException
 import net.minecraft.world.level.block.Block
 import net.minecraft.world.level.block.state.BlockState
 import net.minecraft.world.level.block.entity.BlockEntity
-import net.minecraft.core.component.DataComponents
-import net.minecraft.world.item.component.CustomData
 import net.minecraft.world.Container
 import net.minecraft.world.item.ItemStack
 import net.minecraft.nbt.CompoundTag
@@ -150,11 +148,11 @@ object ServerContext {
      * meaning the same thing across versions.
      */
     fun stackNbt(stack: ItemStack): CompoundTag? =
-        stack.get(DataComponents.CUSTOM_DATA)?.copyTag()
+        stack.tag?.copy()
 
     fun stackSetNbt(stack: ItemStack, nbt: CompoundTag?) {
         //set(type, null) removes the component
-        stack.set(DataComponents.CUSTOM_DATA, nbt?.let(CustomData::of))
+        stack.tag = nbt
     }
 
     fun itemStackToJson(stack: ItemStack): com.google.gson.JsonObject {

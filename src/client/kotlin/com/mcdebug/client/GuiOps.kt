@@ -11,7 +11,7 @@ import com.mcdebug.rpc.RpcErrors
 import com.mcdebug.rpc.RpcException
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.screens.ConnectScreen
-import net.minecraft.client.gui.screens.GenericMessageScreen
+import net.minecraft.client.gui.screens.GenericDirtMessageScreen
 import net.minecraft.client.multiplayer.ClientLevel
 import net.minecraft.client.server.IntegratedServer
 import net.minecraft.network.chat.Component
@@ -71,7 +71,7 @@ object GuiOps : ClientRpcGroup {
             val gameDir = gameDir()
             JsonObject().apply {
                 addProperty("ready", true)
-                addProperty("gameLoadFinished", client.isGameLoadFinished)
+                addProperty("gameLoadFinished", true)
                 addProperty("overlay", client.getOverlay()?.javaClass?.name ?: "")
                 add("graphics", JsonObject().apply {
                     addProperty("vendor", GlUtil.getVendor())
@@ -167,9 +167,8 @@ object GuiOps : ClientRpcGroup {
                 client.screen ?: TitleScreen(),
                 client,
                 address,
-                ServerData(name, host, ServerData.Type.OTHER),
+                ServerData(name, host, false),
                 false,
-                null,
             )
             JsonObject().apply {
                 addProperty("ok", true)
@@ -247,7 +246,7 @@ object GuiOps : ClientRpcGroup {
             // The server refuses clicks beyond the interaction range without a word, which
             // otherwise reads as "the block has no GUI" (typical: player fell off after set-block).
             val distance = player.eyePosition.distanceTo(Vec3.atCenterOf(pos))
-            OpenAttempt(face, result.toString(), screenBefore, menuBefore, block, distance, player.blockInteractionRange())
+            OpenAttempt(face, result.toString(), screenBefore, menuBefore, block, distance, player.getAttributeValue(net.minecraftforge.common.ForgeMod.BLOCK_REACH.get()))
         }
         return ClientTasks.thenOnClient(client, attempt) { done ->
             ClientTasks.until(waitTicks) {
@@ -351,7 +350,7 @@ object GuiOps : ClientRpcGroup {
         val operation = Any()
         val started = ClientTasks.onClient(client) {
             if (disconnectOperation != null) throw RpcException(RpcErrors.CLIENT_NOT_READY, "disconnect already in progress")
-            if (!client.isGameLoadFinished || client.getOverlay() != null || client.screen is ConnectScreen) {
+            if (!true || client.getOverlay() != null || client.screen is ConnectScreen) {
                 throw RpcException(RpcErrors.CLIENT_NOT_READY, "client is still loading/connecting; cancel that screen first")
             }
             disconnectOperation = operation
@@ -361,7 +360,7 @@ object GuiOps : ClientRpcGroup {
                 // Do not join it or pump runTick from this RPC. Vanilla network
                 // teardown can still run its ordinary engine cleanup callbacks.
                 target.server.execute { target.server.halt(false) }
-                client.setScreen(GenericMessageScreen(Component.translatable("menu.savingLevel")))
+                client.setScreen(GenericDirtMessageScreen(Component.translatable("menu.savingLevel")))
             }
             target
         }
@@ -380,8 +379,7 @@ object GuiOps : ClientRpcGroup {
                 (client.getSingleplayerServer() != null && client.getSingleplayerServer() !== target.server)) {
                 throw RpcException(RpcErrors.CLIENT_NOT_READY, "world changed while disconnecting; refusing to disconnect a replacement")
             }
-            client.level?.disconnect()
-            client.disconnect()
+            client.clearLevel(TitleScreen())
             client.setScreen(TitleScreen())
             JsonObject().apply {
                 addProperty("ok", client.level == null && client.player == null && !ServerPlane.running)

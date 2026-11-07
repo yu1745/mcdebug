@@ -58,7 +58,7 @@ object WorldOps : RpcHandlerGroup {
                 add("state", ServerContext.blockStateToJson(state))
                 addProperty("hasBlockEntity", hasBe)
                 if (includeNbt && hasBe) {
-                    val nbt = world.getBlockEntity(pos)!!.saveWithoutMetadata(world.registryAccess())
+                    val nbt = world.getBlockEntity(pos)!!.saveWithoutMetadata()
                     add("nbt", NbtJson.toJson(nbt))
                 }
             }
@@ -137,7 +137,7 @@ object WorldOps : RpcHandlerGroup {
                     addProperty("dim", world.dimension().location().toString())
                     add("state", ServerContext.blockStateToJson(state))
                     addProperty("hasBlockEntity", be != null)
-                    if (includeNbt && be != null) add("nbt", NbtJson.toJson(be.saveWithoutMetadata(world.registryAccess())))
+                    if (includeNbt && be != null) add("nbt", NbtJson.toJson(be.saveWithoutMetadata()))
                 }
                 results.add(entry)
             }
@@ -161,7 +161,7 @@ object WorldOps : RpcHandlerGroup {
                 val entry = JsonObject().apply { add("pos", ServerContext.posAsJson(pos)) }
                 if (includeNbt) {
                     val be = world.getBlockEntity(pos)
-                    if (be != null) entry.add("nbt", NbtJson.toJson(be.saveWithoutMetadata(world.registryAccess())))
+                    if (be != null) entry.add("nbt", NbtJson.toJson(be.saveWithoutMetadata()))
                 }
                 matches.add(entry)
             }
@@ -188,7 +188,7 @@ object WorldOps : RpcHandlerGroup {
             // 同步等到区块 FULL：在主线程调用，create=true 阻塞直到加载完成。
             val chunk = world.chunkSource.getChunk(
                 chunkPos.x, chunkPos.z,
-                net.minecraft.world.level.chunk.status.ChunkStatus.FULL, true,
+                net.minecraft.world.level.chunk.ChunkStatus.FULL, true,
             )
             val loaded = chunk != null
             JsonObject().apply {

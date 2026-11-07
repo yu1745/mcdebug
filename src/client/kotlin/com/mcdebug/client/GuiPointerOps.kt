@@ -285,7 +285,7 @@ object GuiPointerOps : ClientRpcGroup {
             val screen = client.screen ?: throw noScreen()
             val target = GuiTargets.resolve(client, q)
             val cursorMoved = moveCursor && GuiCursor.warp(client, target.x, target.y)
-            val handled = screen.mouseScrolled(target.x, target.y, dx, dy)
+            val handled = screen.mouseScrolled(target.x, target.y, dy)
             GuiTargets.report(target).apply {
                 addProperty("ok", true)
                 addProperty("handled", handled)

@@ -76,7 +76,7 @@ object InventoryOps : RpcHandlerGroup {
                 if (current.isEmpty) {
                     if (!simulate) inv.setItem(targetSlot, stack)
                     remaining = 0
-                } else if (ItemStack.isSameItemSameComponents(current, stack) && current.count < current.maxStackSize) {
+                } else if (ItemStack.isSameItemSameTags(current, stack) && current.count < current.maxStackSize) {
                     val space = current.maxStackSize - current.count
                     val toAdd = minOf(space, remaining)
                     if (!simulate) {
@@ -91,7 +91,7 @@ object InventoryOps : RpcHandlerGroup {
                 for (i in 0 until inv.containerSize) {
                     if (remaining <= 0) break
                     val current = inv.getItem(i)
-                    if (current.isEmpty || !ItemStack.isSameItemSameComponents(current, stack)) continue
+                    if (current.isEmpty || !ItemStack.isSameItemSameTags(current, stack)) continue
                     if (current.count >= current.maxStackSize) continue
                     val space = current.maxStackSize - current.count
                     val toAdd = minOf(space, remaining)
@@ -135,7 +135,7 @@ object InventoryOps : RpcHandlerGroup {
             var remaining = maxExtract
             if (targetSlot != null) {
                 val current = inv.getItem(targetSlot)
-                if (!current.isEmpty && ItemStack.isSameItemSameComponents(current, target)) {
+                if (!current.isEmpty && ItemStack.isSameItemSameTags(current, target)) {
                     val take = minOf(current.count, remaining)
                     if (!simulate) {
                         val newStack = current.copy()
@@ -148,7 +148,7 @@ object InventoryOps : RpcHandlerGroup {
                 for (i in 0 until inv.containerSize) {
                     if (remaining <= 0) break
                     val current = inv.getItem(i)
-                    if (current.isEmpty || !ItemStack.isSameItemSameComponents(current, target)) continue
+                    if (current.isEmpty || !ItemStack.isSameItemSameTags(current, target)) continue
                     val take = minOf(current.count, remaining)
                     if (!simulate) {
                         val newStack = current.copy()

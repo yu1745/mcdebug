@@ -1159,13 +1159,8 @@ internal object WorldPlayerActions {
     // `Item#getDefaultAttributeModifiers` is @Deprecated in 1.21.1 but is still what vanilla's own
     // ItemStack#forEachModifier uses, so keep the identical source of modifiers on purpose.
     @Suppress("DEPRECATION")
-    private fun mainHandModifierMultimap(stack: ItemStack): com.google.common.collect.Multimap<Holder<Attribute>, AttributeModifier> {
-        val multimap = LinkedHashMultimap.create<Holder<Attribute>, AttributeModifier>()
-        stack.item.getDefaultAttributeModifiers().forEach(EquipmentSlot.MAINHAND) { attribute, modifier ->
-            multimap.put(attribute, modifier)
-        }
-        return multimap
-    }
+    private fun mainHandModifierMultimap(stack: ItemStack): com.google.common.collect.Multimap<Attribute, AttributeModifier> =
+        stack.getAttributeModifiers(EquipmentSlot.MAINHAND)
 
     private fun addMainHandModifiers(player: ServerPlayer, stack: ItemStack) {
         if (!stack.isEmpty) {
@@ -1184,7 +1179,8 @@ internal object WorldPlayerActions {
     }
 
     private val LAST_ATTACKED_TICKS_FIELD by lazy {
-        listOf("lastAttackedTicks", "field_6273", "aQ").firstNotNullOfOrNull { name ->
+        // Yarn, intermediary, obfuscated, Mojang (NeoForge/dev runtime), SRG (Forge 1.20 runtime)
+        listOf("lastAttackedTicks", "field_6273", "aQ", "attackStrengthTicker", "f_20922_").firstNotNullOfOrNull { name ->
             findDeclaredField(Player::class.java, name)
         } ?: error("Unable to resolve Player lastAttackedTicks field")
     }
