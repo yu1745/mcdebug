@@ -176,12 +176,26 @@ private fun tick(server: MinecraftServer, params: JsonObject?): CompletableFutur
         @Suppress("UNCHECKED_CAST")
         val ticker = state.getTicker(world, be.type) as BlockEntityTicker<BlockEntity>? 
             ?: throw RpcException(RpcErrors.INVALID_PARAMS, "block at $pos has no ticker (not a ticking block entity)")
-        repeat(count) {
-            ticker.tick(world, pos, state, be)
+        // Like the level's ticker, pass the CURRENT state each tick: a block entity that changes its own state
+        // (lit furnace, a multiblock controller's in-structure flag) must see the change on the next tick.
+        // Stops early if the block entity is removed or replaced.
+        var ticked = 0
+        var currentTicker = ticker
+        var block = state.block
+        while (ticked < count) {
+            if (be.isRemoved || world.getBlockEntity(pos) !== be) break
+            val now = world.getBlockState(pos)
+            if (now.block !== block) {
+                block = now.block
+                @Suppress("UNCHECKED_CAST")
+                currentTicker = (now.getTicker(world, be.type) as BlockEntityTicker<BlockEntity>?) ?: break
+            }
+            currentTicker.tick(world, pos, now, be)
+            ticked++
         }
         JsonObject().apply {
             add("pos", ServerContext.posAsJson(pos))
             addProperty("dim", world.dimension().location().toString())
-            addProperty("ticked", count)
+            addProperty("ticked", ticked)
         }
     }
