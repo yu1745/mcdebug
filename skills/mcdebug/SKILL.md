@@ -132,6 +132,8 @@ mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeo
   `--offset M` on `reflect get`/`call`: e.g. every recipe id is
   `reflect get --root server --path 'recipeManager.byName.keySet()' --limit 10000`. To keep mobs still between reflect
   calls (AI moves them every tick), run `/tick freeze` first and `/tick unfreeze` after.
+  Many commands at once: put them in a world datapack function (`<world>/datapacks/<p>/data/<ns>/function/x.mcfunction`,
+  `functions/` on 1.20.x), `reload`, then one `server.runCommand` of `function <ns>:x`; read results back with one scan.
   `inserted`/`extracted` can be far below `amount`: the block's own transfer limit applies, and
   it is usually **per tick**, so repeating the call within the same tick (a tight loop, `--batch`)
   gets 0. `remaining` is about this call only; read the result back with `storage get`. To fill

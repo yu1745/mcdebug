@@ -121,27 +121,47 @@ object ServerOps : RpcHandlerGroup {
             val source: CommandSourceStack = server.createCommandSourceStack().withLevel(sourceWorld)
 
             val output = StringBuilder()
+            // CommandSourceStack.sendFailure styles its message red; that is how a failure is told from feedback
+            val failures = StringBuilder()
             // Capture the textual output the command would print.
             val capturing = object : CommandSource {
                 override fun sendSystemMessage(message: Component) {
                     if (output.isNotEmpty()) output.append('\n')
                     output.append(message.string)
+                    if (message.style.color == net.minecraft.network.chat.TextColor.fromLegacyFormat(net.minecraft.ChatFormatting.RED)) {
+                        if (failures.isNotEmpty()) failures.append('\n')
+                        failures.append(message.string)
+                    }
                 }
                 override fun acceptsSuccess(): Boolean = true
                 override fun acceptsFailure(): Boolean = true
                 override fun shouldInformAdmins(): Boolean = true
             }
+            // Vanilla's own entry point (Commands.performCommand) runs the command inside an execution context, which
+            // 1.20.3+ needs for /function, /return and macro functions (a bare dispatcher.execute fails them with
+            // "This function should not run"). It reports errors as a failure message, so success/result come from the
+            // result callback and a failed command is still an RPC error carrying that message.
+            var callbackSuccess: Boolean? = null
+            var result = 0
             val sourceWithCapture = source.withSource(capturing)
-
-            //executeWithPrefix returns void in 1.21; parse+execute on the dispatcher keeps the int result
-            val result: Int = try {
-                val commands = server.getCommands()
-                commands.dispatcher.execute(commands.dispatcher.parse(command.removePrefix("/"), sourceWithCapture))
+                .withCallback(net.minecraft.commands.CommandResultCallback { success, value ->
+                    callbackSuccess = success
+                    result = value
+                })
+            val commands = server.getCommands()
+            val parse = commands.dispatcher.parse(command.removePrefix("/"), sourceWithCapture)
+            try {
+                net.minecraft.commands.Commands.validateParseResults(parse)
             } catch (e: Exception) {
-                throw RpcException(
-                    RpcErrors.INTERNAL_ERROR,
-                    "command execution threw: ${e.javaClass.simpleName}: ${e.message}"
-                )
+                throw RpcException(RpcErrors.INTERNAL_ERROR, "command execution threw: ${e.javaClass.simpleName}: ${e.message}")
+            }
+            try {
+                commands.performCommand(parse, command.removePrefix("/"))
+            } catch (e: Exception) {
+                throw RpcException(RpcErrors.INTERNAL_ERROR, "command execution threw: ${e.javaClass.simpleName}: ${e.message}")
+            }
+            if (callbackSuccess != true && failures.isNotEmpty()) {
+                throw RpcException(RpcErrors.INTERNAL_ERROR, "command failed: $failures")
             }
             JsonObject().apply {
                 addProperty("success", result > 0)

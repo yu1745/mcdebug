@@ -271,6 +271,8 @@ node scripts/set-version.mjs X.Y.Z
 
 ## 11b. 已完成变更记录（v2 → 0.6.x）
 
+- **`server.runCommand` 走原版执行上下文（未发版）**：改用 `Commands.performCommand`（结果经 `CommandResultCallback` 取回），1.20.3+ 的 `/function`、`/return`、宏函数不再报 `This function should not run`。语法错误照旧抛 `-32603 command execution threw`；执行失败按 `sendFailure` 的红色消息判定，抛 `-32603 command failed: <消息>`；function 本身无结果回调时返回 `success:false` 加反馈文本。
+
 - **reflect 大值分页（未发版）**：`reflect.get`/`reflect.call`（含 `gui.reflect.*`）新增可选参数 `offset`/`limit`（1..10000，CLI `--offset/--limit`），`ReflectCore.Window` 同时作用于内联纯值数组（默认 200）与 ref 摘要（默认 20），摘要带 `offset`/`truncated`/`returned`；`limit` 显式给出时 map 一律走摘要分页。用途：一次取全部配方 id、某注册表的整张标签表（`--class ...BuiltInRegistries --path ITEM.tags --limit 10000`）。单测 `ReflectCoreTest`。
 
 - **通用玩法驱动补强（未发版，来自 Tinkers 1.21 移植的真实玩法回归）**：①`screen.openBlock` 先走 `MenuProvider`，被 loader 拒绝（Fabric 扩展 screen handler、写额外开屏数据的菜单）或为空时，改为空手右键方块的真实交互路径，回答带 `openedBy`；②新 RPC `screen.clickButton`（原版 `clickMenuButton`，切石机/织布机/附魔台/模组选择器）；③物品参数统一支持 `components`（原版 `DataComponentPatch` JSON，RegistryOps；`ServerContext.itemStackFromJson/itemStackToJson`），输出逐组件编码、失败列入 `#errors`，`nbt` 仍只表示 custom_data；客户端平面用客户端 level 的注册表编码；④`wait.until` 新源 `storage[x,y,z].<item|fluid|energy|inventory>.<path>`（复用 `storage.get` 的 JSON，`PredicateExpr.jsonPath`）；⑤`server.status.playerList`；⑥客户端 `gui.hover`/`gui.screenshot` 的 `heldModifiers`（`GuiInputModifiers.held`，只在该次渲染期间生效，CLI `--hold-shift/--hold-ctrl/--hold-alt`）。⑦修复 NeoForge dev 运行（`runServer`/`neoforge-smoke.sh`）自 `67626bb` 起缺 Kotlin stdlib：`additionalRuntimeClasspath` 补上（发布 jar 本就内嵌，不受影响）。
