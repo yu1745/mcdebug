@@ -196,6 +196,9 @@ class ScreenApi(private val rpc: RpcClient) {
     fun quickMove(screenId: String, slot: Int): JsonElement =
         rpc.call("screen.quickMove", params { p("screenId", screenId); p("slot", slot) })
 
+    fun batch(steps: Any, screenId: String? = null, closeAtEnd: Boolean = false): JsonElement =
+        rpc.call("screen.batch", params { p("steps", steps); p("screenId", screenId); p("closeAtEnd", closeAtEnd) })
+
     fun close(screenId: String): JsonElement =
         rpc.call("screen.close", params { p("screenId", screenId) })
 }

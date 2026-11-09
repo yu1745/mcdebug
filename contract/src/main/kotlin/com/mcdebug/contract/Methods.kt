@@ -53,7 +53,7 @@ object Methods {
     val trace = setOf("trace.start", "trace.stop", "trace.get")
     val screen = setOf(
         "screen.openBlock", "screen.snapshot", "screen.setPlayerSlot",
-        "screen.clickSlot", "screen.clickButton", "screen.quickMove", "screen.close",
+        "screen.clickSlot", "screen.clickButton", "screen.quickMove", "screen.close", "screen.batch",
     )
     val redstone = setOf(
         "redstone.getPower", "redstone.isPowered", "redstone.setLever",
