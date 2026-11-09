@@ -54,6 +54,16 @@ class ScreenClickSlotCmd : CliktCommand(name = "click-slot", help = "click a slo
     }
 }
 
+class ScreenBatchCmd : CliktCommand(name = "batch", help = "run many screen operations in ONE call: --steps is a JSON array of {op,...} (open|setPlayerSlot|setSlot|clearPlayerSlots|clickSlot|clickButton|quickMove|snapshot|close, each with the parameters of that single command; open takes x,y,z/dim/side as pos), later steps use the screen opened by the last open; prints a compact result per step (snap:true adds the slots); stops at the first failing step") {
+    private val steps by option("--steps", help = "JSON array of steps, or @file").required()
+    private val screenId by option("--screen-id", help = "screen to use before any open step")
+    private val closeAtEnd by option("--close-at-end", help = "close the current screen when done, also after a failure").flag()
+
+    override fun run() = withApi { api ->
+        printJson(api.screen.batch(parseJsonArg(steps), screenId, closeAtEnd))
+    }
+}
+
 class ScreenQuickMoveCmd : CliktCommand(name = "quick-move", help = "shift-click a slot") {
     private val screenId by option("--screen-id").required()
     private val slot by option("--slot").int().required()
@@ -137,7 +147,7 @@ class RedstoneNotifyNeighborsCmd : CliktCommand(name = "notify-neighbors", help 
 
 fun screenSubcommands() = listOf(
     ScreenOpenBlockCmd(), ScreenSnapshotCmd(), ScreenSetPlayerSlotCmd(),
-    ScreenClickSlotCmd(), ScreenQuickMoveCmd(), ScreenCloseCmd(),
+    ScreenClickSlotCmd(), ScreenQuickMoveCmd(), ScreenBatchCmd(), ScreenCloseCmd(),
 )
 
 fun redstoneSubcommands() = listOf(

@@ -13,6 +13,7 @@ import com.mojang.authlib.GameProfile
 import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.world.inventory.AbstractContainerMenu
 import net.minecraft.world.inventory.ClickType
+import net.minecraft.world.item.ItemStack
 import net.minecraft.server.MinecraftServer
 import net.minecraft.server.level.ServerPlayer
 import net.minecraft.network.chat.Component
@@ -33,6 +34,7 @@ object ScreenOps : RpcHandlerGroup {
         "clickButton" to ::clickButton,
         "quickMove" to ::quickMove,
         "close" to ::close,
+        "batch" to ::batch,
     )
 
     fun clear() {
@@ -43,7 +45,9 @@ object ScreenOps : RpcHandlerGroup {
     }
 
     private fun openBlock(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
-        RpcContext.onServer(server) {
+        RpcContext.onServer(server) { openBlockNow(server, params) }
+
+    private fun openBlockNow(server: MinecraftServer, params: JsonObject?): JsonElement = run {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
             val pos = p.requirePos("pos")
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
@@ -77,13 +81,17 @@ object ScreenOps : RpcHandlerGroup {
         }
 
     private fun snapshot(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
-        RpcContext.onServer(server) {
+        RpcContext.onServer(server) { snapshotNow(server, params) }
+
+    private fun snapshotNow(server: MinecraftServer, params: JsonObject?): JsonElement = run {
             val session = session(params)
             screenSnapshot(session)
         }
 
     private fun setPlayerSlot(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
-        RpcContext.onServer(server) {
+        RpcContext.onServer(server) { setPlayerSlotNow(server, params) }
+
+    private fun setPlayerSlotNow(server: MinecraftServer, params: JsonObject?): JsonElement = run {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
             val session = session(p)
             val slot = p.requireLong("slot").toInt()
@@ -99,7 +107,9 @@ object ScreenOps : RpcHandlerGroup {
         }
 
     private fun clickSlot(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
-        RpcContext.onServer(server) {
+        RpcContext.onServer(server) { clickSlotNow(server, params) }
+
+    private fun clickSlotNow(server: MinecraftServer, params: JsonObject?): JsonElement = run {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
             val session = session(p)
             val slot = p.requireLong("slot").toInt()
@@ -112,7 +122,9 @@ object ScreenOps : RpcHandlerGroup {
         }
 
     private fun clickButton(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
-        RpcContext.onServer(server) {
+        RpcContext.onServer(server) { clickButtonNow(server, params) }
+
+    private fun clickButtonNow(server: MinecraftServer, params: JsonObject?): JsonElement = run {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
             val session = session(p)
             val button = p.requireLong("button").toInt()
@@ -123,7 +135,9 @@ object ScreenOps : RpcHandlerGroup {
         }
 
     private fun quickMove(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
-        RpcContext.onServer(server) {
+        RpcContext.onServer(server) { quickMoveNow(server, params) }
+
+    private fun quickMoveNow(server: MinecraftServer, params: JsonObject?): JsonElement = run {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
             val session = session(p)
             val slot = p.requireLong("slot").toInt()
@@ -134,7 +148,9 @@ object ScreenOps : RpcHandlerGroup {
         }
 
     private fun close(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
-        RpcContext.onServer(server) {
+        RpcContext.onServer(server) { closeNow(server, params) }
+
+    private fun closeNow(server: MinecraftServer, params: JsonObject?): JsonElement = run {
             val session = session(params)
             sessions.remove(session.id)
             closeSession(session)
@@ -143,6 +159,81 @@ object ScreenOps : RpcHandlerGroup {
                 addProperty("closed", true)
             }
         }
+
+    /**
+     * Many menu operations in ONE rpc (one hop to the server thread, one round trip). `steps` run in order; each is
+     * `{op, ...params of that single call}` with op one of open (pos/dim/side, makes the new screen the current one),
+     * setPlayerSlot, setSlot (any menu slot written directly), clearPlayerSlots, clickSlot, clickButton, quickMove,
+     * snapshot, close. A step uses the current screen unless it names `screenId`. Results are compact: `snap:true` on
+     * a step (always for op snapshot) adds `slots` (item stacks only), clickButton adds `accepted`. The first failing step
+     * stops the batch with `{error}` as its result; `closeAtEnd:true` closes the current screen then, even after a failure.
+     */
+    private fun batch(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
+        RpcContext.onServer(server) {
+            val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
+            val steps = p.get("steps")?.takeIf { it.isJsonArray }?.asJsonArray
+                ?: throw RpcException(RpcErrors.INVALID_PARAMS, "steps (array) required")
+            var current = p.getStringOrNull("screenId")
+            val results = JsonArray()
+            try {
+                for (el in steps) {
+                    val step = el.asJsonObject
+                    val op = step.get("op")?.asString ?: throw RpcException(RpcErrors.INVALID_PARAMS, "step without op")
+                    val out = JsonObject()
+                    results.add(out)
+                    try {
+                        val q = step.deepCopy()
+                        if (!q.has("screenId") && current != null) q.addProperty("screenId", current)
+                        val r: JsonObject = when (op) {
+                            "open" -> openBlockNow(server, q).asJsonObject.also { current = it.get("screenId").asString }
+                            "setPlayerSlot" -> setPlayerSlotNow(server, q).asJsonObject
+                            "setSlot" -> setSlotNow(server, q)
+                            "clearPlayerSlots" -> clearPlayerSlotsNow(server, q)
+                            "clickSlot" -> clickSlotNow(server, q).asJsonObject
+                            "clickButton" -> clickButtonNow(server, q).asJsonObject
+                            "quickMove" -> quickMoveNow(server, q).asJsonObject
+                            "snapshot" -> snapshotNow(server, q).asJsonObject
+                            "close" -> closeNow(server, q).asJsonObject.also { current = null }
+                            else -> throw RpcException(RpcErrors.INVALID_PARAMS, "unknown batch op: $op")
+                        }
+                        out.addProperty("ok", true)
+                        r.get("screenId")?.let { out.add("screenId", it) }
+                        r.get("accepted")?.let { out.add("accepted", it) }
+                        r.get("openedBy")?.let { out.add("openedBy", it) }
+                        if (op == "snapshot" || step.get("snap")?.asBoolean == true) r.get("slots")?.let { out.add("slots", it) }
+                    } catch (e: RpcException) {
+                        out.addProperty("error", e.message)
+                        break
+                    }
+                }
+            } finally {
+                if (p.get("closeAtEnd")?.asBoolean == true) {
+                    current?.let { id -> sessions.remove(id)?.let { runCatching { closeSession(it) } } }
+                }
+            }
+            JsonObject().apply { add("results", results) }
+        }
+
+    private fun setSlotNow(server: MinecraftServer, p: JsonObject): JsonObject {
+        val session = session(p)
+        val slot = p.requireLong("slot").toInt()
+        requireUsable(session)
+        if (slot !in 0 until session.handler.slots.size) {
+            throw RpcException(RpcErrors.INVALID_PARAMS, "menu slot must be in 0..${session.handler.slots.size - 1}, got $slot")
+        }
+        session.handler.getSlot(slot).set(itemStackFromJson(server, p.requireObject("stack")))
+        session.handler.slotsChanged(session.handler.getSlot(slot).container)
+        session.handler.broadcastChanges()
+        return JsonObject().apply { addProperty("screenId", session.id) }
+    }
+
+    private fun clearPlayerSlotsNow(server: MinecraftServer, p: JsonObject): JsonObject {
+        val session = session(p)
+        requireUsable(session)
+        for (i in 0 until 36) session.player.inventory.setItem(i, ItemStack.EMPTY)
+        session.player.inventory.setChanged()
+        return JsonObject().apply { addProperty("screenId", session.id) }
+    }
 
     private fun screenSnapshot(session: ScreenSession): JsonObject =
         JsonObject().apply {
