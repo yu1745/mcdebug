@@ -2,7 +2,7 @@
 
 2026-11-01。只读调研与离线装配验证，未启用新 profile、未修改日常 Pi 配置、未发起模型生成请求。
 
-结论：可以移植 Codex 客户端可见的提示体系，Pi 1.4 已有整份提示替换、完整请求 hook、工具注册、子代理和脚本工具入口，主要工作可在扩展层完成。工具适配必须覆盖参数、返回值和消息/等待语义，不能仅替换名称。提示层迁移可实现，模型行为是否接近 Codex 仍需对照实验。
+结论：可以移植 Codex 客户端可见的提示体系，Pi 1.4 已有整份提示替换、完整请求钩子、工具注册、子代理和脚本工具入口，主要工作可在扩展层完成。工具适配必须覆盖参数、返回值和消息/等待语义，不能仅替换名称。提示层迁移可实现，模型行为是否接近 Codex 仍需对照实验。
 
 ## Codex 的来源与范围
 
@@ -13,7 +13,7 @@
 - [多代理角色与模式](https://github.com/openai/codex/blob/67f0994b532b8740f14b5b738af7b7b2a915b1d6/codex-rs/prompts/src/model_messages/multi_agent.rs) 区分 root、subagent、显式派发和主动派发，目录可覆盖默认值。
 - [压缩提示](https://github.com/openai/codex/blob/67f0994b532b8740f14b5b738af7b7b2a915b1d6/codex-rs/prompts/templates/compact/prompt.md) 属于独立生命周期请求，替换主会话提示不会自动替换它。
 
-“全套”应理解为按实际模型、角色、模式和功能装配当前生效的各层。不能把 Plan/Default、root/subagent、不同审批模式的模板同时拼进去。工具 schema 和 description 也是模型输入，必须一起处理。客户端不可观测的服务端实现不属于可完整复刻的范围。
+“全套”应理解为按实际模型、角色、模式和功能装配当前生效的各层。不能把 Plan/Default、root/subagent、不同审批模式的模板同时拼进去。工具类结构和 description 也是模型输入，必须一起处理。客户端不可观测的服务端实现不属于可完整复刻的范围。
 
 ## Pi 1.4 的实际支持
 
@@ -22,7 +22,7 @@
 `dist/core/system-prompt.js` 的行为：
 
 1. `customPrompt` / `--system-prompt` / SYSTEM.md 替换默认基础角色，并跳过默认 tools/rules/docs 段；因此并非只能在 Pi 原提示后追加 Codex 提示。
-2. 项目 contextFiles、skills、APPEND_SYSTEM 仍可加入。通常应保留用户项目规则和真实可用的 skill 目录，主动控制追加来源。
+2. 项目 contextFiles、skills、APPEND_SYSTEM 仍可加入。通常应保留用户项目规则和真实可用的技能目录，主动控制追加来源。
 3. `forceSystemPrompt` 可精确替换整份提示文本；使用它的组装器需要自行保留项目规则、环境和技能信息。
 4. `before_agent_start` 可改变提示；`context_with_system` 可处理完整转录；`before_provider_request` 可处理最终请求。其他插件仍可能在后面改写，profile 需要明确装配顺序和归属。
 5. 真正的工具声明独立存在，不能因为提示写了工具名称就认为能力已经注册。
@@ -36,21 +36,21 @@
 | functions.exec | codemode | 都支持 JavaScript、tools.*、并行调用和输出筛选；pragma、脚本运行时、store 持久化和挂起/恢复不同 |
 | functions.wait / yield_control | 无直接相同的 codemode 单元恢复接口 | Pi 可把长操作交给后台 job；若保留 Codex 的 cell 语义则需额外适配 |
 | exec_command / write_stdin | bash、bash_bg、jobs | timeout 单位、cwd、PTY/stdin、输出和会话 ID 不同，不能只改名字 |
-| apply_patch | edit/write，或独立 patch 工具 | exact replacement 与 diff patch 是不同契约；偏好原格式时可提供兼容工具 |
+| apply_patch | edit/write，或独立 patch 工具 | exact replacement 与差异 patch 是不同契约；偏好原格式时可提供兼容工具 |
 | spawn_agent | Agent | 参数、模型继承、上下文继承、角色提示和递归配置不同 |
 | followup_task | steer_subagent / Agent(resume) | 要按正在运行或已返回选择行为 |
 | send_message | steer_subagent / send_parent_message | Codex queue-only 与 Pi 的 steer、根父唤醒、已结束任务处理并不完全相同 |
 | wait_agent | get_subagent_result 加等待适配 | mailbox 任意消息、指定结果、有限超时和取消是不同条件；现有 wait:true 不是直接等价物 |
 | view_image | read 图片 | 按实际图像输入支持组装说明 |
-| MCP / Web / skills / 用户问题工具 | 已安装插件和相应适配 | 使用实际注册的能力与 schema；不能保留不存在的工具说明 |
+| MCP / Web / skills / 用户问题工具 | 已安装插件和相应适配 | 使用实际注册的能力与类结构；不能保留不存在的工具说明 |
 
 OpenAI 的 [Codex Prompting Guide](https://developers.openai.com/cookbook/examples/gpt-5/codex_prompting_guide) 明确讨论了替代文件工具和自定义工具的适配，也强调工具格式与模型习惯的关系。这支持工具可移植的判断，但它针对该指南所述模型，不能据此保证 Sol 或 Flash 的同等效果。
 
 ## 比较合适的实现形态
 
-提供一个可切换的 Codex prompt profile，通过同一个组装器选择模型基础提示、主/子角色、工作模式、真实环境与工具说明。技术上优先使用现有扩展和 SDK；确需精确行为的工具再加薄适配器。
+提供一个可切换的 Codex 提示词 profile，通过同一个组装器选择模型基础提示、主/子角色、工作模式、真实环境与工具说明。技术上优先使用现有扩展和 SDK；确需精确行为的工具再加薄适配器。
 
-该 profile 要同时覆盖主代理和 worker，并控制旧插件行为提示的重复注入。只替换 SYSTEM.md、保留其余插件原描述/动态提示，不构成完整替换。权限、并发槽位、消息格式、技能工具可用性都应由实际 Pi 环境生成。
+该 profile 要同时覆盖主代理和工作代理，并控制旧插件行为提示的重复注入。只替换 SYSTEM.md、保留其余插件原描述/动态提示，不构成完整替换。权限、并发槽位、消息格式、技能工具可用性都应由实际 Pi 环境生成。
 
 压缩若也要求对齐，则通过 `session_before_compact` 接管摘要生成并返回 Pi 要求的 CompactionResult。普通 customInstructions 是追加焦点，不能当成完整替换压缩模板的开关。可以保留 Pi 的存储/截断基础设施，并适配模型看到的交接文本。
 

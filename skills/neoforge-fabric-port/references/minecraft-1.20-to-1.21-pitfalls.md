@@ -26,11 +26,11 @@ float u = sprite.getU(x);
 
 ## 2. 物品数据从 NBT 迁到 codec/数据组件后，新旧键名并存
 
-**边界：** 1.21 把物品数据放进数据组件，原先手写 NBT 的值类型多数改由 codec 序列化，字段名随之改变（例如流体栈由 `FluidName`/`Amount` 变成 `id`/`amount`）。第三方 1.21 基线常常只迁移了主写入路径，次要写入器、读取端和数据文件仍沿用 1.20 键名。
+**边界：** 1.21 把物品数据放进数据组件，原先手写 NBT 的值类型多数改由编解码器序列化，字段名随之改变（例如流体栈由 `FluidName`/`Amount` 变成 `id`/`amount`）。第三方 1.21 基线常常只迁移了主写入路径，次要写入器、读取端和数据文件仍沿用 1.20 键名。
 
 **典型遗留位置：**
-- 不经过 codec、直接拼 `CompoundTag` 的辅助写入器（创造栏/配方查看器的预填变体、“未校验”快捷构造）。
-- 只读单个键的派生值：配方查看器 subtype、tooltip、模型 predicate、排序/比较键。
+- 不经过编解码器、直接拼 `CompoundTag` 的辅助写入器（创造栏/配方查看器的预填变体、“未校验”快捷构造）。
+- 只读单个键的派生值：配方查看器 subtype、提示框、模型 predicate、排序/比较键。
 - 数据包里写成 SNBT 字符串的谓词与图标：进度的 `minecraft:custom_data`、战利品/配方的物品组件。
 - 物品数据仍包在 `CUSTOM_DATA` 里的项目最容易出错：组件类型不会报错，只是新旧子树互不匹配。
 
@@ -38,21 +38,21 @@ float u = sprite.getU(x);
 
 **核实与验证：** 对每一种序列化格式，列出全部写入器和读取器，并 grep 旧键名，Java 与 `data/**/*.json` 都要查。每个写入器都要做“写入 → 原生读取”往返，比较读出的数量和类型，不只看 NBT 是否存在。数据文件里的谓词，用真实写入路径产出的物品触发一次，不要手写理想化的 NBT。开发阶段没有旧存档兼容要求时，统一成一种格式即可，不要为旧键名补读取分支。
 
-## 3. 注册表 codec 配合裸 `NbtOps`/`JsonOps` 静默失败
+## 3. 注册表编解码器配合裸 `NbtOps`/`JsonOps` 静默失败
 
-**边界：** 1.21 的附魔、伤害类型、纹饰等改为数据驱动注册表，`ItemEnchantments.CODEC` 这类 codec 的键走 `RegistryFixedCodec`，只有 `RegistryOps` 才能编解码。1.20 时代用裸 `NbtOps.INSTANCE` 做“快照再恢复”或手工序列化的代码照搬过来后，`encodeStart`/`parse` 返回 `DataResult.error`；再配上 `.result().orElse(...)` 回退，错误被吞掉，结果是空值。
+**边界：** 1.21 的附魔、伤害类型、纹饰等改为数据驱动注册表，`ItemEnchantments.CODEC` 这类编解码器的键走 `RegistryFixedCodec`，只有 `RegistryOps` 才能编解码。1.20 时代用裸 `NbtOps.INSTANCE` 做“快照再恢复”或手工序列化的代码照搬过来后，`encodeStart`/`parse` 返回 `DataResult.error`；再配上 `.result().orElse(...)` 回退，错误被吞掉，结果是空值。
 
 **典型症状：** 不报错；临时改写后恢复的数据被清空（例如挖掘时临时叠加附魔，恢复后工具原有附魔全部丢失），同步/存档的字段读出为空。
 
-**核实与验证：** grep `NbtOps.INSTANCE`、`JsonOps.INSTANCE` 与 `.result().orElse`/`orElseGet` 的组合，确认 codec 是否含注册表引用。只是在内存里暂存时，直接保留不可变的组件值；必须序列化时用 `provider.createSerializationContext(ops)`。验证要用“非空”的输入：空集合往往能编码成功，掩盖问题。
+**核实与验证：** grep `NbtOps.INSTANCE`、`JsonOps.INSTANCE` 与 `.result().orElse`/`orElseGet` 的组合，确认编解码器是否含注册表引用。只是在内存里暂存时，直接保留不可变的组件值；必须序列化时用 `provider.createSerializationContext(ops)`。验证要用“非空”的输入：空集合往往能编码成功，掩盖问题。
 
-## 4. `getDefaultTooltipHideFlags` 消失后 tooltip 重复
+## 4. `getDefaultTooltipHideFlags` 消失后提示框重复
 
 **边界：** 1.20 Forge 的 `IItemExtension#getDefaultTooltipHideFlags` 在 1.21 被移除，隐藏改由 `ATTRIBUTE_MODIFIERS`/`ENCHANTMENTS` 组件的 `showInTooltip` 决定。自绘属性列表或依赖按键（shift/ctrl）切换视图的模组，原覆盖方法变成无人调用的死代码。
 
-**典型症状：** 不报错；物品 tooltip 同时出现模组自己的属性行和原版 "When in Main Hand"/附魔行。常规视图可能看起来正常，只有按住 shift/ctrl 的视图才重复。
+**典型症状：** 不报错；物品提示框同时出现模组自己的属性行和原版 "When in Main Hand"/附魔行。常规视图可能看起来正常，只有按住 shift/ctrl 的视图才重复。
 
-**核实与验证：** grep `HideFlags`/`getDefaultTooltipHideFlags`/`TooltipPart`，确认是否仍有调用方。在目标平台按 1.20 的掩码语义接管 `ItemStack#addAttributeTooltips` 和对应组件的 tooltip，按键相关时要在每次绘制时求值，不能写进组件。验收要真实按住修饰键截图：合成的按键事件不一定改变 GLFW 键状态，截图前确认 tooltip 确实切换了视图。
+**核实与验证：** grep `HideFlags`/`getDefaultTooltipHideFlags`/`TooltipPart`，确认是否仍有调用方。在目标平台按 1.20 的掩码语义接管 `ItemStack#addAttributeTooltips` 和对应组件的提示框，按键相关时要在每次绘制时求值，不能写进组件。验收要真实按住修饰键截图：合成的按键事件不一定改变 GLFW 键状态，截图前确认提示框确实切换了视图。
 
 ## 5. Forge 条件配方拆分后的分支语义
 

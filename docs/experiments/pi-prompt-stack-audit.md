@@ -1,14 +1,14 @@
 # Pi 提示词栈审计（2026-11-01）
 
-本轮只读审计日常 Pi 配置；未修改插件、全局设置或移植 skill。结论是已有可复现的提示词一致性问题，值得先修；尚不能证明某一插件导致 Sol 派发后等待。
+本轮只读审计日常 Pi 配置；未修改插件、全局设置或移植技能。结论是已有可复现的提示词一致性问题，值得先修；尚不能证明某一插件导致 Sol 派发后等待。
 
 ## 取证方式与边界
 
 - 使用当前全局 Pi 1.2.0 SDK，以及当前配置的 6 个 package、38 个 extension 入口。
-- 当前 cwd 为 mcdebug-wt-121；保留正常 AGENTS、skill 目录与工具配置。MCP 在诊断中关闭。
+- 当前 cwd 为 mcdebug-wt-121；保留正常 AGENTS、技能目录与工具配置。MCP 在诊断中关闭。
 - 分别捕获无插件 Sol、正常 Sol、会话内打开子代理后的 Sol、配置默认 CodeBuddy DeepSeek、Astra，共 5 个新内存会话。
 - 在最终 provider payload 形成后、模型请求发送前截断；不执行模型生成或工具调用。HTTP fetch 同时被禁用。启动时的模型目录、配额等请求也因此不能联网。
-- 记录资源路径、文件哈希、工具说明、动态 hook 前后变化与最终请求提示词。所有最终捕获均无 extension hook 报错。
+- 记录资源路径、文件哈希、工具说明、动态钩子前后变化与最终请求提示词。所有最终捕获均无 extension 钩子报错。
 - 默认 DeepSeek 的诊断截断错误触发了 CodeBuddy fallback，故其 result.json 的最终 session.model 是备用模型；payload-prompt.json 才是本次请求模型，仍为 deepseek-v4.1-flash (x0.11)。这不是一次真实服务失败或模型效果测试。
 - 插件工作区另有并行升级修改；本轮没有构建或覆盖它们。日常快照对应当时加载的 bundle 哈希，不能用当前源码状态替代先前实验的冻结快照。
 - TUI 专属逻辑、已有目标、压缩后恢复、上下文压力提示分别按源码核查；新会话没有覆盖所有条件分支。
@@ -18,19 +18,19 @@
 
 ## 实际构成
 
-基础角色提示 → 当前可见工具的 promptSnippet / promptGuidelines → Pi 文档入口 → AGENTS 层级 → skill 目录 → before_agent_start 动态文本 → context / context_with_system → provider payload hook → 最终请求。
+基础角色提示 → 当前可见工具的 promptSnippet / promptGuidelines → Pi 文档入口 → AGENTS 层级 → 技能目录 → before_agent_start 动态文本 → context / context_with_system → provider payload 钩子 → 最终请求。
 
 工具 description/schema 还会独立随请求发送。因此，只看 SYSTEM.md 或 before_agent_start 不足以还原模型收到的全部约束。
 
 | 场景 | system 字符 | 工具数 | 工具 JSON 字符 |
 |---|---:|---:|---:|
-| 无插件 Sol，保留上下文和 skill 目录 | 62,265 | 4 | 3,242 |
+| 无插件 Sol，保留上下文和技能目录 | 62,265 | 4 | 3,242 |
 | 正常 Sol，子代理默认关闭 | 64,836 | 7 | 7,519 |
 | 正常 Sol，子代理打开 | 72,242 | 17 | 47,270 |
 | 默认 CodeBuddy DeepSeek | 64,836 | 11 | 11,371 |
 | 正常 Astra | 64,836 | 7 | 7,519 |
 
-字符数不是 token 数。工具 JSON 字符包含参数 schema。mcdebug 目录的三层 AGENTS 共 54,111 字符（全局 757、server-v2 7,237、项目 46,117），占基础提示文本约 87%。这部分是当前位置的项目文档成本，不能归因于插件，也不代表隔离移植实验的提示长度。
+字符数不是 token 数。工具 JSON 字符包含参数类结构。mcdebug 目录的三层 AGENTS 共 54,111 字符（全局 757、server-v2 7,237、项目 46,117），占基础提示文本约 87%。这部分是当前位置的项目文档成本，不能归因于插件，也不代表隔离移植实验的提示长度。
 
 ## 已确认的问题
 
@@ -66,9 +66,9 @@ Agent、get_subagent_activity、get_subagent_activity_detail、watch_subagent、
 
 ### 4. 不常用 workflow 的整份手册常驻
 
-当前 full 模式下，Agent description 为 6,879 字符，SubagentWorkflow description 为 20,874 字符，后者包含大量 API、脚本用法和恢复说明。两项约 2.8 万字符，还未计算参数 schema。
+当前 full 模式下，Agent description 为 6,879 字符，SubagentWorkflow description 为 20,874 字符，后者包含大量 API、脚本用法和恢复说明。两项约 2.8 万字符，还未计算参数类结构。
 
-常见单 worker 任务也承担这份成本。应优先缩短工具入口，把完整说明按调用需要读取；避免再追加更多“注意事项”抵消已有复杂度。现有 toolDescriptionMode=compact 是可测的配置选项，但本轮没有切换日常设置，也不能假定它同时缩短 workflow。
+常见单工作代理任务也承担这份成本。应优先缩短工具入口，把完整说明按调用需要读取；避免再追加更多“注意事项”抵消已有复杂度。现有 toolDescriptionMode=compact 是可测的配置选项，但本轮没有切换日常设置，也不能假定它同时缩短 workflow。
 
 来源：快照 Agent-description.txt、SubagentWorkflow-description.txt；`pi-subagents/src/workflow/tool-description.ts`。
 
@@ -87,9 +87,9 @@ general-purpose 默认 promptMode=append；buildAgentPrompt 把父提示词完�
 | pi-subagents | 替换 bash；开启后提供代理/监督/任务工具；是常驻策略文本的主要来源 |
 | pi-extensions | web_reader、Z.AI web_search、图片交付与视觉模型禁用 image-reader；大量其他入口属于 UI、计费、provider 实现 |
 | pi-goal | 即使没有活动目标，create_goal 工具及约 1,234 字符 guidelines 仍可见；活动目标持续执行文本是条件分支 |
-| pi-openai-toolkit | 注册 context/search/image 等能力，再按模型与配置决定暴露；本轮 Sol 的相关 hook 没有追加 system 文本，也没有重写提示内容 |
+| pi-openai-toolkit | 注册 context/search/image 等能力，再按模型与配置决定暴露；本轮 Sol 的相关钩子没有追加 system 文本，也没有重写提示内容 |
 | pi-smart-compact | 当前 provider gate 明确关闭 openai-codex，因此不能解释本轮正常 Sol 的工作倾向；默认 DeepSeek 会注册 smart_* 工具，压力/压缩提示另有条件 |
-| pi-btw | 本轮 context hook 未改变 system；侧聊用的独立系统提示不能当成主模型常驻指令 |
+| pi-btw | 本轮 context 钩子未改变 system；侧聊用的独立系统提示不能当成主模型常驻指令 |
 
 没有发现 toolkit 给当前 Sol 换成一整份 Codex CLI 角色提示。settings 中旧 codexContextModels 字段不能据此推断运行行为。
 
@@ -125,13 +125,13 @@ Toolkit web-search 的 removeToolkitWebSearchPrompt 会从自身 marker 截断�
 用户要求移除 image-reader 及其拦截插件，修正其余问题，暂缓 Agent/workflow 说明长度优化。随后确认全局 Pi 与插件开发 SDK 已升级至 1.4.0，后续验证使用实际 1.4.0。
 
 - 删除用户级 agents/image-reader.md，删除 pi-extensions 的 filter-image-reader.ts 及 package 注册项和 README 条目；保留 image-view 的图片显示能力。
-- bash_bg/jobs/monitor 从子代理可见性开关中分离，随 owned shell 一起可用，关闭 Agent 不再让 bash 引用隐藏工具。
+- bash_bg/jobs/monitor 从子代理可见性开关中分离，随自有 shell 一起可用，关闭 Agent 不再让 bash 引用隐藏工具。
 - 监督政策集中到 Agent guidelines：继续有用的独立工作并审查现有改动/证据，无可做工作时再等待。其他监督工具只保留操作说明，watch 明确说明阻塞 result wait 会延后通知。
 - 删除 append bridge 中覆盖搜索偏好的 grep/find 两行。父提示继承方式保持原设计；本轮没有把 append 改成 replace。
 - Web Search 仅删除自身完整已知提示段，保留后续其他插件文字，覆盖切路由和关闭搜索两种情形。
-- Agent 保留 full 模式与 Writing the prompt 等内容，workflow 的 20,874 字符说明保留。没有进行整份说明瘦身。
+- Agent 保留 full 模式与 Writing the 提示词等内容，workflow 的 20,874 字符说明保留。没有进行整份说明瘦身。
 
-修后实际请求（只截取、不执行模型生成）存于 `/home/wangyu/.cache/mcdebug-port-skill-eval/pi-effective-prompt-after-fix/`。正常 Sol 开/关两例均无 hook 错误、无 image-reader，shell 配套工具均可见；开例 system 中独立工作和方向/范围/验收政策各出现一次。检查脚本 `verify-pi-prompt-fix.py` 与 verification.json 同存于该 cache 上下文。修前/修后跨越 Pi 1.2→1.4 升级，不将字符差异解释成单一提示修改的行为效果。
+修后实际请求（只截取、不执行模型生成）存于 `/home/wangyu/.cache/mcdebug-port-skill-eval/pi-effective-prompt-after-fix/`。正常 Sol 开/关两例均无钩子错误、无 image-reader，shell 配套工具均可见；开例 system 中独立工作和方向/范围/验收政策各出现一次。检查脚本 `verify-pi-prompt-fix.py` 与 verification.json 同存于该 cache 上下文。修前/修后跨越 Pi 1.2→1.4 升级，不将字符差异解释成单一提示修改的行为效果。
 
 验证结果：
 
@@ -142,4 +142,4 @@ Toolkit web-search 的 removeToolkitWebSearchPrompt 会从自身 marker 截断�
 
 日志为 `/home/wangyu/.cache/pi-prompt-fix-*.log`；反向检查详单为 `/home/wangyu/.cache/mcdebug-port-skill-eval/pi-prompt-fix-mutations/results.json`。这些验证确认提示构成和实现一致性，尚未重跑端到端移植任务来测量 Sol 行为改善。现有四个隔离 Pi 宿主保持冻结，不热加载本轮修改。
 
-版本路径更正：随后发现 `pi` 命令实际指向 `~/.local/share/pi/releases/1.4.0/bin/pi`，旧 npm 目录仍留有 1.2.0 SDK。最初的修后请求截取脚本引用了旧 SDK；核心插件测试使用的开发 SDK 始终为 1.4.0。已把截取脚本切换至实际 1.4.0 release 内的 SDK，重跑开/关两个场景，结果存于 `pi-effective-prompt-after-fix-1.4/`，manifest 均记录 sdk_version=1.4.0。两例无 hook 错误，原修复断言均再次通过；system 字符分别为 66,992 和 69,236。前述旧快照保留作历史证据，不再作为 1.4.0 请求依据。
+版本路径更正：随后发现 `pi` 命令实际指向 `~/.local/share/pi/releases/1.4.0/bin/pi`，旧 npm 目录仍留有 1.2.0 SDK。最初的修后请求截取脚本引用了旧 SDK；核心插件测试使用的开发 SDK 始终为 1.4.0。已把截取脚本切换至实际 1.4.0 release 内的 SDK，重跑开/关两个场景，结果存于 `pi-effective-prompt-after-fix-1.4/`，清单均记录 sdk_version=1.4.0。两例无钩子错误，原修复断言均再次通过；system 字符分别为 66,992 和 69,236。前述旧快照保留作历史证据，不再作为 1.4.0 请求依据。

@@ -59,7 +59,7 @@
 
 ## 口径与核对
 
-- 每轮仅统计该实验 Sol 主代理及其唯一 Luna worker，包含 resume 和有 usage 记录的上下文压缩。外层监督、监控、准备环境、研究提示词等不混入。
+- 每轮仅统计该实验 Sol 主代理及其唯一 Luna 工作代理，包含 resume 和有 usage 记录的上下文压缩。外层监督、监控、准备环境、研究提示词等不混入。
 - Codex 使用每线程最终累计 total_token_usage；累计计数经核验无回退。不逐行相加 last_token_usage，重复累计事件去重。
 - Pi 对 assistant response usage 按 responseId 去重；input 已扣缓存，另加 cacheRead/cacheWrite；compaction 节点的独立 usage 各计一次。不得重复加 profile audit 或父代理看到的子代理 transcript。
 - reasoning 是输出子集，已包含在 output，不再重复加费。所有已记录 cacheWrite 为 0。

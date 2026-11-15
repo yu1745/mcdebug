@@ -15,25 +15,25 @@
 
 ## 输入与可比性
 
-- 证据根：`/home/wangyu/.cache/mcdebug-port-skill-eval/source-workspace-pi-comparison/run-6_w9_4ew`。包含prompt.txt、manifest、每个模型的完整Pi输出/session、请求元数据、timing、root-audit、原报告和构建配置/日志。
+- 证据根：`/home/wangyu/.cache/mcdebug-port-skill-eval/source-workspace-pi-comparison/run-6_w9_4ew`。包含prompt.txt、清单、每个模型的完整Pi输出/session、请求元数据、timing、root-audit、原报告和构建配置/日志。
 - 五次Pi采用完全相同任务文本，通过TEST_ROOT区分各自空目录，读取相同原始源工程。Luna原始派单正文加密，无法逐字导出，Pi文本按相同任务约束重建；不能称与Luna字节相同。
 - 测试文档均冻结于SHA256 `f504ee048dd33da846854939d1c0fabf1995b287aad3e735fc1e367144739c4c`，运行中不追加提示或修改文档。
 - Pi显式设为low。CodeBuddy与ZAI逐请求记录均为reasoning_effort=low；Gemini请求为gemini-3.8-flash-low、thinkingBudget=1000，实际响应modelVersion为gemini-3.8-flash-n。跨模型的low不代表相同内部计算量。
 - DeepSeek/MiniMax为第一批并行，两个GLM为第二批并行，Gemini随后加入；共用标准暖依赖缓存。Pi与Codex工具宿主不同，每个模型仅一个样本，结果不是稳定速度排名。
 - 耗时从Pi进程启动计至退出，包含模型、工具和依赖任务，不含外层审计、留证与清理。
 
-## Skill调整与清理
+## 技能调整与清理
 
 用户指出额外分类及限制会分散注意力后，source-workspace.md收敛为生成步骤、产物定位、提取脚本与完成检查，从15302字节精简到7101字节。删除了来源分类的额外门禁和重复提醒。精简版SHA256为`1dc46675e04280c10ff3d547f75a3d67eaec8cd6122c2c6cbf7ae1b739ef6086`，格式和示例Python语法校验通过；上表五次Pi使用旧冻结版；精简版后续DeepSeek none结果单列如下。
 
 全部五个隔离根已在审计留证、检查无相关活进程后删除。六个模型在/tmp创建的产物亦已留证并清理；标准共享Gradle缓存保留。原始报告不覆写。
 
-## 补充：DeepSeek V4.1 Flash / none
+## 补充：DeepSeek V4.1 Flash 关闭思考（`none`）
 
 用户追加一轮关闭思考测试，使用当前精简版文档SHA256 `1dc46675e04280c10ff3d547f75a3d67eaec8cd6122c2c6cbf7ae1b739ef6086`，任务文本与前五次Pi相同，独立空目录。Pi传`--thinking off`，90次请求实际均为`reasoning_effort: none`。
 
 - 用时430.642秒，即7分10.6秒；四类主要源码齐全，两端MC各5363、NeoForge API951、Fabric API48模块/1075 Java。57份归档记录核算通过（含一条binary-only记录；Java提取内容、覆盖、哈希均核过）。FML/EventBus已取得。
-- Distmarker注解源码未取得。模型错误尝试按包名构造Maven坐标，并声称无公开源；这是查找未完成，不能据此断言不可获取。javap为诊断信息，不算源码。此项单独标PARTIAL，不抹掉四类源码已完成的事实。
+- Distmarker注解源码未取得。模型错误尝试按包名构造Maven坐标，并声称无公开源；这是查找未完成，不能据此断言不可获取。javap为诊断信息，不算源码。此项单独标部分通过，不抹掉四类源码已完成的事实。
 - 一次越界将init脚本写到/tmp/probe.gradle；已留证、清理。独立实验根已在确认无相关进程后删除，共享缓存保留。
 - 比旧low轮9分46.7秒少约2分36秒，但同时缩短了输入文档，不能把差异归因于关闭思考。
 

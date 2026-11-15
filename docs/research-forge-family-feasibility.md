@@ -1,110 +1,107 @@
-# mcdebug on Forge-family 1.21.1 — feasibility research
+# mcdebug 在 Forge 系 1.21.1 上运行的可行性研究
 
-Date of research: **2026-10-30**. All version/date claims verified against primary sources on that date
-(GitHub API/releases/source, Modrinth API, the Sinytra Probe compatibility service, Gradle Plugin Portal,
-`files.minecraftforge.net`). Everything marked **[unverified]** was *not* confirmed.
+调研日期：**2026-10-30**。所有版本和日期结论均在当日对照一手来源核实，
+包括 GitHub API、发布与源码、Modrinth API、Sinytra Probe 兼容性服务、Gradle Plugin Portal
+和 `files.minecraftforge.net`。标为**[未验证]**的内容未得到确认。
 
-Method note: except where a URL is a doc page, I queried the live APIs directly (GitHub REST, Modrinth v2,
-`https://probe.sinytra.org/api/v1/probe`) and quoted the response. mcdebug's own jar
-(`build/libs/mcdebug-0.7.0.jar`, built 2026-10-30 with Loom 1.15) was unpacked and inspected.
+方法说明：除指向文档页的链接外，调研直接查询在线 API，包含 GitHub REST、Modrinth v2 和
+`https://probe.sinytra.org/api/v1/probe`，并引用响应。mcdebug 自身的
+`build/libs/mcdebug-0.7.0.jar` 于 2026-10-30 使用 Loom 1.15 构建，已解包检查。
+下文所引外部说明均译为中文，技术名称和原始数据保持原样。
 
 ---
 
-## A) SINYTRA CONNECTOR
+## A）Sinytra Connector
 
-### A1. Versions, maintenance status, and the supported-module list
+### A1. 版本、维护状态和支持模块
 
-**Is 1.21.1 supported, and is Connector still maintained as of 2026?** Yes to both, but 1.21.1 is now the
-*legacy* line, not the primary one — the project website still claims otherwise and that page is stale.
+**是否支持 1.21.1，2026 年是否仍在维护？** 两者均是，但 1.21.1 已是旧版本维护线，
+不再是主要版本线；项目网站仍有相反说法，对应页面已经过时。
 
-| Fact | Value | Source |
+| 项目 | 数据 | 来源 |
 |---|---|---|
-| Repo | `Sinytra/Connector`, not archived | [github.com/Sinytra/Connector](https://github.com/Sinytra/Connector) |
-| Repo last push | **2026-10-30T10:11:45Z** (same day as this research) | GitHub REST `repos/Sinytra/Connector` |
-| Default branch | **`26.2.x`** (1.21.1 lives on branch `1.21.x`) | as above + `branches` |
-| Branches | `1.20.1`, `1.21.x`, `26.1.x`, `26.2.x`, `dev`, `master` | `repos/Sinytra/Connector/branches` |
-| Latest 1.21.1 release | **`2.0.0-beta.17+1.21.1`**, published **2026-08-15** | [release page](https://github.com/Sinytra/Connector/releases/tag/2.0.0-beta.17%2B1.21.1) |
-| Last commit on `1.21.x` | **2026-09-26** (`5a2f668a`, "Add overrides and mixin config filter") | `commits?sha=1.21.x` |
-| Latest overall | `3.1.0-beta.4+26.2` and `3.0.0-beta.7+26.1.2`, both 2026-10-30 | `gh release list` |
-| Latest 1.20.1 (LTS) | `1.0.0-beta.49+1.20.1`, 2026-07-04 | `gh release list` |
-| Downloads (Modrinth) | 27,710,970 | [modrinth.com/mod/connector](https://modrinth.com/mod/connector) |
+| 仓库 | `Sinytra/Connector`，未归档 | [Sinytra/Connector](https://github.com/Sinytra/Connector) |
+| 仓库最后推送 | **2026-10-30T10:11:45Z**，与本次调研同日 | GitHub REST `repos/Sinytra/Connector` |
+| 默认分支 | **`26.2.x`**，1.21.1 位于 `1.21.x` | 同上及 `branches` |
+| 分支 | `1.20.1`、`1.21.x`、`26.1.x`、`26.2.x`、`dev`、`master` | `repos/Sinytra/Connector/branches` |
+| 最新 1.21.1 发布 | **`2.0.0-beta.17+1.21.1`**，发布于 **2026-08-15** | [发布页面](https://github.com/Sinytra/Connector/releases/tag/2.0.0-beta.17%2B1.21.1) |
+| `1.21.x` 最后提交 | **2026-09-26**，`5a2f668a`，添加覆盖设置与 mixin 配置过滤器 | `commits?sha=1.21.x` |
+| 全项目最新发布 | `3.1.0-beta.4+26.2` 和 `3.0.0-beta.7+26.1.2`，均为 2026-10-30 | `gh release list` |
+| 最新 1.20.1 长期支持版 | `1.0.0-beta.49+1.20.1`，2026-07-04 | `gh release list` |
+| Modrinth 下载量 | 27,710,970 | [Connector 项目页](https://modrinth.com/mod/connector) |
 
-⚠️ **Contradiction to flag.** The official FAQ at <https://connector.sinytra.org/faq> says
-*"✅ 1.21.1 is our primary supported version. This is the one that will receive new fixes and compatibility
-improvements. ⚠️ 1.20.1 is our long-term-support version"* — but that page is footed "© 2025 Sinytra" and the
-GitHub record contradicts it: the default branch is `26.2.x`, `1.21.x` has had no commit since 2026-09-26,
-while `26.2.x` is committed to daily. Treat the FAQ text as stale; **1.21.1 is in maintenance, receiving
-occasional fixes, not active compatibility work.** Connector is *not* abandoned, but 1.21.1 compatibility
-improvements are no longer the priority the FAQ claims.
+⚠️ **官方资料存在矛盾。** [官方 FAQ](https://connector.sinytra.org/faq) 声称：
+“✅ 1.21.1 是主要支持版本，将获得新修复和兼容性改进；⚠️ 1.20.1 是长期支持版本。”
+但页脚为“© 2025 Sinytra”，GitHub 记录与其矛盾：默认分支是 `26.2.x`，
+`1.21.x` 自 2026-09-26 后无提交，而 `26.2.x` 每天都有提交。
+应将 FAQ 视为过时说明：**1.21.1 处于维护状态，偶尔获得修复，并非积极开展兼容性工作的主线。**
+Connector 未被放弃，但 1.21.1 兼容性改进已不是 FAQ 所称的优先事项。
 
-**Forgified Fabric API (FFAPI) — the Fabric API replacement.**
+**Forgified Fabric API（FFAPI）：Fabric API 的替代品。**
 
-| Fact | Value | Source |
+| 项目 | 数据 | 来源 |
 |---|---|---|
-| Latest 1.21.1 release | **`0.116.15+2.3.6+1.21.1`**, published **2026-10-15** | [release page](https://github.com/Sinytra/ForgifiedFabricAPI/releases/tag/0.116.15%2B2.3.6%2B1.21.1) |
-| Repo last push | 2026-10-23 | `repos/Sinytra/ForgifiedFabricAPI` |
-| 1.21.1 branch | `1.21.1` (exists) | `branches` |
-| Main FML mod id | **`fabric_api`** — so a Fabric mod declaring `"fabric-api": "*"` is satisfied | [Connector developer docs](https://moddedmc.wiki/en/project/connector/latest/docs/developers) |
+| 最新 1.21.1 发布 | **`0.116.15+2.3.6+1.21.1`**，发布于 **2026-10-15** | [发布页面](https://github.com/Sinytra/ForgifiedFabricAPI/releases/tag/0.116.15%2B2.3.6%2B1.21.1) |
+| 仓库最后推送 | 2026-10-23 | `repos/Sinytra/ForgifiedFabricAPI` |
+| 1.21.1 分支 | `1.21.1`，存在 | `branches` |
+| 主 FML 模组 ID | **`fabric_api`**，因此满足 Fabric 模组的 `"fabric-api": "*"` 声明 | [Connector 开发文档](https://moddedmc.wiki/en/project/connector/latest/docs/developers) |
 
-Note the FFAPI version string encodes the **upstream Fabric API version it tracks**: `0.116.15` mirrors Fabric
-API `0.116.x` — i.e. the same minor line mcdebug builds against (`gradle.properties`:
-`fabric_api_version=0.116.17+1.21.1`).
+FFAPI 版本号包含**所跟踪的上游 Fabric API 版本**：`0.116.15` 对应 Fabric API `0.116.x`，
+与 mcdebug 在 `gradle.properties` 中的 `fabric_api_version=0.116.17+1.21.1` 属于同一小版本线。
 
-**Which modules are supported — measured, not guessed.** I unpacked both jars and diffed the nested module jars:
+**支持模块通过实测确认。** 解包两个 JAR 并比较其嵌套模块后得到：
 
-- Upstream `fabric-api-0.116.17+1.21.1.jar` (from [Modrinth](https://modrinth.com/mod/fabric-api)) — **49** modules.
-- `forgified-fabric-api-0.116.15+2.3.6+1.21.1.jar` — **44** modules.
+- 上游 `fabric-api-0.116.17+1.21.1.jar`，来自 [Modrinth](https://modrinth.com/mod/fabric-api)，含 **49** 个模块。
+- `forgified-fabric-api-0.116.15+2.3.6+1.21.1.jar` 含 **44** 个模块。
 
-**Present upstream but NOT shipped by FFAPI 1.21.1 (6):**
+**上游存在、FFAPI 1.21.1 未包含的模块，共 6 个：**
 
-| Module | Status upstream |
+| 模块 | 上游状态 |
 |---|---|
-| `fabric-crash-report-info-v1` | current, non-deprecated → **real gap** |
-| `fabric-dimensions-v1` | current, non-deprecated → **real gap** |
-| `fabric-command-api-v1` | in `deprecated/` upstream → cosmetic |
-| `fabric-commands-v0` | in `deprecated/` upstream → cosmetic |
-| `fabric-keybindings-v0` | in `deprecated/` upstream → cosmetic |
-| `fabric-rendering-v0` | in `deprecated/` upstream → cosmetic |
+| `fabric-crash-report-info-v1` | 当前有效且未弃用，属于**实际缺口** |
+| `fabric-dimensions-v1` | 当前有效且未弃用，属于**实际缺口** |
+| `fabric-command-api-v1` | 上游位于 `deprecated/`，不构成当前 API 缺口 |
+| `fabric-commands-v0` | 上游位于 `deprecated/`，不构成当前 API 缺口 |
+| `fabric-keybindings-v0` | 上游位于 `deprecated/`，不构成当前 API 缺口 |
+| `fabric-rendering-v0` | 上游位于 `deprecated/`，不构成当前 API 缺口 |
 
-**Present in FFAPI but not in the upstream aggregator jar (1):** `fabric-gametest-api-v1-2.0.5`
-(upstream keeps gametest out of the release aggregator). There is no upstream doc page listing
-"supported/unsupported modules"; the module list is only derivable from the jar or the repo tree, which is
-what I did. **Uncertainty:** FFAPI "has checks in place to ensure full api compatibility with Fabric API" for
-`net.fabricmc.*.api` packages but explicitly disclaims internal/implementation APIs
-([FFAPI README](https://github.com/Sinytra/ForgifiedFabricAPI/blob/1.21.1/README.md)) — so *API-level* parity
-is claimed, *behavioural* parity is on a best-effort basis.
+**FFAPI 存在、上游聚合 JAR 未包含的模块，共 1 个：** `fabric-gametest-api-v1-2.0.5`。
+上游未将 GameTest 纳入发布聚合包。上游没有列出全部支持或不支持模块的文档页，
+模块列表只能从 JAR 或仓库树推导，本次调研采用了该方法。
+**不确定性：** FFAPI 声称通过检查保证 `net.fabricmc.*.api` 包的完整 Fabric API 兼容性，
+但明确不保证内部实现 API，见 [FFAPI README](https://github.com/Sinytra/ForgifiedFabricAPI/blob/1.21.1/README.md)。
+因此其承诺是 API 层面一致，行为一致仅按尽力原则实现。
 
-**mcdebug impact: none of the 6 missing modules are used by mcdebug.** mcdebug uses
-`fabric-api-base`, `fabric-lifecycle-events-v1`, `fabric-api-lookup-api-v1` and
-`fabric-transfer-api-v1` — all four present.
+**对 mcdebug 的影响：未使用这 6 个缺失模块。** mcdebug 使用 `fabric-api-base`、
+`fabric-lifecycle-events-v1`、`fabric-api-lookup-api-v1`、`fabric-transfer-api-v1`，四者均存在。
 
-### A2. Mixins, Kotlin, loader API, Transfer API
+### A2. Mixin、Kotlin、加载器 API 与 Transfer API
 
-**(a) Mixins into client rendering classes.** Connector does support refmapless mixins (the Loom-1.5+
-mode that remaps mixin classes in place) — the tracking issue *"Connector is unable to handle refmapless
-mixins"* ([#795](https://github.com/Sinytra/Connector/issues/795)) was **closed as completed on 2024-04-06**,
-and Sinytra's Adapter issue *"Support no-refmap method patches and ModifyConstant injectors"*
-([Adapter#12](https://github.com/Sinytra/Adapter/issues/12)) closed 2026-07-15. Client-rendering Fabric mods
-are routinely tested and pass; from the official Probe service for **1.21.1** on
-`2.0.0-beta.17+1.21.1` / NeoForge `21.1.264`:
+**（a）注入客户端渲染类的 mixin。** Connector 支持无 refmap 的 mixin，即 Loom 1.5+
+直接重映射 mixin 类的模式。“Connector 无法处理无 refmap mixin”的跟踪问题
+[#795](https://github.com/Sinytra/Connector/issues/795) 已于 **2024-04-06 完成并关闭**；
+Sinytra Adapter 中“支持无 refmap 方法补丁和 ModifyConstant 注入器”的
+[Adapter #12](https://github.com/Sinytra/Adapter/issues/12) 于 2026-07-15 关闭。
+客户端渲染 Fabric 模组会被定期测试，其中有通过案例。
+官方 Probe 服务对 **1.21.1**、Connector `2.0.0-beta.17+1.21.1` 和 NeoForge `21.1.264` 报告：
 
-| Mod | Result |
+| 模组 | 结果 |
 |---|---|
-| Indium (Fabric-only Sodium-compat renderer) | ✅ passing, `1.0.35+mc1.21`, tested 2026-10-22 |
-| Krypton (Fabric-only networking) | ✅ passing, `0.2.8`, tested 2026-10-22 |
-| Fabric Language Kotlin | ✅ passing, `1.14.2+kotlin.2.4.21`, tested 2026-10-22 |
-| Mod Menu | ❌ failing, `11.0.5`, tested 2026-10-22 |
-| Carpet | ❌ failing, `1.4.147`, tested 2026-10-24 |
+| Indium，仅 Fabric 的 Sodium 兼容渲染器 | ✅ 通过，`1.0.35+mc1.21`，测试于 2026-10-22 |
+| Krypton，仅 Fabric 的网络优化模组 | ✅ 通过，`0.2.8`，测试于 2026-10-22 |
+| Fabric Language Kotlin | ✅ 通过，`1.14.2+kotlin.2.4.21`，测试于 2026-10-22 |
+| Mod Menu | ❌ 失败，`11.0.5`，测试于 2026-10-22 |
+| Carpet | ❌ 失败，`1.4.147`，测试于 2026-10-24 |
 
-(Source: `POST https://probe.sinytra.org/api/v1/probe`, `{"platform":"modrinth","slug":…,"game_version":"1.21.1"}`;
-the human-readable listing is at <https://connector.sinytra.org/compatibility>.) Note the Probe docs' own
-caveat: it *"runs Connector's code transformations on the mod jar file and validates the results"* **outside**
-the game — *"it is possible that despite the jar being successfully patched, there are still remaining issues
-that will only trigger in game"* ([compatibility page](https://connector.sinytra.org/compatibility)).
+来源为 `POST https://probe.sinytra.org/api/v1/probe`，请求为
+`{"platform":"modrinth","slug":…,"game_version":"1.21.1"}`，
+人工可读列表见[兼容性页面](https://connector.sinytra.org/compatibility)。
+Probe 文档自身也提醒：它在**游戏外**对模组 JAR 执行 Connector 代码转换并验证结果；
+即使 JAR 补丁成功，仍可能有只有进入游戏才触发的问题，见同一[兼容性页面](https://connector.sinytra.org/compatibility)。
 
-**But** the specific shape mcdebug uses is the shape that keeps breaking. mcdebug's client plane is 10 mixin
-classes, **refmapless**, with **bare intermediary method names and no descriptors** — verified directly in
-`build/libs/mcdebug-0.7.0.jar`:
+**mcdebug 使用的具体形式恰好属于持续出问题的形式。**
+mcdebug 客户端平面含 10 个 mixin 类，均无 refmap，且使用**不带描述符的裸 intermediary 方法名**。
+直接检查 `build/libs/mcdebug-0.7.0.jar` 已确认：
 
 ```
 RuntimeVisibleAnnotations:
@@ -112,111 +109,125 @@ RuntimeVisibleAnnotations:
     method=["method_25295"]
     at=[@org.spongepowered.asm.mixin.injection.At(value="HEAD")])
 ```
-and the constant pool is pure intermediary: `Lnet/minecraft/class_332;` (GuiGraphics),
-`net/minecraft/class_4587` (PoseStack), `class_2960` (ResourceLocation), `method_51448`, …
 
-Two open/newly-closed issues hit exactly this:
+常量池也完全使用 intermediary：`Lnet/minecraft/class_332;`（GuiGraphics）、
+`net/minecraft/class_4587`（PoseStack）、`class_2960`（ResourceLocation）、`method_51448` 等。
 
-- **[FFAPI #260 — "Incompatibility with Fabric mods built with Fabric Loom 1.14+."](https://github.com/Sinytra/ForgifiedFabricAPI/issues/260)** — **still OPEN**, created 2026-02-26, last updated 2026-08-03; labelled `bug, 1.21.x`; a commenter confirms it reproduces on 1.21.1. The only known remedy in-thread is a third-party patch mod ("Mishang Urban Construction Sinytra Connector Fix") — i.e. no upstream fix.
-- **[FFAPI #266 — "Crash on startup when using mod built with Loom 1.15 or higher"](https://github.com/Sinytra/ForgifiedFabricAPI/issues/266)** — closed **completed** 2026-06-21. Root cause, per Connector's maintainer Su5eD: *"I checked the difference in one of the mixins between 1.14 and 1.15 jars and the mixin was missing its method descriptor in the 1.15 version. I believe this is related to a bug that was fixed by [FabricMC/tiny-remapper#164]. I tried using loom 1.17 (1.16 still had the issue) and the descriptors are included again now."* The reporter noted both failing mixins were **`@WrapOperation`** — which is precisely the annotation family mcdebug uses exclusively (AGENTS.md §14: "一律用 `@WrapOperation`/`@Inject`").
-- **[Connector #2134 — "[Dev Issue] Incorrect mappings of the method 'tick'"](https://github.com/Sinytra/Connector/issues/2134)** — **OPEN** (created 2026-03-02). A mod author's own diagnosis: when Connector converts a *bare intermediary method name* to the Mojang mapping, overloaded targets are ambiguous — *"in the Mojang official mapping, there are two methods named 'pick' in the class GameRenderer… the method 'method_56153' should be converted to a specific method signature … instead of 'pick' to avoid ambiguity."* mcdebug's `@Inject(method="method_25295")` on `GuiGraphics` (whose `blit` family is heavily overloaded) is exactly this ambiguity class.
-- **[Connector #2295 — "Bundled FART 1.0.14 has a race condition producing randomly broken transformation output (unmapped names -> AbstractMethodError)"](https://github.com/Sinytra/Connector/issues/2295)** — **OPEN**, created 2026-08-12. Nondeterministic transformation: *"measured: 1 broken output in 8 samples"*, manifesting as `AbstractMethodError` for lambdas implementing MC interfaces. **This issue was filed by `yu1745` (mcdebug's own account) against IC2 Refabricate 0.5 + `fabric-language-kotlin` under Connector**, and includes a proposed upstream fix. This is the strongest single signal: the exact consumer stack (IC2 Fabric mod + FLK) has already produced an unreproducible-by-design transformation failure on Connector.
+以下未关闭或刚关闭的问题直接涉及此形式：
 
-⇒ **Verdict for (a): supported in principle, but mcdebug's specific mixin shape is the known-bad shape, and two of the three relevant issues are open.** Fix path before trying: bump Loom to ≥ 1.17 (per #266) and add method descriptors to every mixin `method=` value (kills the #2134 ambiguity class). Both are cheap and independently good hygiene.
+- **[FFAPI #260：与 Fabric Loom 1.14+ 构建的 Fabric 模组不兼容](https://github.com/Sinytra/ForgifiedFabricAPI/issues/260)**
+  仍未关闭，创建于 2026-02-26，最后更新于 2026-08-03，标签为 `bug, 1.21.x`，评论确认 1.21.1 可复现。
+  讨论中唯一已知补救是第三方补丁模组 Mishang Urban Construction Sinytra Connector Fix，尚无上游修复。
+- **[FFAPI #266：使用 Loom 1.15 或更高版本构建的模组启动崩溃](https://github.com/Sinytra/ForgifiedFabricAPI/issues/266)**
+  于 **2026-06-21 完成并关闭**。维护者 Su5eD 对比发现，1.15 JAR 的 mixin 缺少方法描述符，
+  推测关联 FabricMC/tiny-remapper#164；Loom 1.16 仍有问题，1.17 再次包含描述符。
+  报告者指出两个失败 mixin 均为 **`@WrapOperation`**，与 mcdebug 使用的注解类别相同。
+  AGENTS.md 第 14 节要求一律使用 `@WrapOperation` / `@Inject`。
+- **[Connector #2134：tick 方法映射错误](https://github.com/Sinytra/Connector/issues/2134)**
+  未关闭，创建于 2026-03-02。模组作者诊断：将裸 intermediary 方法名转为 Mojang 名称时，
+  重载目标会产生歧义。例如 GameRenderer 有两个 `pick`，`method_56153` 应转换为具体方法签名，而非只转为 `pick`。
+  mcdebug 在重载很多的 GuiGraphics blit 系列上使用 `@Inject(method="method_25295")`，正属此类歧义。
+- **[Connector #2295：内嵌 FART 1.0.14 存在竞态，随机产生未映射名称与 AbstractMethodError](https://github.com/Sinytra/Connector/issues/2295)**
+  未关闭，创建于 2026-08-12，实测 8 个样本中 1 个输出损坏，表现为实现 MC 接口的 lambda 抛出 `AbstractMethodError`。
+  **该问题由 mcdebug 自身账号 `yu1745` 针对 Connector 下 IC2 Refabricate 0.5 加 `fabric-language-kotlin` 提交**，
+  附有上游修复建议。这是最直接的信号：同一消费者组合已经产生非确定性的转换失败。
 
-**(b) `fabric-language-kotlin`.** Supported and actively tested: Probe reports FLK `1.14.2+kotlin.2.4.21`
-**passing** on Connector `2.0.0-beta.17+1.21.1` with NeoForge `21.1.264`, tested 2026-10-22
-(`probe.sinytra.org/api/v1/probe`). FLK itself is maintained, last release `1.14.2+kotlin.2.4.21` on
-2026-10-09 ([releases](https://github.com/FabricMC/fabric-language-kotlin/releases)). mcdebug's
-`fabric.mod.json` uses `{"adapter": "kotlin", …}` for both entrypoints, so FLK must be installed on the
-NeoForge side too.
+⇒ **结论：原则上支持，但 mcdebug 的具体 mixin 形式属于已知风险形式，三个直接相关问题中仍有两个未关闭。**
+试验前先将 Loom 升到 ≥ 1.17，依据 #266，并为所有 mixin `method=` 值补充方法描述符，
+消除 #2134 一类歧义。这两项改动成本低，也能独立改善代码健壮性。
 
-⚠️ **Residual risk — Kotlin-for-Forge coexistence.** If the user's NeoForge pack already contains
-*Kotlin for Forge* (very common), adding FLK has historically crashed at boot:
-[Connector #1654](https://github.com/Sinytra/Connector/issues/1654) ("Kotlin Fabric together with Kotlin
-NeoForge crashes on startup", 1.21.1, closed 2025-02-25) and
-[#1671](https://github.com/Sinytra/Connector/issues/1671) (closed 2026-02-23). Both are closed, and the
-in-thread workaround was pinning FLK to 1.13.0. **Probe tests FLK in isolation — it does not test FLK
-alongside Kotlin for Forge.** **[unverified]** whether current FLK 1.14.x coexists cleanly with current
-Kotlin for Forge.
+**（b）`fabric-language-kotlin`。** 已支持并持续测试。Probe 在 2026-10-22 报告
+FLK `1.14.2+kotlin.2.4.21` 在 Connector `2.0.0-beta.17+1.21.1` 和 NeoForge `21.1.264` 上**通过**，
+来源为 `probe.sinytra.org/api/v1/probe`。FLK 自身仍在维护，最新版本
+`1.14.2+kotlin.2.4.21` 发布于 2026-10-09，见[发布记录](https://github.com/FabricMC/fabric-language-kotlin/releases)。
+mcdebug 的 `fabric.mod.json` 中两个入口均使用 `{"adapter": "kotlin", …}`，因此 NeoForge 侧也必须安装 FLK。
 
-**(c) Fabric Loader API used directly.** Connector ships a Fabric Loader fork,
-[`Sinytra/ForgifiedFabricLoader`](https://github.com/Sinytra/ForgifiedFabricLoader) — *"An implementation of
-Fabric Loader api on top of NeoForged's Fancy Mod Loader"* — bundled inside the FFAPI jar. Verified: FFAPI
-`0.116.15+2.3.6+1.21.1` contains `META-INF/jars/forgified-fabric-loader-2.5.68+0.18.4+1.21.1-full.jar`, and
-Connector's own `META-INF/MANIFEST.MF` declares `Fabric-Loader-Version: 0.19.3`.
+⚠️ **剩余风险：与 Kotlin for Forge 共存。** NeoForge 整合包中常见的 Kotlin for Forge
+曾在加入 FLK 后导致启动崩溃，见
+[Connector #1654](https://github.com/Sinytra/Connector/issues/1654)，1.21.1、关闭于 2025-02-25，
+和 [#1671](https://github.com/Sinytra/Connector/issues/1671)，关闭于 2026-02-23。
+两者均已关闭，讨论中的解决方法是将 FLK 固定到 1.13.0。
+**Probe 单独测试 FLK，不测试它与 Kotlin for Forge 共存。**
+当前 FLK 1.14.x 与当前 Kotlin for Forge 能否正常共存仍为**[未验证]**。
 
-Which API surface exists on the `1.21.x` branch of that fork (from its git tree):
+**（c）直接使用 Fabric Loader API。** Connector 提供 Fabric Loader 分支
+[Sinytra/ForgifiedFabricLoader](https://github.com/Sinytra/ForgifiedFabricLoader)，
+在 NeoForged Fancy Mod Loader 之上实现 Fabric Loader API，内嵌于 FFAPI JAR。
+已确认 FFAPI `0.116.15+2.3.6+1.21.1` 包含
+`META-INF/jars/forgified-fabric-loader-2.5.68+0.18.4+1.21.1-full.jar`，
+Connector 自身 `META-INF/MANIFEST.MF` 声明 `Fabric-Loader-Version: 0.19.3`。
 
-- ✅ `net/fabricmc/loader/api/FabricLoader.java`, `api/MappingResolver.java`
-- ✅ `net/fabricmc/loader/impl/FabricLoaderImpl.java`, `impl/MappingResolverImpl.java`
-- ✅ `net/fabricmc/loader/impl/launch/FabricLauncherBase.java` — and `FabricLauncherFML.java`
+该分支 `1.21.x` 的仓库树包含：
 
-So the **classes mcdebug touches exist**, and because mcdebug declares `"fabricloader": ">=0.14.21"`
-(a low bound) there is no loader-version rejection. mcdebug's actual loader-API surface is small — four uses of
-`FabricLoader` plus one of `FabricLauncherBase`:
+- ✅ `net/fabricmc/loader/api/FabricLoader.java`、`api/MappingResolver.java`
+- ✅ `net/fabricmc/loader/impl/FabricLoaderImpl.java`、`impl/MappingResolverImpl.java`
+- ✅ `net/fabricmc/loader/impl/launch/FabricLauncherBase.java` 和 `FabricLauncherFML.java`
 
-| File | Use |
+因此 **mcdebug 接触的类均存在**。mcdebug 声明 `"fabricloader": ">=0.14.21"`，下限较低，
+不会因加载器版本而被拒绝。其实际调用面较小，`FabricLoader` 使用四处，`FabricLauncherBase` 使用一处：
+
+| 文件 | 用途 |
 |---|---|
 | `src/main/kotlin/com/mcdebug/util/Mappings.kt` | `FabricLoader.getInstance().mappingResolver.currentRuntimeNamespace` |
-| `src/main/kotlin/com/mcdebug/McDebugMod.kt` | `FabricLoader` (game dir / config) |
-| `src/client/.../ClientInfo.kt`, `McDebugClientMod.kt` | `FabricLoader` |
+| `src/main/kotlin/com/mcdebug/McDebugMod.kt` | 通过 `FabricLoader` 获取游戏目录和配置 |
+| `src/client/.../ClientInfo.kt`、`McDebugClientMod.kt` | `FabricLoader` |
 | `src/client/.../Hotswap.kt:182` | `FabricLauncherBase.getLauncher()` |
 
-⚠️ **The `FabricLauncherBase` use is the weak point.** That is an *impl/internal* class; under Connector it is
-`FabricLauncherFML`, not Knot, so `getLauncher().getClassByteArray(name, propagateError)` has FML semantics.
-mcdebug already guards this (`Hotswap.transformedBytes` only trusts the launcher's pre-mixin pipeline when the
-returned bytes `contentEquals(fileBytes)`, i.e. the dev-classpath case, and falls back to raw file bytes
-otherwise; the `MixinEnvironment…activeTransformer` cast is null-guarded). Expected outcome: **`gui.hotswap`
-degrades or reports failure under Connector rather than crashing the client** — but this is a prediction, not
-a verified result. **[unverified]** — must be tested empirically.
+⚠️ **薄弱点是 `FabricLauncherBase`。** 这是内部实现类，在 Connector 下为 FabricLauncherFML 而非 Knot，
+所以 `getLauncher().getClassByteArray(name, propagateError)` 使用 FML 语义。
+mcdebug 已设置保护：`Hotswap.transformedBytes` 只在返回字节 `contentEquals(fileBytes)`，
+即开发类路径场景，才信任启动器的 mixin 前处理流水线，否则回退到原始文件字节；
+`MixinEnvironment…activeTransformer` 转型也有空值保护。
+预期 `gui.hotswap` 在 Connector 下会降级或报告失败，而非使客户端崩溃，
+但这是推断，**[未验证]**，必须实测。
 
-**(d) Fabric Transfer API — NOT a gap. This is the single most useful finding.** FFAPI 1.21.1 ships a full
-port, verified by unpacking the jar:
+**（d）Fabric Transfer API 并不缺失，这是本次调研最有用的发现。**
+FFAPI 1.21.1 提供完整移植，解包已确认：
 
 ```
 META-INF/jars/fabric-transfer-api-v1-5.4.4+6244b11119.jar
 ```
 
-and the module source tree on branch `1.21.1` contains every API class mcdebug would use —
-[`storage/Storage.java`](https://github.com/Sinytra/ForgifiedFabricAPI/tree/1.21.1/fabric-transfer-api-v1/src/main/java/net/fabricmc/fabric/api/transfer/v1/storage)
-(`Storage`, `SlottedStorage`, `StorageUtil`, `StorageView`, `TransferVariant`, `StoragePreconditions`),
-[`item/ItemStorage.java`](https://github.com/Sinytra/ForgifiedFabricAPI/blob/1.21.1/fabric-transfer-api-v1/src/main/java/net/fabricmc/fabric/api/transfer/v1/item/ItemStorage.java),
-[`fluid/FluidStorage.java`](https://github.com/Sinytra/ForgifiedFabricAPI/blob/1.21.1/fabric-transfer-api-v1/src/main/java/net/fabricmc/fabric/api/transfer/v1/fluid/FluidStorage.java),
-`transaction/Transaction.java`, `transaction/TransactionContext.java`,
-`transaction/base/SnapshotParticipant.java`, `context/ContainerItemContext.java`,
-`base/SingleVariantStorage.java`, `base/CombinedStorage.java`, plus the client-side
-`client/fluid/FluidVariantRendering.java`. There is also a dedicated NeoForge bridge package
-`org.sinytra.fabric.transfer_api.compat` (`NeoItemStorage`, `NeoFluidStorage`, `ItemStorageItemHandler`,
-`FluidStorageFluidHandler`, `NeoCompatUtil`) registered through
-[`TransferApiNeoCompat.java`](https://github.com/Sinytra/ForgifiedFabricAPI/blob/1.21.1/fabric-transfer-api-v1/src/main/java/org/sinytra/fabric/transfer_api/TransferApiNeoCompat.java),
-which wires `ItemStorage.SIDED` / `FluidStorage.SIDED` into NeoForge's
-`Capabilities.ItemHandler.BLOCK` / `Capabilities.FluidHandler.BLOCK` in both directions (with a
-`COMPUTING_CAPABILITY_LOCK` ThreadLocal to break the recursion between the two lookup systems).
+`1.21.1` 分支的模块源码包含 mcdebug 使用的全部 API 类：
+[storage/Storage.java](https://github.com/Sinytra/ForgifiedFabricAPI/tree/1.21.1/fabric-transfer-api-v1/src/main/java/net/fabricmc/fabric/api/transfer/v1/storage)
+中的 `Storage`、`SlottedStorage`、`StorageUtil`、`StorageView`、`TransferVariant`、`StoragePreconditions`，
+[item/ItemStorage.java](https://github.com/Sinytra/ForgifiedFabricAPI/blob/1.21.1/fabric-transfer-api-v1/src/main/java/net/fabricmc/fabric/api/transfer/v1/item/ItemStorage.java)、
+[fluid/FluidStorage.java](https://github.com/Sinytra/ForgifiedFabricAPI/blob/1.21.1/fabric-transfer-api-v1/src/main/java/net/fabricmc/fabric/api/transfer/v1/fluid/FluidStorage.java)、
+`transaction/Transaction.java`、`transaction/TransactionContext.java`、
+`transaction/base/SnapshotParticipant.java`、`context/ContainerItemContext.java`、
+`base/SingleVariantStorage.java`、`base/CombinedStorage.java`，以及客户端
+`client/fluid/FluidVariantRendering.java`。
+还包含 NeoForge 桥接包 `org.sinytra.fabric.transfer_api.compat`，其中有 `NeoItemStorage`、
+`NeoFluidStorage`、`ItemStorageItemHandler`、`FluidStorageFluidHandler`、`NeoCompatUtil`，
+通过 [TransferApiNeoCompat.java](https://github.com/Sinytra/ForgifiedFabricAPI/blob/1.21.1/fabric-transfer-api-v1/src/main/java/org/sinytra/fabric/transfer_api/TransferApiNeoCompat.java)
+将 `ItemStorage.SIDED` / `FluidStorage.SIDED` 与 NeoForge 的
+`Capabilities.ItemHandler.BLOCK` / `Capabilities.FluidHandler.BLOCK` 双向连接，
+并通过 `COMPUTING_CAPABILITY_LOCK` ThreadLocal 打断两个查询系统间的递归。
 
-FFAPI's README states the design intent plainly: *"Where possible, Fabric APIs such as `FabricItem`,
-`ItemStorage` and `FluidStorage` are bridged to NeoForge's counterparts."*
+FFAPI README 明确表示：尽可能将 `FabricItem`、`ItemStorage`、`FluidStorage` 等 Fabric API
+桥接到对应 NeoForge API。
 
-**Differences vs upstream (measured by tree diff), worth knowing but not blocking for mcdebug:** FFAPI's
-transfer module lacks five of upstream's vanilla-integration mixins —
-`BucketItemAccessor`, `ChiseledBookshelfBlockEntityMixin`, `CrafterBlockMixin`, `DropperBlockMixin`,
-`HopperBlockEntityMixin`. Those vanilla paths are instead served by NeoForge's own capability patches, which
-is likely intentional (FFAPI's stated design goal: *"keep modifications to minecraft's code at minimum"*).
+**与上游的差异已通过仓库树比较确认，值得了解但不阻塞 mcdebug。**
+FFAPI 传输模块缺少五个上游原版集成 mixin：`BucketItemAccessor`、`ChiseledBookshelfBlockEntityMixin`、
+`CrafterBlockMixin`、`DropperBlockMixin`、`HopperBlockEntityMixin`。
+这些原版路径由 NeoForge 自身能力补丁处理，可能是有意设计，
+符合 FFAPI 尽量减少 Minecraft 代码修改的目标。
 
-**Known open transfer-API bugs (all about third-party mod interop, not about the API being absent/unusable):**
-[FFAPI #215](https://github.com/Sinytra/ForgifiedFabricAPI/issues/215) (1.21.1, crash auto-outputting from
-Iron Furnaces/Functional Storage into Oritech machines, open since 2025-04-08) and
-[FFAPI #276](https://github.com/Sinytra/ForgifiedFabricAPI/issues/276) (1.21.1, *"Presence of Forgified Fabric
-API breaks item transport on Every Compat dynamic chests"*, open since 2026-06-29 — a case where FFAPI's
-capability registration *silently shadows* another mod's capability provider).
+**已知未关闭的 Transfer API 问题涉及第三方互操作，不表示 API 缺失或无法使用：**
+[FFAPI #215](https://github.com/Sinytra/ForgifiedFabricAPI/issues/215)，1.21.1，
+Iron Furnaces / Functional Storage 向 Oritech 机器自动输出时崩溃，自 2025-04-08 起未关闭；
+[FFAPI #276](https://github.com/Sinytra/ForgifiedFabricAPI/issues/276)，1.21.1，
+FFAPI 导致 Every Compat 动态箱子的物品传输损坏，自 2026-06-29 起未关闭。
+后一问题中，FFAPI 的能力注册会静默覆盖另一模组的能力提供者。
 
-### A3. Does Connector work on plain Forge 1.21.1? **No.**
+### A3. Connector 能否用于原生 Forge 1.21.1？不能
 
-Plain Forge 1.21.1 exists — Forge `52.1.20` is both `latest` and `recommended` for 1.21.1
-(`https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json`). But **no Connector build
-targets it**:
+原生 Forge 1.21.1 确实存在，Forge `52.1.20` 同时为该版本的 latest 和 recommended，
+来源为 `https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json`。
+但**没有面向它的 Connector 构建**：
 
-- Connector's own `META-INF/neoforge.mods.toml` on branch `1.21.x` declares:
+- Connector `1.21.x` 分支的 `META-INF/neoforge.mods.toml` 声明：
+
   ```toml
   [[dependencies.connector]]
       modId="neoforge"
@@ -227,567 +238,552 @@ targets it**:
       type="required"
       versionRange="[1.21,1.22)"
   ```
-  → a hard NeoForge dependency. Verified by downloading the `-full` jar from the release.
-- Modrinth's loader tags: the Connector project lists loaders `["forge","neoforge"]`, but **every 1.21.1
-  version is tagged `neoforge` only**; all `forge`-tagged versions are the 1.20.1 `1.0.0-beta.x` line
-  (`fabric-version` API, `GET /v2/project/connector/version`). The last Forge-tagged release is
-  `1.0.0-beta.49+1.20.1` (2026-07-04).
-- Repo description and README: *"A compatibility layer that allows running Fabric mods on **NeoForge**"*.
 
-**⇒ If a user runs plain Forge 1.21.1, Connector is not an option at all.**
+  这是强制 NeoForge 依赖，已下载发布版 `-full` JAR 验证。
+- Modrinth 的 Connector 项目加载器标签是 `["forge","neoforge"]`，但**每个 1.21.1 版本都只标注 neoforge**；
+  forge 标签只出现在 1.20.1 的 `1.0.0-beta.x` 线，来源为 `fabric-version` API，
+  `GET /v2/project/connector/version`。最后的 Forge 版本是 `1.0.0-beta.49+1.20.1`，2026-07-04。
+- 仓库描述和 README 都说明它是允许 Fabric 模组在 **NeoForge** 上运行的兼容层。
 
-### A4. Practical limitations and failure modes
+**⇒ 原生 Forge 1.21.1 用户完全不能选择 Connector。**
 
-**Install footprint.** 1.21.1 requires exactly two extra jars: **Connector + FFAPI**. From Connector's
-`1.21.x` README: *"1. Install **NeoForge**… 2. Install **Connector**… 3. Download the **Forgified Fabric API**.
-It is meant to be a direct *replacement* for the Fabric API and is **not compatible with it**. We'll try our
-best to avoid loading the Fabric API if it's installed automatically (e.g. by your modpack manager), but if
-you have the option to avoid installing it, please do so."*
-⚠️ **The docs site (26.1.x) differs from the 1.21.x README**: <https://moddedmc.wiki/en/project/connector/latest/docs/introduction>
-lists a **third** dependency, [Launchpad](https://github.com/Sinytra/Launchpad) — but Launchpad has **no 1.21.1
-build** (Modrinth `game_versions` = `26.1, 26.1.1, 26.1.2, 26.2` only; repo branches `26.1.x`, `26.2.x`,
-`master`). So for 1.21.1 the answer is **Connector + FFAPI**, no Launchpad. The `Launchpad` recommendation
-only applies to the 26.x lines, where Connector no longer loads Fabric mods itself.
+### A4. 实际限制与失败形式
 
-Also note: Connector's jar is only distributed as **one** asset, `connector-2.0.0-beta.17+1.21.1-full.jar`
-(4.57 MB, containing `mappings/mappings.tiny` + `mappings.tsrg`). Same single file on Modrinth. So there is no
-"thin jar downloads mappings at runtime" variant to worry about on 1.21.1.
+**安装范围。** 1.21.1 只需要两个额外 JAR：**Connector + FFAPI**。
+Connector `1.21.x` README 要求先安装 NeoForge、Connector，再下载作为 Fabric API 直接替代品的
+Forgified Fabric API，二者**不能共存**。它会尽量避免加载被整合包管理器自动安装的 Fabric API，
+但能不安装时应避免安装。
+⚠️ [26.1.x 文档站](https://moddedmc.wiki/en/project/connector/latest/docs/introduction)
+与 1.21.x README 不同，多列出第三个依赖 [Launchpad](https://github.com/Sinytra/Launchpad)。
+但 Launchpad **没有 1.21.1 构建**：Modrinth `game_versions` 只有 `26.1, 26.1.1, 26.1.2, 26.2`，
+仓库分支为 `26.1.x`、`26.2.x`、`master`。
+因此 1.21.1 只需要 Connector + FFAPI，不需要 Launchpad。
+Launchpad 建议仅适用于 Connector 不再自行加载 Fabric 模组的 26.x 版本线。
 
-**Does it break with mods that mixin vanilla classes also touched by Forge patches?** Yes — this is the
-canonical failure mode. The FAQ: *"some functionality may work slightly different than expected. This is not
-caused by Connector's presence itself, but rather happens due to specific interactions between Fabric mods,
-Mixins, patched NeoForge code and other mods"* (<https://connector.sinytra.org/faq>). Concretely documented in
-the open issue list:
+Connector 只分发**一个**附件 `connector-2.0.0-beta.17+1.21.1-full.jar`，
+4.57 MB，包含 `mappings/mappings.tiny` 和 `mappings.tsrg`；Modrinth 也使用同一个文件。
+1.21.1 没有运行时下载映射的精简 JAR 变体。
 
-- [#2151](https://github.com/Sinytra/Connector/issues/2151) mixin injection failure in `ItemStack` (1.21.1)
-- [#2169](https://github.com/Sinytra/Connector/issues/2169) *"BlockColors being rewritten in forge to use its own registries breaks fabric mods relying on it"*
-- [#2166]/[#2313](https://github.com/Sinytra/Connector/issues/2313) *"Fabric mod's `onInitializeClient()` timing inside `Minecraft.<init>` risks racing NeoForge's own `EntityRenderersEvent.RegisterLayerDefinitions` merge, causing 'No model for layer' crashes for unrelated native mods"* — **open**, and a commenter reproduced the same signature on Forge 1.20.1; explicitly **timing-dependent** (*"two boots crashed with byte-identical missing-layer lists, while launches in between completed normally"*). This is the pattern to expect for a mod that does substantial work in a client entrypoint.
-- [#2235]/[#2295](https://github.com/Sinytra/Connector/issues/2295) nondeterministic FART transformation (see A2a)
-- [#2206](https://github.com/Sinytra/Connector/issues/2206) Fabric-registered biomes missing from NeoForge's `DynamicRegistryManager`
-- [#2300](https://github.com/Sinytra/Connector/issues/2300) Jankson-based Fabric mods and owo-lib
+**Fabric mixin 与 Forge 对同一原版类的补丁是否会冲突？会，这是典型失败形式。**
+[FAQ](https://connector.sinytra.org/faq) 说明，功能差异来自 Fabric 模组、Mixin、
+NeoForge 补丁代码和其他模组之间的特定交互。未关闭问题中有以下具体案例：
 
-**Documented, user-visible failure mode: the Mixin Safeguard.** `config/connector.json` ships
-`"enableMixinSafeguard": true`, documented as: *"If enabled, halts loading and shows a warning screen when an
-installed mod contains failing Mixins that Connector was unable to fix, preventing a hard crash. This warning
-will only be shown once, after mod transformation, and is enabled by default."*
-(<https://github.com/Sinytra/Connector/blob/1.21.x/docs/configuration.mdx>). So a mod whose mixin set Connector
-can't patch is **blocked loudly at startup** — not silently broken. That is the realistic outcome for
-mcdebug's client plane if the intermediary→Mojang conversion of its refmapless `@Inject`/`@WrapOperation`
-targets fails.
+- [#2151](https://github.com/Sinytra/Connector/issues/2151)：1.21.1 的 `ItemStack` mixin 注入失败。
+- [#2169](https://github.com/Sinytra/Connector/issues/2169)：Forge 将 BlockColors 改为使用自己的注册表，
+  使依赖它的 Fabric 模组损坏。
+- [#2166] / [#2313](https://github.com/Sinytra/Connector/issues/2313)：Fabric 模组的 `onInitializeClient()`
+  在 `Minecraft.<init>` 中执行时，可能与 NeoForge 自身 `EntityRenderersEvent.RegisterLayerDefinitions`
+  合并竞态，导致无关原生模组出现 `No model for layer` 崩溃。问题未关闭，评论也在 Forge 1.20.1 复现相同特征。
+  此问题明确**依赖时序**，两次启动缺失图层列表逐字节相同，却在中间启动中正常完成。
+  客户端入口执行大量工作的模组可能遇到此类模式。
+- [#2235] / [#2295](https://github.com/Sinytra/Connector/issues/2295)：FART 非确定性转换，见 A2（a）。
+- [#2206](https://github.com/Sinytra/Connector/issues/2206)：Fabric 注册的生物群系未出现在 NeoForge 的 `DynamicRegistryManager`。
+- [#2300](https://github.com/Sinytra/Connector/issues/2300)：基于 Jankson 的 Fabric 模组和 owo-lib 的问题。
 
-Other documented limits: OptiFine incompatible; **custom server APIs (Mohist, Magma, Arclight) and mobile
-launchers (Pojav, FoldCraft) and pirated launchers are not supported** (FAQ).
+**有文档记录、用户可见的失败形式：Mixin 安全保护。**
+`config/connector.json` 默认启用 `"enableMixinSafeguard": true`。
+其[配置文档](https://github.com/Sinytra/Connector/blob/1.21.x/docs/configuration.mdx)
+说明，安装模组含无法修复的失败 mixin 时会停止加载并显示警告界面，避免直接崩溃；
+警告只在转换完成后显示一次，默认启用。
+因此 Connector 无法修补的 mixin 集合会在启动时**明确阻止加载**，而非悄悄损坏。
+若 mcdebug 无 refmap 的 `@Inject` / `@WrapOperation` 目标从 intermediary 转为 Mojang 失败，
+客户端平面最可能出现的就是这种结果。
 
-**Is a dedicated server supported and common?** Yes — explicitly. Connector's source contains
-[`ServerMainMixin`](https://github.com/Sinytra/Connector/blob/1.21.x/src/mod/java/org/sinytra/connector/mod/mixin/boot/ServerMainMixin.java)
-which injects into `net.minecraft.server.Main.main` at the `ServerModLoader.load()` call site to run
-`ConnectorLoader.load()`, i.e. the dedicated-server path is a first-class code path, not an accident of the
-client path. And `neoforge.mods.toml` sets `displayTest = 'IGNORE_ALL_VERSION'` with the comment *"Connector
-is optional for both sides"* — so a client without Connector can join a Connector server and vice versa;
-server-side-only Fabric mods need Connector only on the server. **The FAQ's server guidance is negative only
-about hybrid server APIs, which implies stock NeoForge dedicated servers are fine.**
+其他已记录限制：不兼容 OptiFine；不支持 Mohist、Magma、Arclight 等自定义服务端 API，
+Pojav、FoldCraft 等移动启动器，以及盗版启动器，见 FAQ。
 
-For mcdebug this matters: the **server plane** (`world.*` … `store.*`) only needs NeoForge + Connector + FFAPI
-on the dedicated server, which is the lowest-risk half of the experiment. The **client plane** (`gui.*`) needs
-the same stack on the *client*, and that is where every open client-side bug above lives. **Recommendation:
-test the server plane first; treat the client plane as a separate, higher-risk milestone.**
+**是否支持专用服务端？明确支持。** Connector 源码含
+[ServerMainMixin](https://github.com/Sinytra/Connector/blob/1.21.x/src/mod/java/org/sinytra/connector/mod/mixin/boot/ServerMainMixin.java)，
+在 `net.minecraft.server.Main.main` 调用 `ServerModLoader.load()` 的位置注入 `ConnectorLoader.load()`，
+说明专用服务端是正式代码路径，而非客户端路径的偶然产物。
+`neoforge.mods.toml` 设置 `displayTest = 'IGNORE_ALL_VERSION'`，注释说明双方均可选装 Connector。
+因此无 Connector 的客户端可加入 Connector 服务端，反之亦然；纯服务端 Fabric 模组只需服务端安装 Connector。
+**FAQ 只对混合服务端 API 给出否定意见，表明标准 NeoForge 专用服务端可用。**
 
-### A5. Would mcdebug actually work — unix socket, arbitrary reflection, and the namespace question
+对 mcdebug 而言，**服务端平面**（`world.*` … `store.*`）只需要在专用服务端安装
+NeoForge + Connector + FFAPI，是试验中风险最低的一半。
+**客户端平面**（`gui.*`）需在客户端安装同一组合，上述客户端问题也都发生在那里。
+**建议先验证服务端平面，将客户端平面作为单独、风险更高的里程碑。**
 
-**Unix domain socket.** Nothing in Connector's transformation touches `java.nio.channels`/`ServerSocketChannel`
-AF_UNIX usage or `File`/`Path` handling. Under NeoForge the JVM, the process, and the filesystem are the same
-JVM/process/filesystem as under Fabric; only the *mod loader* and *MC class names* differ. **Expected: works
-unchanged.** Caveat: mcdebug's config resolution uses "gameDir" — under NeoForge that is the same working
-directory concept, so `<gameDir>/mcdebug/socket` should land in the same place. **[unverified]** empirically,
-but there is no mechanism by which it would fail.
+### A5. mcdebug 的 Unix 套接字、任意反射和命名空间能否工作
 
-**Arbitrary reflection by name — this is the interesting part, and the answer is favourable.**
+**Unix 域套接字。** Connector 转换不涉及 `java.nio.channels` / `ServerSocketChannel` 的
+AF_UNIX 使用方式，也不涉及 `File` / `Path` 处理。
+NeoForge 下仍是相同的 JVM、进程和文件系统，变化只在模组加载器和 MC 类名。
+**预期无需修改即可工作。** mcdebug 配置解析使用 gameDir，NeoForge 下也是相同的工作目录概念，
+因此 `<gameDir>/mcdebug/socket` 应位于相同位置。实测仍为**[未验证]**，但未发现导致失败的机制。
 
-*How Connector handles the namespace.* Verified from source, not from prose:
+**按名称进行任意反射：结果较为有利。**
 
-1. Connector bundles a Tiny v1 mapping file with three namespaces. Unpacked from the jar, header is:
+Connector 如何处理命名空间，已从源码而非说明文字确认：
+
+1. Connector 内嵌三个命名空间的 Tiny v1 映射，解包后的文件头为：
+
    ```
    v1   official   intermediary   mojang
    CLASS  eza  net/minecraft/class_3673  com/mojang/blaze3d/Blaze3D
    ```
-   (`mappings/mappings.tiny` and a parallel `mappings.tsrg`, both inside `connector-2.0.0-beta.17+1.21.1-full.jar`.)
-2. It remaps each Fabric mod **from `intermediary` to the NeoForge runtime namespace** at load time:
-   [`JarTransformer.SOURCE_NAMESPACE = "intermediary"`](https://github.com/Sinytra/Connector/blob/1.21.x/transformer/src/main/java/org/sinytra/connector/transformer/jar/JarTransformer.java),
-   and [`IntermediateMapping`](https://github.com/Sinytra/Connector/blob/1.21.x/transformer/src/main/java/org/sinytra/connector/transformer/jar/IntermediateMapping.java)
-   deliberately filters to only the intermediary-shaped names
-   (`net/minecraft/class_`, `field_`, `method_`, `comp_`) *"as those don't need to be remapped and will only
-   cause issues with our barebones find/replace remapper"*.
-3. **The runtime namespace is `mojang`, not `intermediary`.** [`ForgifiedFabricLoader`'s `LoaderUtil`](https://github.com/Sinytra/ForgifiedFabricLoader/blob/1.21.x/src/main/java/net/fabricmc/loader/impl/util/LoaderUtil.java) declares
-   `public static final String RUNTIME_MAPPING = "mojang";` and
-   [`MappingConfiguration.getTargetNamespace()`](https://github.com/Sinytra/ForgifiedFabricLoader/blob/1.21.x/src/main/java/net/fabricmc/loader/impl/launch/MappingConfiguration.java)
-   returns it. So **the user's premise is inverted**: under Connector a Fabric mod does *not* "see intermediary
-   names at load time". Its bytecode is rewritten to **Mojang** names, and the game itself is Mojang-named.
 
-   ⚠️ **[unverified]**: I verified the constant and the config class, but not that
-   `FabricLoader.getInstance().mappingResolver.currentRuntimeNamespace` returns `"mojang"` at runtime in a live
-   Connector 1.21.1 instance. That's a five-minute empirical check and it is *the* gating question for the
-   whole Connector path for mcdebug.
+   `mappings/mappings.tiny` 及并行的 `mappings.tsrg` 均位于
+   `connector-2.0.0-beta.17+1.21.1-full.jar`。
+2. 加载时把每个 Fabric 模组**从 intermediary 转到 NeoForge 运行时命名空间**，见
+   [JarTransformer.SOURCE_NAMESPACE = "intermediary"](https://github.com/Sinytra/Connector/blob/1.21.x/transformer/src/main/java/org/sinytra/connector/transformer/jar/JarTransformer.java)。
+   [IntermediateMapping](https://github.com/Sinytra/Connector/blob/1.21.x/transformer/src/main/java/org/sinytra/connector/transformer/jar/IntermediateMapping.java)
+   有意只处理 `net/minecraft/class_`、`field_`、`method_`、`comp_` 这类 intermediary 名称，
+   因为其他名称无需重映射，只会给简化查找替换式重映射器带来问题。
+3. **运行时命名空间是 mojang，而非 intermediary。**
+   [ForgifiedFabricLoader 的 LoaderUtil](https://github.com/Sinytra/ForgifiedFabricLoader/blob/1.21.x/src/main/java/net/fabricmc/loader/impl/util/LoaderUtil.java)
+   声明 `public static final String RUNTIME_MAPPING = "mojang";`，
+   [MappingConfiguration.getTargetNamespace()](https://github.com/Sinytra/ForgifiedFabricLoader/blob/1.21.x/src/main/java/net/fabricmc/loader/impl/launch/MappingConfiguration.java)
+   返回该值。因此原先假设反了：Connector 下 Fabric 模组加载时并非看到 intermediary 名称，
+   其字节码被改写为 Mojang 名称，游戏自身也使用 Mojang 名称。
 
-4. Connector **does** rewrite reflection, but only in a very narrow, statically-analysable form.
-   [`ReflectionRenamingTransformer`](https://github.com/Sinytra/Connector/blob/1.21.x/transformer/src/main/java/org/sinytra/connector/transformer/patch/ReflectionRenamingTransformer.java)
-   uses an ASM `SourceInterpreter` and only fires when it sees a method call whose first three arguments are
-   **single `LDC` string constants** (owner, name, descriptor) — i.e. literal
-   `Class.getDeclaredMethod("net/minecraft/class_310", "method_1551", "()V")`-style calls. It then rewrites
-   those `cst` values in place. Anything computed at runtime, built by concatenation, or read from a bundled
-   resource is invisible to it.
+   ⚠️ **[未验证]**：虽然已检查常量和配置类，但尚未在真实 Connector 1.21.1 实例中确认
+   `FabricLoader.getInstance().mappingResolver.currentRuntimeNamespace` 实际返回 `"mojang"`。
+   这是可在约五分钟内完成的实测，也是整个 mcdebug Connector 路线的关键前提。
 
-**What this means for mcdebug — three conclusions:**
+4. Connector **会改写反射**，但只支持非常狭窄、可静态分析的形式。
+   [ReflectionRenamingTransformer](https://github.com/Sinytra/Connector/blob/1.21.x/transformer/src/main/java/org/sinytra/connector/transformer/patch/ReflectionRenamingTransformer.java)
+   使用 ASM `SourceInterpreter`，仅在方法调用的前三个参数，即所有者、名称、描述符，
+   均为**单个 LDC 字符串常量**时触发，例如字面量形式
+   `Class.getDeclaredMethod("net/minecraft/class_310", "method_1551", "()V")`，随后原位改写 `cst` 值。
+   运行时计算、拼接或从内嵌资源读取的名称均不会被处理。
 
-1. **mcdebug is already namespace-direction-aware and would pick the right direction under Connector.**
-   `Mappings.kt` does:
+**对 mcdebug 的三个结论：**
+
+1. **mcdebug 已识别命名空间转换方向，在 Connector 下会选择正确方向。** `Mappings.kt` 使用：
+
    ```kotlin
    private val intermediaryRuntime: Boolean by lazy {
        runCatching { FabricLoader.getInstance().mappingResolver.currentRuntimeNamespace == "intermediary" }
            .getOrDefault(true)
    }
    ```
-   Under Connector this yields `false` → mcdebug resolves names as **Mojang at runtime**, which is correct,
-   because Connector remapped mcdebug's own bytecode to Mojang names and the live MC classes are Mojang-named.
-   Externally-supplied intermediary names still work, because mcdebug translates intermediary → Mojang from its
-   own bundled table. **The direction logic is correct for Connector as written.**
 
-2. **mcdebug's runtime-computed reflection strings are *not* rewritten by Connector — and that is fine, because
-   they don't need to be.** `ReflectCore.kt:119-121` is `val runtime = Mappings.runtimeClassName(name); Class.forName(runtime)` —
-   the owner string is a computed local, not an `LDC` constant at the call site, so
-   `ReflectionRenamingTransformer` will not (and cannot) touch it. mcdebug reads its mapping table from
-   `/mappings/reflect.txt.gz` at runtime (generated at build time from Loom's 1.21.1 intermediary↔Mojang
-   mappings), which is namespace-compatible with Connector's bundled `mappings.tiny`
-   (`official`/`intermediary`/`mojang` for the same MC version). A mod that *hardcoded* intermediary strings
-   would depend on Connector's rewriting; mcdebug does not. **This is the strongest pro-Connector finding in
-   this report.**
-
-3. **The remaining reflection risk is name-ambiguity, and mcdebug is partly insulated.** Connector #2134 shows
-   conversion can be ambiguous for **overloaded** members; mcdebug's own table is aware of this — `Mappings.kt`
-   documents that *"a Mojang name shared by several intermediary members (overloads renamed differently) yields
-   several candidates and the caller picks the one whose signature fits"*, and `ReflectCore` handles overload
-   scoring. Since mcdebug performs its own disambiguation by descriptor at runtime, it is **less** exposed to
-   #2134 than a mod relying on Connector's static rewriting. The exposure that remains is not in `reflect.*`
-   but in the **mixin annotations** (see A2a): those *are* static `LDC` constants
-   (`method=["method_25295"]`, no descriptor) sitting inside the mixin classes, i.e. squarely inside the code
-   path Connector must rewrite and where #2134's ambiguity bites. Adding descriptors to those annotations
-   removes the ambiguity entirely.
+   Connector 下得到 false，mcdebug 按 **Mojang 运行时**解析名称；这符合 Connector 已将其自身字节码
+   重映射为 Mojang、实际 MC 类也为 Mojang 的情况。
+   外部传入 intermediary 名称仍可用，因为 mcdebug 会使用自带映射表转换为 Mojang。
+   **现有方向逻辑对 Connector 是正确的。**
+2. **mcdebug 运行时计算的反射字符串不会被 Connector 改写，但它们也无需改写。**
+   `ReflectCore.kt:119-121` 为 `val runtime = Mappings.runtimeClassName(name); Class.forName(runtime)`。
+   所有者字符串是计算所得局部变量，不是调用点的 LDC 常量，`ReflectionRenamingTransformer` 无法也不会改动它。
+   mcdebug 运行时读取 `/mappings/reflect.txt.gz`，构建时由 Loom 的 1.21.1 intermediary↔Mojang 映射生成，
+   与 Connector 内嵌、同一 MC 版本的 `mappings.tiny`（`official` / `intermediary` / `mojang`）兼容。
+   硬编码 intermediary 字符串的模组依赖 Connector 改写，mcdebug 不依赖。
+   **这是本报告最支持 Connector 路线的发现。**
+3. **剩余反射风险是名称歧义，mcdebug 已有部分防护。** Connector #2134 表明重载成员可能转换歧义。
+   mcdebug 自带表已考虑这种情况：`Mappings.kt` 说明，共享一个 Mojang 名的多个 intermediary 成员
+   会生成多个候选，由调用者按签名选择；`ReflectCore` 负责重载评分。
+   mcdebug 在运行时按描述符自行消歧，比依赖 Connector 静态改写的模组受 #2134 影响更小。
+   剩余风险位于 **mixin 注解**而非 `reflect.*`：`method=["method_25295"]` 这类无描述符的静态 LDC 常量
+   正是 Connector 必须改写、也最易受歧义影响的路径，见 A2（a）。补充描述符即可消除该歧义。
 
 ---
 
-## B) KILT (KiltMC)
+## B）Kilt（KiltMC）
 
-**Direction — this is the crucial, easily-missed point.** Kilt does the **inverse** of Connector. Repo
-description: *"A Fabric mod that brings **(Neo)Forge mods into the Fabric ecosystem**"*
-([KiltMC/Kilt](https://github.com/KiltMC/Kilt)); Modrinth: *"Allows the loading of (Neo)Forge mods in the
-Fabric ecosystem. Very experimental."* ([modrinth.com/mod/kilt](https://modrinth.com/mod/kilt)). Kilt's own
-README FAQ makes the contrast explicit: *"Connector's aim is to have Fabric mods on Forge, while Kilt aims to
-have Forge mods on Fabric."*
+**方向是关键。** Kilt 与 Connector 的方向相反。
+[KiltMC/Kilt](https://github.com/KiltMC/Kilt) 的描述为将 **(Neo)Forge 模组带入 Fabric 生态**的 Fabric 模组；
+[Modrinth 项目页](https://modrinth.com/mod/kilt) 同样说明它允许在 Fabric 加载 (Neo)Forge 模组，且非常实验性。
+README FAQ 明确区分：Connector 让 Fabric 模组运行于 Forge，Kilt 让 Forge 模组运行于 Fabric。
 
-**Consequence for mcdebug:** Kilt does **not** let a NeoForge/Forge user run mcdebug. It lets a **Fabric**
-user run their Forge mods. The only way Kilt helps is if the user *migrates their server from NeoForge to
-Fabric + Kilt* — a change to the user's setup, not to mcdebug.
+**对 mcdebug 的影响：** Kilt 不能让 NeoForge / Forge 用户运行 mcdebug，
+只能让 Fabric 用户运行自己的 Forge 模组。
+只有用户把服务端从 NeoForge 迁到 Fabric + Kilt 时才有帮助，改变的是用户环境，而非 mcdebug。
 
-**Is it maintained? Yes — surprisingly actively, contrary to its own stale README.**
+**是否仍维护？是，活跃程度与过时 README 所呈现的不同。**
 
-| Fact | Value | Source |
+| 项目 | 数据 | 来源 |
 |---|---|---|
-| Latest release | **`v21.1.18`, 2026-10-28** (2 days before this research) | [releases](https://github.com/KiltMC/Kilt/releases) |
-| Default branch | `version/1.21.1` | `repos/KiltMC/Kilt` |
-| Last commit | **2026-10-28T23:15:03Z** | `commits` |
-| Repo pushed_at | 2026-10-30T12:16:47Z | `repos/KiltMC/Kilt` |
-| Branches | `version/1.20.1`, `version/1.21.1`, `version/26.1.x`, many PR branches | `branches` |
-| Release cadence on 1.21.1 | 18 releases; 21.1.11→18 all in Aug–Oct 2026 | releases |
-| Downloads / followers | 272,377 / 773 | Modrinth API |
-| Modrinth `game_versions` | `1.20.1`, `1.21.1` **only** | Modrinth API |
-| Loader | `fabric` only | Modrinth API |
+| 最新发布 | **`v21.1.18`，2026-10-28**，调研前两天 | [发布记录](https://github.com/KiltMC/Kilt/releases) |
+| 默认分支 | `version/1.21.1` | `repos/KiltMC/Kilt` |
+| 最后提交 | **2026-10-28T23:15:03Z** | `commits` |
+| 仓库 pushed_at | 2026-10-30T12:16:47Z | `repos/KiltMC/Kilt` |
+| 分支 | `version/1.20.1`、`version/1.21.1`、`version/26.1.x` 及多个 PR 分支 | `branches` |
+| 1.21.1 发布节奏 | 18 次发布，21.1.11→18 均在 2026 年 8–10 月 | 发布记录 |
+| 下载量 / 关注者 | 272,377 / 773 | Modrinth API |
+| Modrinth `game_versions` | **仅** `1.20.1`、`1.21.1` | Modrinth API |
+| 加载器 | 仅 `fabric` | Modrinth API |
 
-**Version support.** Kilt `v21.1.x` tracks Minecraft **1.21.1** and NeoForge **21.1.x** — the v21.1.18 release
-notes list *"Update to NeoForge 21.1.265."* It therefore targets the *same* NeoForge 1.21.1 line that Connector
-does, which is why mcdebug's archived 1.20.1 line used a "Kilt container test environment" (AGENTS.md §12) and
-why two Kilt-era diagnostic RPCs (`server.mantleInteract`, `server.forgeFluidCapability`) existed.
+**版本支持。** Kilt `v21.1.x` 对应 Minecraft **1.21.1** 与 NeoForge **21.1.x**。
+其 v21.1.18 发布说明包含更新到 NeoForge 21.1.265，因此与 Connector 面向同一 NeoForge 1.21.1 线。
+这也解释了 mcdebug 已归档的 1.20.1 线为何使用 Kilt 容器测试环境，见 AGENTS.md 第 12 节，
+以及当时为何存在 `server.mantleInteract`、`server.forgeFluidCapability` 两个诊断 RPC。
 
-⚠️ Kilt's README is **stale and contradicts its release history**: it still says *"A NeoForge 1.21.1 build is
-currently in progress, however that is going to take some time"*, while 1.21.1 builds have shipped 18 times
-since. Judge Kilt by releases, not by that README.
+⚠️ Kilt README **过时且与发布历史矛盾**，仍称 NeoForge 1.21.1 构建正在开发、尚需时间，
+实际已发布 18 次。应以发布记录判断，不应只看 README。
 
-**Is it a realistic option for 1.21.1?** It is technically real and current, but the project's own framing is a
-hard warning: *"Kilt is currently highly unstable, may break worlds, may cause crashes, hence why it is
-currently published as **Alpha** to Modrinth and **Beta** to CurseForge"*, plus *"do not report [bugs] to the
-mod developers unless they also occur on Forge"* (README, `version/1.21.1` branch). For a debug/automation mod
-whose whole value proposition is *trustworthy assertions about a machine's state*, standing on an
-Alpha-quality translation layer that itself warns about world corruption is a poor trade — and it shifts the
-risk onto the user's modpack rather than onto mcdebug. Two-person project, 270 open issues.
+**对 1.21.1 是否现实？** 技术上确有现成版本，但项目自己明确警告：Kilt 很不稳定，
+可能损坏世界或崩溃，因此在 Modrinth 以 **Alpha**、CurseForge 以 **Beta** 发布；
+除非问题在 Forge 也存在，否则不要向原模组开发者报告，来源为 `version/1.21.1` README。
+调试与自动化模组的价值是对机器状态做可信断言，依赖主动提示世界损坏风险的 Alpha 转换层并不划算，
+且风险转移到了用户整合包，而非 mcdebug。该项目有两位开发者、270 个未关闭问题。
 
-⚠️ **Uncertainty:** Kilt's `WHY.md`/docs site (<https://kilt.bluspring.xyz/>) may carry a more current support
-matrix than the README; I did not read it. Also, exactly which NeoForge mods work is not systematically tested
-the way Connector's Probe service tests Fabric mods — **Kilt has no equivalent public compatibility matrix**,
-so risk assessment for a specific modpack would be anecdotal.
+⚠️ **不确定性：** Kilt 的 WHY.md 或[文档站](https://kilt.bluspring.xyz/) 可能有比 README 更新的支持矩阵，
+本次未阅读。具体 NeoForge 模组的可用性也未像 Connector Probe 那样系统测试；
+**Kilt 没有同等公开兼容矩阵**，评估特定整合包风险只能依赖零散案例。
 
-**One relevant technical datapoint:** Kilt remaps Forge mods *from SRG into Fabric's intermediary*
-(*"Kilt first remaps them from the Forge SRG format into Fabric's Intermediary format, then applies some of
-its own 'fixers'"* — README), and it maintains its own forks of NeoForge, FancyModLoader, ForgeAutoRenamingTool
-and `srg2intermediary` for this ([KiltMC org repos](https://github.com/orgs/KiltMC/repositories)). The
-v21.1.18 notes include *"Implement reflection fixers"* and *"Fix Sable: Ragdoll. Also probably a lot of mods
-that rely on reflection."* — i.e. Kilt, like Connector, has to special-case reflection, and for the mirror-image
-reason. Neither translation layer makes reflection free.
+**一个相关技术点：** Kilt 先将 Forge 模组从 SRG 重映射到 Fabric intermediary，再应用自己的修复器。
+为此维护 NeoForge、FancyModLoader、ForgeAutoRenamingTool 和 `srg2intermediary` 的分支，
+见 [KiltMC 组织仓库](https://github.com/orgs/KiltMC/repositories)。
+v21.1.18 说明含实现反射修复器、修复 Sable: Ragdoll 及可能影响大量反射模组的修复。
+这说明 Kilt 与 Connector 一样必须特别处理反射，只是转换方向相反；二者都不能消除反射适配成本。
 
 ---
 
-## C) ARCHITECTURY / MULTI-LOADER BUILD
+## C）Architectury 与多加载器构建
 
-### Current state for 1.21.1
+### 1.21.1 的当前状态
 
-| Component | Status for 1.21.1 | Source |
+| 组件 | 1.21.1 状态 | 来源 |
 |---|---|---|
-| **architectury-loom** | Latest release **1.17**, 2026-07-08; repo last push 2026-09-12; default branch `dev/1.17` | [releases](https://github.com/architectury/architectury-loom/releases) |
-| **architectury-api** | **`13.0.11`**, 2026-07-23 — published for **`fabric` and `neoforge` ONLY** | Modrinth API `GET /v2/project/architectury-api/version` |
-| Repo branch for 1.21.1 | **there is no `1.21.1` branch** — only `1.21` (last commit 2026-07-23, "Merge pull request #733 from st0x0ef/1.21") | `branches`, `commits?sha=1.21` |
-| Cache of 413 versions | loader counts across all versions: `fabric` 215, `quilt` 130, `forge` 120, `neoforge` 78 — but **zero `forge` among the six versions whose `game_versions` include 1.21.1** | Modrinth API |
+| **architectury-loom** | 最新发布 **1.17**，2026-07-08；仓库最后推送 2026-09-12，默认分支 `dev/1.17` | [发布记录](https://github.com/architectury/architectury-loom/releases) |
+| **architectury-api** | **`13.0.11`**，2026-07-23，**仅发布 fabric 和 neoforge** | Modrinth API `GET /v2/project/architectury-api/version` |
+| 1.21.1 对应分支 | **没有 `1.21.1` 分支**，只有 `1.21`，最后提交为 2026-07-23，合并 st0x0ef/1.21 的 PR #733 | `branches`、`commits?sha=1.21` |
+| 缓存的 413 个版本 | 全版本加载器计数为 `fabric` 215、`quilt` 130、`forge` 120、`neoforge` 78，但 `game_versions` 含 1.21.1 的六个版本中 **forge 为零** | Modrinth API |
 
-**⚠️ Plain Forge 1.21.1 is not an Architectury target.** Architectury API has no Forge build for 1.21.1
-(only `13.0.6`, `13.0.8`, `13.0.11`, each ×2 for fabric+neoforge). And Architectury's own docs have dropped
-Forge from the framing entirely — <https://docs.architectury.dev/api> now reads: *"Architectury API is a
-multiplatform Minecraft mod API. It abstracts the differences between **Fabric and NeoForge** so you can write
-your mod's logic once, in a shared common codebase, and ship it on both loaders."* Loom's docs similarly carry
-"Using NeoForge" and "NeoForge Migration" but no current Forge guide (only "Using Legacy MCP (1.16.5 or
-lower)") — <https://docs.architectury.dev/loom/introduction>.
+**⚠️ 原生 Forge 1.21.1 不是 Architectury 目标。** Architectury API 没有该版本的 Forge 构建，
+只有 `13.0.6`、`13.0.8`、`13.0.11` 各自的 Fabric 和 NeoForge 两份构建。
+[Architectury API 文档](https://docs.architectury.dev/api) 已不再以 Forge 为目标，
+而是说明通过抽象 **Fabric 与 NeoForge** 的差异，在共享代码中编写一次逻辑并为两个加载器分发。
+[Loom 文档](https://docs.architectury.dev/loom/introduction) 同样只有 NeoForge 使用和迁移说明，
+没有现行 Forge 指南，只保留旧 MCP、1.16.5 或更低版本的说明。
 
-**So Architectury for 1.21.1 = Fabric + NeoForge, exactly like Connector's target. If "Forge-family" includes
-plain Forge 1.21.1, Architectury does not solve it either.** This is probably the most consequential finding
-in section C.
+**因此 Architectury 1.21.1 = Fabric + NeoForge，与 Connector 目标一致。
+若 Forge 系包含原生 Forge 1.21.1，Architectury 也不能解决。** 这是本节影响最大的发现。
 
-**Architectury Loom caveats (its own docs, <https://docs.architectury.dev/loom/introduction>):**
-*"Architectury Loom currently only supports IntelliJ IDEA and Visual Studio Code. Other IDEs are not tested
-and are not supported."* / *"Architectury Loom is an experimental project."* / mapping options: Yarn, Official
-Mojang Mappings, or MCP / Gradle 8.1+.
+Architectury Loom 的[官方说明](https://docs.architectury.dev/loom/introduction)还指出：
+仅支持 IntelliJ IDEA 与 Visual Studio Code，其他 IDE 未测试且不支持；
+Loom 仍为实验项目，映射可选 Yarn、Mojang 官方映射或 MCP，要求 Gradle 8.1+。
 
-### Kotlin support in a common+loader setup
+### 共享代码与加载器分层中的 Kotlin 支持
 
-**There is no first-class Kotlin story in Architectury.** Evidence: a code search for `kotlin` across
-`architectury/architectury-loom` returns **no matches**, and a search restricted to
-`architectury/architectury-api path:docs` returns **no matches** (GitHub code-search API, 2026-10-30). Loom's
-docs pages have no Kotlin section. Architectury Loom is "a fork of Juuxel's Loom fork … that is a fork of
-Fabric Loom" ([README](https://github.com/architectury/architectury-loom)) — so Kotlin arrives via Fabric
-Loom's inherited Kotlin support plus **you wiring up the loader-specific Kotlin runtimes yourself**
-(`fabric-language-kotlin` on Fabric, `kotlin-for-forge`/NeoForge's Kotlin on the other side). The
-`architectury-templates` repo that the docs point at via
-<https://generate.architectury.dev/> was **last pushed 2023-11-12** — stale.
+**Architectury 没有专门、完整的 Kotlin 接入方案。**
+2026-10-30 使用 GitHub 代码搜索 API，在 `architectury/architectury-loom` 搜索 kotlin 无结果，
+在 `architectury/architectury-api path:docs` 搜索也无结果，Loom 文档没有 Kotlin 章节。
+其 [README](https://github.com/architectury/architectury-loom) 说明该项目源自 Juuxel 的 Loom 分支，
+后者又源自 Fabric Loom，因此 Kotlin 支持来自继承的 Fabric Loom，
+并须自行接入加载器专属运行时：Fabric 使用 `fabric-language-kotlin`，
+另一端使用 `kotlin-for-forge` 或 NeoForge 对应 Kotlin 运行时。
+文档通过 <https://generate.architectury.dev/> 指向的 `architectury-templates`
+仓库最后推送为 **2023-11-12**，已过时。
 
-**Realistic extra cost for mcdebug specifically.** mcdebug's *loader-specific* surface is genuinely small:
+**mcdebug 的额外成本。** 其加载器专属调用面较小：
 
-- **Lifecycle hooks** — `ServerLifecycleEvents` / `ServerTickEvents` (Fabric API) → NeoForge `FMLLoader`/event bus equivalents. Small, mechanical.
-- **Transfer/storage API** — `ItemStorage.SIDED` / `FluidStorage.SIDED` / `Storage` / `Transaction` → NeoForge `Capabilities.ItemHandler.BLOCK` / `FluidHandler.BLOCK` + `IItemHandler`/`IFluidHandler`, or a hand-written abstraction. Medium; note FFAPI's own bridge code (`NeoItemStorage`, `ItemStorageItemHandler`, `SlottedItemStorageItemHandler`, …) is a ready-made reference for exactly this mapping.
-- **Loader API** — `FabricLoader` (game dir, mod metadata, `MappingResolver`) → NeoForge `FMLPaths`/`ModList`. Small, but `MappingResolver` has **no NeoForge equivalent** — under NeoForge the runtime *is* Mojang-named, so mcdebug's mapping layer reduces to "identity + a user-name table", which is a simplification, not a port.
-- **`Mappings.kt` / `reflect.*`** — the intermediary half becomes dead weight on NeoForge; the Mojang→Mojang path is trivial. Small.
-- **The large client-side mixin set — this is the real cost.** 10 mixin classes, all currently written against **intermediary** targets, refmapless, with bare method names. On NeoForge they must be re-pointed at Mojang names *and re-verified against NeoForge-patched vanilla*: Forge patches touch exactly the classes mcdebug instruments (`GuiGraphics`, `GameRenderer`, `Screen`, `RenderSystem`, `Minecraft`). And there is **no Transfer-API-style bridge for mixin targets** — no compatibility shim saves you here. Additionally mcdebug's AGENTS.md §14 documents that Loom 1.15 writes single-value `at` as an array, breaking MixinExtras in consumer projects, and that injection points *must* be validated in a real client because `defaultRequire: 1` turns an injection miss into a startup failure. On NeoForge + a multi-loader build the number of (loader × mixin-remap × patch-set) combinations to validate multiplies.
-- **Argument that it's cheaper than it looks:** the client mixin set is *conceptually* loader-independent — it targets vanilla classes that both loaders patch. If the mixin count were 2–3 the port would be trivial; at 10, each with `defaultRequire: 1`, the verification cost dominates.
+- **生命周期钩子**：Fabric API 的 `ServerLifecycleEvents` / `ServerTickEvents`
+  对应 NeoForge `FMLLoader` 或事件总线，工作量小且偏机械。
+- **传输与存储 API**：`ItemStorage.SIDED` / `FluidStorage.SIDED` / `Storage` / `Transaction`
+  对应 NeoForge `Capabilities.ItemHandler.BLOCK` / `FluidHandler.BLOCK` 加 `IItemHandler` / `IFluidHandler`，
+  或自行编写抽象层，工作量中等。FFAPI 的 `NeoItemStorage`、`ItemStorageItemHandler`、
+  `SlottedItemStorageItemHandler` 等桥接代码可直接作为映射参考。
+- **加载器 API**：`FabricLoader` 的游戏目录、模组元数据、`MappingResolver`
+  对应 NeoForge `FMLPaths` / `ModList`，工作量小。但 NeoForge **没有 MappingResolver 对应物**，
+  因为运行时本就使用 Mojang 名称，映射层可简化为恒等映射加用户名称表。
+- **`Mappings.kt` / `reflect.*`**：NeoForge 不需要 intermediary 部分，Mojang 到 Mojang 的路径很简单，工作量小。
+- **真正成本在 10 个客户端 mixin 类**：目前均针对 intermediary、无 refmap 且使用裸方法名，
+  在 NeoForge 上必须改为 Mojang 名称，并对 NeoForge 修补后的原版类重新验证。
+  两个加载器都会修改 mcdebug 观测的 `GuiGraphics`、`GameRenderer`、`Screen`、`RenderSystem`、`Minecraft`。
+  Mixin 目标没有类似 Transfer API 的桥接层，兼容垫片不能代替验证。
+  AGENTS.md 第 14 节还记录 Loom 1.15 将单值 `at` 写成数组，破坏消费者项目的 MixinExtras；
+  `defaultRequire: 1` 会将注入未命中变为启动失败，必须在真实客户端验证。
+  多加载器构建使加载器、mixin 重映射、补丁集的组合数增加。
+- **成本也有可控之处**：客户端 mixin 在概念上与加载器无关，目标是两边都会修补的原版类。
+  若仅有两三个 mixin，移植很简单；现在有 10 个且都使用 `defaultRequire: 1`，验证成本占主导。
 
-### Modern alternatives people actually use in 2026
+### 2026 年实际使用的其他工具
 
-- **Stonecutter** — *"Modern Gradle plugin for multi-version management"*, by KikuGie. Gradle Plugin Portal lists **`dev.kikugie.stonecutter` version `0.9.8`, created 31 August 2026**
-  (<https://plugins.gradle.org/plugin/dev.kikugie.stonecutter>), sources at
-  <https://github.com/kikugie/stonecutter>, docs <https://stonecutter.kikugie.dev/>.
-  ⚠️ **Discrepancy, flagged:** the GitHub repo reports `pushed_at = 2025-12-25T16:00:27Z` with default branch
-  `display`, and the newest commit I could reach on branch `0.9` is 2025-12-20 — which is inconsistent with a
-  plugin version published 2026-08-31. I could not reconcile this (possible mirror/rename involvement: a repo
-  `stonecutter-versioning/stonecutter` carries byte-identical metadata). Treat "0.9.8 / 2026-08-31" as
-  authoritative for *availability* and the repo push date as **unreliable**.
-  Stonecutter is a **multi-version** tool that is also used for **multi-loader**: MCPFabric below uses it for
-  exactly that.
-- **Modstitch** — *"A gradle plugin to unify official tooling for both Fabric and (Neo)Forge"*, repo
-  <https://github.com/modstitch/modstitch> (last push 2026-04-01, 34★), docs
-  <https://isxander.github.io/modstitch-docs/>. Docs site is thin (a single "Getting Started / What is
-  Modstitch?" page as rendered 2026-10-30). Again **Fabric + (Neo)Forge** — no plain Forge.
-- **Stonecutter multi-loader template** — <https://github.com/rotgruengelb/stonecutter-mod-template>
-  ("Stonecutter Multi-Loader & Multi-Version Minecraft Mod Template", pushed 2026-10-20, 51★), described as
-  targeting Fabric, NeoForge and Forge. This is the most direct starting point if a Forge target is truly needed.
-- **`kikugie/modkit`** — *"Suite of Gradle plugins for building Minecraft mods"*, pushed 2026-09-15, 0★; too
-  immature to rely on.
-- **Manual `common` + `fabric` + `neoforge` Gradle multi-project** — what the closest prior art actually does
-  (see D).
-- ❌ **`EdwinMindcraft/forgified-fabric-loom`** — "Gradle build system, that works for forge as well",
-  **last pushed 2021-03-28**, 0★. Dead. Do not use.
+- **Stonecutter**：KikuGie 开发的现代 Gradle 多版本管理插件。
+  [Gradle Plugin Portal](https://plugins.gradle.org/plugin/dev.kikugie.stonecutter) 列出
+  **`dev.kikugie.stonecutter` `0.9.8`，发布于 2026-08-31**。
+  源码为 <https://github.com/kikugie/stonecutter>，文档为 <https://stonecutter.kikugie.dev/>。
+  ⚠️ 元数据有矛盾：GitHub 仓库 `pushed_at = 2025-12-25T16:00:27Z`，默认分支 `display`，
+  可访问的 `0.9` 最新提交为 2025-12-20，与 2026-08-31 的插件发布时间不符。
+  尚无法解释，可能涉及镜像或改名，`stonecutter-versioning/stonecutter` 具有逐字节相同元数据。
+  可用性以插件门户的版本与日期为准，仓库推送日期不可靠。
+  Stonecutter 主要管理**多版本**，也用于**多加载器**，下文 MCPFabric 就这样使用。
+- **Modstitch**：统一 Fabric 和 (Neo)Forge 官方工具链的 Gradle 插件，
+  仓库 <https://github.com/modstitch/modstitch>，最后推送 2026-04-01，34 星；
+  文档 <https://isxander.github.io/modstitch-docs/>，2026-10-30 渲染后仅有入门和项目介绍页面，内容较少。
+  仍是 Fabric + (Neo)Forge，不包含原生 Forge。
+- **Stonecutter 多加载器模板**：<https://github.com/rotgruengelb/stonecutter-mod-template>，
+  多加载器、多版本 Minecraft 模组模板，2026-10-20 推送，51 星，声明支持 Fabric、NeoForge 和 Forge。
+  真正需要 Forge 目标时，这是最直接的起点。
+- **`kikugie/modkit`**：Minecraft 模组构建插件集合，2026-09-15 推送，0 星，尚不成熟，不宜依赖。
+- **手动 `common` + `fabric` + `neoforge` Gradle 多工程**：最接近的已有项目实际采用此方式，见 D 节。
+- ❌ **`EdwinMindcraft/forgified-fabric-loom`**：声称也适用于 Forge 的 Gradle 构建系统，
+  最后推送为 **2021-03-28**，0 星，已停止维护，不应使用。
 
-### ⚠️ "NeoForge's Fabric compatibility claims" — **[not found / unverified]**
+### ⚠️ NeoForge 原生兼容 Fabric 的说法：[未找到 / 未验证]
 
-I could **not** locate any official NeoForge statement, doc page, or release note claiming that NeoForge runs
-Fabric mods natively. Searches of `docs.neoforged.net` and the web for such a claim returned only third-party
-loader-comparison pages and unrelated GitHub issues. Everything I found indicates the opposite framing: a
-Fabric mod is not a NeoForge mod, and the ecosystem's answer to "run Fabric mods on NeoForge" is a
-**third-party** mod — Sinytra Connector, which describes itself as *"a translation/compatibility layer that
-allows running Fabric mods on **NeoForge**"*, plus its companion FFAPI (a **port** of Fabric API to NeoForge)
-and, for 26.x, Launchpad. If the user has a specific NeoForge statement in mind, it should be re-checked; I
-found no primary source for it and I am explicitly not asserting one.
+本次**未找到** NeoForge 官方声明、文档或发布说明称其可原生运行 Fabric 模组。
+在 `docs.neoforged.net` 与网络搜索中，只找到第三方加载器比较和无关 GitHub 问题。
+找到的资料均表明 Fabric 模组不等于 NeoForge 模组；让 Fabric 模组运行于 NeoForge，
+通常依赖**第三方** Sinytra Connector、将 Fabric API 移植到 NeoForge 的 FFAPI，
+以及 26.x 的 Launchpad。若有具体 NeoForge 声明，需另行核对；本次未找到一手来源，不作此断言。
 
 ---
 
-## D) PRIOR ART — cross-loader debug/automation RPC mods
+## D）已有的跨加载器调试与自动化 RPC 模组
 
-**Short answer: yes, credible prior art exists, it is recent, it is 1.21.1, and at least two projects ship
-both Fabric and NeoForge builds of a socket/HTTP JSON-RPC automation mod. None is a drop-in replacement for
-mcdebug, but `mcpfabric` covers a large, overlapping feature set and is the closest thing to an alternative.**
+已有可信、较新的 1.21.1 项目，至少两个提供基于套接字或 HTTP JSON-RPC 自动化模组的
+Fabric 和 NeoForge 构建。它们均不能直接替换 mcdebug，
+但 `mcpfabric` 的功能重叠较多，是最接近的替代方案。
 
-### D1. `mcpfabric` — closest match ⭐
+### D1. `mcpfabric`：最接近的功能对照 ⭐
 
-| Fact | Value |
+| 项目 | 数据 |
 |---|---|
-| Repo | <https://github.com/denfry/mcpfabric> — *"Control and observe a running Minecraft: Java Edition game from AI agents over MCP (Fabric and NeoForge, 1.21.1+)"* |
-| License | MIT |
-| Created / last push | 2026-10-05 / 2026-10-26 |
-| Stars | 14 |
-| Modrinth | <https://modrinth.com/mod/mcpfabric> — 5,503 downloads, updated 2026-10-16 |
-| **1.21.1 builds** | **both**: `mcpfabric-0.8.0+1.21.1.jar` (fabric) and `mcpfabric-neoforge-0.8.0+1.21.1.jar` (neoforge), both 2026-10-16 |
-| Modrinth loaders / versions | `["fabric","neoforge"]`; `1.21.1`–`1.21.11`, `26.1`–`26.3` |
-| **Build strategy** | **"A single source tree targets many Minecraft versions using [Stonecutter](https://stonecutter.kikugie.dev/). Each version below ships its own jar"** — this is direct evidence for the section-C toolchain question |
+| 仓库 | <https://github.com/denfry/mcpfabric>，通过 MCP 让 AI 代理控制和观察运行中的 Minecraft Java 版，支持 Fabric、NeoForge 和 1.21.1+ |
+| 许可证 | MIT |
+| 创建 / 最后推送 | 2026-10-05 / 2026-10-26 |
+| 星数 | 14 |
+| Modrinth | <https://modrinth.com/mod/mcpfabric>，5,503 次下载，更新于 2026-10-16 |
+| **1.21.1 构建** | **两种均有**：`mcpfabric-0.8.0+1.21.1.jar`（fabric）和 `mcpfabric-neoforge-0.8.0+1.21.1.jar`（neoforge），均为 2026-10-16 |
+| Modrinth 加载器 / 版本 | `["fabric","neoforge"]`；`1.21.1`–`1.21.11`、`26.1`–`26.3` |
+| **构建策略** | 使用 [Stonecutter](https://stonecutter.kikugie.dev/) 让同一源码树面向多个 Minecraft 版本，每个版本分发独立 JAR，直接回答 C 节的工具链问题 |
 
-Architecture (from its README): a mod embedding a **local HTTP bridge** in Minecraft, plus a TypeScript MCP
-server. `POST /rpc` (JSON-RPC) + `GET /events` (SSE), **bearer token, 127.0.0.1 only**; all game access goes
-through the main-thread executor (`server.execute` / `Minecraft.execute`); separate common (`info`, `world`,
-`entities`, `players`, `command`, `chat`, `events`) and client (`player`, `control`, `interact`, `inventory`,
-`vision`, `navigation`, `session`, `ui`) tool groups. **Works on the client *and* dedicated servers.**
+其 README 描述的架构为 Minecraft 内嵌**本地 HTTP 桥接**，外加 TypeScript MCP 服务端。
+使用 `POST /rpc`（JSON-RPC）、`GET /events`（SSE），**只绑定 127.0.0.1，并要求 bearer token**。
+所有游戏访问通过主线程执行器 `server.execute` / `Minecraft.execute`。
+工具组分为公共的 `info`、`world`、`entities`、`players`、`command`、`chat`、`events`，
+和客户端的 `player`、`control`、`interact`、`inventory`、`vision`、`navigation`、`session`、`ui`。
+**客户端和专用服务端均可使用。**
 
-Feature overlap with mcdebug is substantial: `get_block`/`set_block`/`fill_blocks`, `query_entities`,
-`run_command`, **`screenshot` (PNG)**, `get_screen`/`close_screen`, **`get_ui` (widgets of the open screen)**,
-**`click_widget`, `set_text_field`** (behind an `enableUiControl` flag, off by default), `get_inventory`,
-`drop_slot`/`swap_slots`, plus **`open_container`/`container_transfer`/`close_container`**.
+与 mcdebug 重叠的功能包括 `get_block` / `set_block` / `fill_blocks`、`query_entities`、
+`run_command`、**PNG `screenshot`**、`get_screen` / `close_screen`、
+获取当前控件的 **`get_ui`**、**`click_widget` / `set_text_field`**，后两者需默认关闭的
+`enableUiControl` 开关；还有 `get_inventory`、`drop_slot` / `swap_slots`，
+以及 **`open_container` / `container_transfer` / `close_container`**。
 
-**Where it is *not* a drop-in for mcdebug:**
-- Transport is **HTTP on loopback**, not a unix socket + TCP; auth is a bearer token vs mcdebug's deliberate no-auth + firewall model (AGENTS.md §1).
-- Writes go **through the command dispatcher** (*"writes (`setblock`/`summon`/`give`/`tp`/effects/weather/time) go through the command dispatcher with output capture"*) rather than direct block-entity NBT read/write. There is **no equivalent of mcdebug's `be.getNbt`/`be.setNbt`/`be.tick`**, no `snapshot.diff`, no `trace.*`, no predicate-DSL `wait.until`, no `reflect.*`, no `storage.*`/Transfer-API surface, no `gui.hotswap`/`reloadScreen`/golden-image compare.
-- GUI control is widget-level (`click_widget`, `set_text_field`) with **no slot-index clicking, no hover/tooltip capture, no draw log, no annotated screenshots, no rendered-geometry reporting** — mcdebug's whole agent-iteration loop.
-- **Trust/robustness caveats:** 14 stars, created 2026-10-05 (three weeks old at time of research), and its README states *"**No hidden telemetry:** the current **Fabric** release sends no usage analytics"* — an oddly scoped sentence that implies the NeoForge release may differ. **[unverified]** — I did not inspect either jar. Its own caution: *"MCP Fabric can grant an AI operator-level control."*
+**不能直接替换 mcdebug 的原因：**
 
-### D2. `arclightpowered/minecraft-mcp` (by IzzelAliz) — closest *architecturally* ⭐
+- 传输是**回环 HTTP**，而非 Unix 套接字加 TCP；身份认证为 bearer token，
+  mcdebug 则有意使用不鉴权加防火墙的部署模型，见 AGENTS.md 第 1 节。
+- 写操作通过**命令分派器**，如 setblock、summon、give、tp、效果、天气、时间，并捕获输出，
+  不直接读写方块实体 NBT。没有 `be.getNbt` / `be.setNbt` / `be.tick`，也没有
+  `snapshot.diff`、`trace.*`、谓词 DSL `wait.until`、`reflect.*`、`storage.*` / Transfer API、
+  `gui.hotswap` / `reloadScreen` 或基准图比较。
+- GUI 控制只到 `click_widget`、`set_text_field` 控件级，**没有按槽位点击、悬停提示捕获、
+  绘制日志、标注截图或渲染几何信息**，缺少 mcdebug 的整套代理迭代流程。
+- **信任与稳健性限制**：项目只有 14 星，调研时仅创建三周。
+  README 将无隐藏遥测的声明限定为当前 **Fabric** 发布不发送使用分析，NeoForge 是否相同并未明确。
+  **[未验证]**，本次未检查两个 JAR。其自身也提示 MCP Fabric 可赋予 AI 操作者管理员级控制。
 
-| Fact | Value |
+### D2. `arclightpowered/minecraft-mcp`：架构最接近的参考 ⭐
+
+作者为 IzzelAliz。
+
+| 项目 | 数据 |
 |---|---|
-| Repo | <https://github.com/arclightpowered/minecraft-mcp> — *"Minecraft client mod exposing a local MCP-style JSON-RPC endpoint for AI agents"* |
-| License | **MIT** (`LICENSE`: "MIT License, Copyright (c) 2026 IzzelAliz"); `gradle.properties` sets `mod_license=MIT`. (GitHub's license classifier says "Other" — the file itself is MIT.) |
-| Created / last push | 2026-05-13 / 2026-09-22; last commit 2026-06-01 |
-| Stars / releases | 5★ / **no GitHub releases** (source-only) |
-| Loaders | **"Supported loaders: Fabric 1.21.1, NeoForge 1.21.1"** |
-| Transport | *"Default transport is local HTTP JSON-RPC at `/mcp`… binds to `127.0.0.1` by default and requires a bearer token"*; discovery file `mcp/server.json` |
-| **Build strategy** | manual multi-project: root `build.gradle` + `settings.gradle` with `common/`, `fabric/`, `neoforge/`. The neo subproject applies `net.neoforged.gradle.userdev` (NeoGradle). `gradle.properties`: `minecraft_version=1.21.1`, `fabric_loader_version=0.16.14`, `fabric_api_version=0.116.1+1.21.1`, `neoforge_version=21.1.222` |
+| 仓库 | <https://github.com/arclightpowered/minecraft-mcp>，向 AI 代理暴露本地 MCP 风格 JSON-RPC 端点的 Minecraft 客户端模组 |
+| 许可证 | **MIT**，LICENSE 标明 2026 IzzelAliz 版权所有，`gradle.properties` 为 `mod_license=MIT`；GitHub 分类虽为 Other，文件本身是 MIT |
+| 创建 / 最后推送 | 2026-05-13 / 2026-09-22，最后提交为 2026-06-01 |
+| 星数 / 发布 | 5 星，**没有 GitHub 发布**，仅源码 |
+| 加载器 | 支持 Fabric 1.21.1、NeoForge 1.21.1 |
+| 传输 | 默认在 `/mcp` 提供本地 HTTP JSON-RPC，绑定 `127.0.0.1` 且要求 bearer token，发现文件为 `mcp/server.json` |
+| **构建策略** | 手动多工程，根 `build.gradle` / `settings.gradle` 配合 `common/`、`fabric/`、`neoforge/`；NeoForge 子工程使用 NeoGradle 的 `net.neoforged.gradle.userdev`；属性为 `minecraft_version=1.21.1`、`fabric_loader_version=0.16.14`、`fabric_api_version=0.116.1+1.21.1`、`neoforge_version=21.1.222` |
 
-Feature scope is **strikingly close to mcdebug's**: server + client bridges, packet recording/filtering,
-**schematic** tools, **scenario engine with assertions**, inventory/container tools, player-action tools,
-screenshot tools, command-suggestion sync, condition/predicate properties. Docs directory:
-`docs/protocol.md`, `docs/scenarios.md`, `docs/scenario-conditions.md`, `docs/inventory-container-tools.md`,
-`docs/player-action-tools.md`, `docs/packet-tools.md`, `docs/schematics.md`, `docs/headless.md`,
-`docs/agent-usage.md`.
+功能范围与 mcdebug 非常接近：服务端与客户端桥接、数据包记录与过滤、**结构蓝图**工具、
+**带断言的场景引擎**、库存与容器工具、玩家动作、截图、命令补全同步及条件或谓词属性。
+文档目录含 `docs/protocol.md`、`docs/scenarios.md`、`docs/scenario-conditions.md`、
+`docs/inventory-container-tools.md`、`docs/player-action-tools.md`、`docs/packet-tools.md`、
+`docs/schematics.md`、`docs/headless.md`、`docs/agent-usage.md`。
 
-This is the **best available reference implementation** for exactly the multi-loader refactor mcdebug is
-contemplating: same MC version, same loaders, same "external tool drives a live game" concept, MIT-licensed,
-and by a well-known Fabric modder (IzzelAliz). Caveats: 5 stars, no releases, no commits since 2026-06-01, and
-it is **client-only** in its README framing (`minecraft-mcp` / `MinecraftClientBridge`).
+这是 mcdebug 所考虑的多加载器重构中**最合适的现成参考实现**：MC 版本、加载器、
+外部工具驱动真实游戏的概念均相同，使用 MIT 许可证，作者为知名 Fabric 模组开发者 IzzelAliz。
+限制是只有 5 星、没有发布、2026-06-01 后无提交，
+且 README 将其描述为**仅客户端**，入口为 `minecraft-mcp` / `MinecraftClientBridge`。
 
-### D3. Other MCP-style mods (weaker / wrong targets)
+### D3. 其他 MCP 风格模组：能力较弱或目标不符
 
-| Project | Loaders | 1.21.1? | Note |
+| 项目 | 加载器 | 支持 1.21.1 | 说明 |
 |---|---|---|---|
-| [`mcp-server-mod`](https://modrinth.com/mod/mcp-server-mod) (cuspymd) | fabric only | **no** (1.21.4+) | 1,585 downloads |
-| [`fabric-api-mcp-server`](https://modrinth.com/mod/fabric-api-mcp-server) (chapmanjw) | fabric only | **no** (1.21.11+) | 1,485 downloads; *"exposes the server-side Minecraft API and the Fabric API as MCP tools"* — the closest *conceptual* match to mcdebug on the server plane, but Fabric-only and too new a version |
-| [`yuniko-software/minecraft-mcp-server`](https://github.com/yuniko-software/minecraft-mcp-server) | none (Mineflayer) | n/a | 800★, the popular "MCP for Minecraft" — an **external protocol-level bot**, so it works against any server (incl. Forge/NeoForge) but has no mod-side access: no block-entity NBT, no server-side state, no client GUI |
+| [mcp-server-mod](https://modrinth.com/mod/mcp-server-mod)，cuspymd | 仅 fabric | **否**，1.21.4+ | 1,585 次下载 |
+| [fabric-api-mcp-server](https://modrinth.com/mod/fabric-api-mcp-server)，chapmanjw | 仅 fabric | **否**，1.21.11+ | 1,485 次下载，将服务端 Minecraft API 与 Fabric API 暴露为 MCP 工具，概念上最接近 mcdebug 服务端平面，但仅 Fabric 且版本过新 |
+| [yuniko-software/minecraft-mcp-server](https://github.com/yuniko-software/minecraft-mcp-server) | 无，使用 Mineflayer | 不适用 | 800 星，流行的 Minecraft MCP；属于外部协议级机器人，可连接 Forge / NeoForge 等任意服务端，但不能访问模组内部的方块实体 NBT、服务端状态或客户端 GUI |
 
-### D4. Carpet / GameTest / other "automation on Forge-family"
+### D4. Carpet、GameTest 与其他 Forge 系自动化方案
 
-- **Carpet** — Fabric only. Modrinth loaders = `["fabric"]`; and it does **not** work through Connector:
-  Probe reports `carpet` `1.4.147` **failing** on 1.21.1 (tested 2026-10-24), and `carpet` `26.2`
-  **❌ Incompatible** on the 26.2 test run (<https://connector.sinytra.org/compatibility>). Carpet/TIS-style
-  tools have **no working NeoForge path**, either native or via Connector. **This is a significant negative
-  datapoint for mcdebug's Connector path**, since Carpet is the closest Fabric-side analogue of a
-  "server-side scriptable automation" mod.
-- **NeoForge GameTest** — a real, first-party, in-process test framework, but **not** a remote RPC bridge:
-  <https://docs.neoforged.net/docs/misc/gametest> (*"Game Tests are a way to run in-game unit tests"*) and
-  NeoForge's own <https://github.com/neoforged/neoforge/blob/26.2.x/docs/TESTFRAMEWORK.md>. Fabric has the
-  equivalent at <https://docs.fabricmc.net/develop/automatic-testing> (and FFAPI ships
-  `fabric-gametest-api-v1`). All in-JVM: no socket, no external client, no screenshots, no GUI driving.
-- **CC:Tweaked** — **native NeoForge on 1.21.1** per Probe (`type: native`, loader `neoforge`), as is
-  WorldEdit, JEI, EMI, REI, ModernFix, Embeddium. CC:Tweaked gives in-game Lua computers with an HTTP client
-  and inventory peripherals — genuinely a remote-automation substrate on NeoForge — but it cannot read/write
-  arbitrary block-entity NBT, cannot screenshot, and cannot drive the client GUI. Note this also surfaced in
-  Connector's tracker as a cross-loader pain point:
-  [Connector #1231](https://github.com/Sinytra/Connector/issues/1231) *"Plethora Peripherals (fabric) and
-  CC:Tweaked (forge)"*.
-- **Axiom** — a cross-loader world editor with its own server-side protocol; [Connector #2190](https://github.com/Sinytra/Connector/issues/2190)
-  *"Axiom 5.4.1 crashing on NeoForge 1.21.1 startup"* is closed, and Probe reports Axiom `6.1.3` compatible on
-  26.2. It is a *building/editing* tool, not a test-automation RPC — **not** a substitute.
+- **Carpet**：仅 Fabric，Modrinth 加载器为 `["fabric"]`，且**不能通过 Connector 工作**。
+  Probe 报告 `carpet` `1.4.147` 在 1.21.1 失败，测试于 2026-10-24；
+  `carpet` `26.2` 在 26.2 试验中也为 ❌ 不兼容，见[兼容性页面](https://connector.sinytra.org/compatibility)。
+  Carpet / TIS 类工具没有可用的 NeoForge 原生或 Connector 路线。
+  Carpet 最接近 Fabric 侧的服务端可脚本化自动化工具，因此这是 mcdebug Connector 路线的重要负面案例。
+- **NeoForge GameTest**：真实的一方进程内测试框架，但不是远程 RPC 桥接。
+  见 [GameTest 文档](https://docs.neoforged.net/docs/misc/gametest)，用于运行游戏内单元测试，
+  以及 [NeoForge 测试框架说明](https://github.com/neoforged/neoforge/blob/26.2.x/docs/TESTFRAMEWORK.md)。
+  Fabric 对应[自动化测试说明](https://docs.fabricmc.net/develop/automatic-testing)，FFAPI 也带 `fabric-gametest-api-v1`。
+  这些均在 JVM 内，无套接字、外部客户端、截图或 GUI 驱动。
+- **CC:Tweaked**：Probe 标为 1.21.1 **原生 NeoForge**，`type: native`、加载器 neoforge，
+  WorldEdit、JEI、EMI、REI、ModernFix、Embeddium 也一样。
+  游戏内 Lua 计算机提供 HTTP 客户端和库存外设，可作为 NeoForge 远程自动化基础，
+  但不能任意读写方块实体 NBT、截图或操作客户端 GUI。
+  它也出现在跨加载器问题 [Connector #1231](https://github.com/Sinytra/Connector/issues/1231) 中，
+  涉及 Fabric 的 Plethora Peripherals 与 Forge 的 CC:Tweaked。
+- **Axiom**：跨加载器世界编辑器，有自己的服务端协议。
+  [Connector #2190](https://github.com/Sinytra/Connector/issues/2190) 中 Axiom 5.4.1 在 NeoForge 1.21.1 启动崩溃的问题已关闭，
+  Probe 报告 Axiom `6.1.3` 在 26.2 兼容。
+  这是建造与编辑工具，不是测试自动化 RPC，不能替代 mcdebug。
 
-### D5. Are any of these a drop-in alternative to writing a port?
+### D5. 是否有项目能直接替代原生移植
 
-**No — but `mcpfabric` is the only one that comes close enough to be worth an explicit evaluation**, and
-`arclightpowered/minecraft-mcp` is worth reading as a reference implementation. The gap is not "can an external
-tool read/write blocks on NeoForge 1.21.1" (mcpfabric answers yes, today, from a single source tree) — the gap
-is mcdebug's *specific* contract: unix-socket-first transport, `be.getNbt`/`be.setNbt`/`be.tick`, `snapshot.diff`,
-`trace.*`, the `wait.until` predicate DSL, `reflect.*`, Transfer-API `storage.*`, and the whole pixel-level GUI
-loop (slot clicks, hover/tooltip from the real draw log, annotated screenshots, golden-image compare, hotswap,
-reloadScreen). No prior-art project reproduces that set, and each project's own README frames it as an
-AI-agent toy rather than a JUnit-drivable test harness. If the goal is "Forge-family users can debug their
-machines with mcdebug", none of these replaces mcdebug.
+**没有。** 但 `mcpfabric` 足够接近，值得单独评估，`arclightpowered/minecraft-mcp` 值得作为实现参考。
+差距不是外部工具能否在 NeoForge 1.21.1 读写方块，mcpfabric 已能从同一源码树做到，
+而是 mcdebug 的特定契约：Unix 套接字优先、`be.getNbt` / `be.setNbt` / `be.tick`、
+`snapshot.diff`、`trace.*`、`wait.until` 谓词 DSL、`reflect.*`、Transfer API `storage.*`，
+以及槽位点击、真实绘制提示框、标注截图、基准图比较、热替换和 Screen 重载组成的像素级 GUI 流程。
+没有现成项目复现整套能力，各项目 README 也更偏向 AI 代理玩具，而非可由 JUnit 驱动的测试工具。
+若目标是让 Forge 系用户用 mcdebug 调试机器，这些项目均不能替代 mcdebug。
 
 ---
 
-## CHEAPEST CREDIBLE PATH — verdict and ranking
+## 成本最低的可信路线：结论与排序
 
-### Framing correction that changes the whole answer
+### 必须先区分两个目标
 
-**"Forge-family 1.21.1" is two different targets, and only one of them is reachable cheaply.**
+**Forge 系 1.21.1 实际是两个不同目标，只有其中一个能低成本触达。**
 
-| Target | Reachable without a native port? | Evidence |
+| 目标 | 能否避免原生移植 | 证据 |
 |---|---|---|
-| **NeoForge 1.21.1** | **Yes** — Connector (+FFAPI). Also the target Architectury 13.x and mcpfabric's neoforge jar serve. | Connector `neoforge.mods.toml` requires `neoforge [21.1.97,)`; Architectury API `13.0.11+neoforge` |
-| **Plain Forge 1.21.1** (`52.1.20`, the current recommended build) | **No.** Connector is NeoForge-only; Architectury has no Forge 1.21.1 build; Kilt is Fabric-side. | Modrinth loader tags (all 1.21.1 Connector versions = `neoforge`); Architectury 1.21.1 versions = `fabric`+`neoforge` only |
+| **NeoForge 1.21.1** | **可以尝试** Connector + FFAPI，Architectury 13.x 和 mcpfabric 的 NeoForge JAR 也面向此目标 | Connector 的 `neoforge.mods.toml` 要求 `neoforge [21.1.97,)`；Architectury API 为 `13.0.11+neoforge` |
+| **原生 Forge 1.21.1**，当前推荐 `52.1.20` | **不能**；Connector 仅 NeoForge，Architectury 没有 Forge 1.21.1 构建，Kilt 在 Fabric 侧 | Modrinth 上全部 1.21.1 Connector 版本均为 neoforge；Architectury 1.21.1 只有 fabric 和 neoforge |
 
-The ecosystem has consolidated on **NeoForge** for 1.21.1. If any user really is on plain Forge 1.21.1, the
-only honest options are a native Forge port or telling them to move to NeoForge.
+1.21.1 生态已集中到 **NeoForge**。若用户确实使用原生 Forge 1.21.1，
+可行选项只有原生 Forge 移植，或迁移到 NeoForge。
 
-### Ranking
+### 路线排序
 
-**#1 — CONNECTOR (NeoForge 1.21.1). Cheapest to *attempt*; medium risk; smallest code change.**
-This is the only option that is genuinely "avoid a native port", and mcdebug is unusually well-positioned for it:
+**第 1：Connector，面向 NeoForge 1.21.1。尝试成本最低、风险中等、代码改动最少。**
+这是唯一真正避免原生移植的选项，mcdebug 的现有设计也较适合：
 
-- ✅ **mcdebug's reflection design is already correct for Connector, by accident of good design.**
-  `ForgifiedFabricLoader`'s `RUNTIME_MAPPING = "mojang"`, so `Mappings.kt`'s
-  `currentRuntimeNamespace == "intermediary"` probe returns `false` → mcdebug resolves reflection names as
-  Mojang at runtime, which is exactly what Connector's remapped bytecode and Mojang-named live classes require.
-  A mod that hardcoded intermediary strings would be more exposed than mcdebug is. *[Gating check: verify
-  `currentRuntimeNamespace` empirically — see below.]*
-- ✅ **Connector's `ReflectionRenamingTransformer` only rewrites `LDC` string constants**, so mcdebug's
-  runtime-computed names pass through untouched — and they don't need rewriting, because mcdebug
-  self-translates from its own bundled intermediary↔Mojang table, which is namespace-compatible with
-  Connector's bundled `mappings.tiny` (`official`/`intermediary`/`mojang`).
-- ✅ **`fabric-transfer-api-v1` is a non-issue**: FFAPI 1.21.1 ships `fabric-transfer-api-v1-5.4.4` with the full
-  API surface (`Storage`, `ItemStorage.SIDED`, `FluidStorage.SIDED`, `Transaction`, `SnapshotParticipant`,
-  `StorageUtil`) plus a two-way NeoForge capability bridge. This was the biggest unknown and it is resolved
-  favourably.
-- ✅ **`fabric-language-kotlin` is supported and officially tested passing** on `2.0.0-beta.17+1.21.1`
-  (2026-10-22).
-- ✅ **None of the 6 modules FFAPI omits are used by mcdebug.**
-- ✅ **Dedicated servers are a first-class code path** (`ServerMainMixin`), and Connector is marked optional per
-  side (`displayTest = IGNORE_ALL_VERSION`), so a server-only install for the server plane works.
-- ✅ **Zero user-visible install cost beyond 2 jars** (Connector + FFAPI; no Launchpad on 1.21.1), and
-  mcdebug's `"fabric-api": "*"` dependency is satisfied by FFAPI's `fabric_api` mod id.
-- ✅ **Loud, not silent, failure**: the Mixin Safeguard (`enableMixinSafeguard`, default true) halts loading
-  with a warning screen if Connector can't patch a mod's mixins.
+- ✅ **反射设计已适配 Connector 的转换方向。** ForgifiedFabricLoader 的 `RUNTIME_MAPPING = "mojang"`，
+  因而 `Mappings.kt` 的 `currentRuntimeNamespace == "intermediary"` 返回 false，
+  mcdebug 按 Mojang 运行时解析，符合改写后的字节码和实际类名称。
+  硬编码 intermediary 字符串的模组风险更大。
+  前提是实测 `currentRuntimeNamespace`，见下文关键检查。
+- ✅ **`ReflectionRenamingTransformer` 仅改写 LDC 字符串常量**，不动运行时计算的名称。
+  mcdebug 使用自身 intermediary↔Mojang 表转换，且与 Connector 内嵌
+  `mappings.tiny` 的 `official` / `intermediary` / `mojang` 命名空间兼容，无需它再改写。
+- ✅ **`fabric-transfer-api-v1` 没有缺口**：FFAPI 1.21.1 带 `fabric-transfer-api-v1-5.4.4`，
+  包含 `Storage`、`ItemStorage.SIDED`、`FluidStorage.SIDED`、`Transaction`、`SnapshotParticipant`、
+  `StorageUtil` 及双向 NeoForge 能力桥接。最大的未知项已得到有利确认。
+- ✅ **`fabric-language-kotlin` 已支持并经官方测试通过**，Connector 版本为
+  `2.0.0-beta.17+1.21.1`，测试于 2026-10-22。
+- ✅ **FFAPI 省略的 6 个模块均未被 mcdebug 使用。**
+- ✅ **专用服务端是正式路径**，由 `ServerMainMixin` 实现，`displayTest = IGNORE_ALL_VERSION`
+  使双方均可选装 Connector，因此服务端平面可只装在服务端。
+- ✅ **仅需额外安装两个 JAR**：Connector + FFAPI，1.21.1 不需要 Launchpad。
+  FFAPI 的 `fabric_api` 模组 ID 满足 mcdebug 的 `"fabric-api": "*"` 依赖。
+- ✅ **失败会明确提示**：默认启用的 Mixin 安全保护 `enableMixinSafeguard`
+  会在无法修补 mixin 时停止加载并显示警告界面。
 
-**Risks, ranked, with concrete mitigations:**
+**按优先级排列的风险与缓解措施：**
 
-1. 🔴 **Loom 1.15 mixin remap bug — actionable.** mcdebug is built with `loom_version=1.15-SNAPSHOT`
-   (`gradle.properties`) and its jar carries **intermediary names, no refmap**. FFAPI
-   [#266](https://github.com/Sinytra/ForgifiedFabricAPI/issues/266) documents a Loom-1.15 crash whose
-   root cause is a tiny-remapper bug dropping mixin method descriptors, with `@WrapOperation` implicated —
-   and mcdebug uses `@WrapOperation`/`@Inject` **exclusively**. Maintainer's own resolution: *"I tried using
-   loom 1.17 (1.16 still had the issue) and the descriptors are included again now."*
-   → **Mitigation: bump Loom to ≥ 1.17.** Cheap, low-risk, independently desirable.
-2. 🔴 **[FFAPI #260](https://github.com/Sinytra/ForgifiedFabricAPI/issues/260) is still OPEN** for "Fabric mods
-   built with Loom 1.14+" (labelled `1.21.x`). So even after the Loom bump, this class of bug is not
-   confirmed dead. Budget for it, and test the *packaged* jar (not `runClient`) in a real NeoForge+Connector
-   client.
-3. 🟠 **Ambiguous bare intermediary method names in mixin annotations ([Connector #2134](https://github.com/Sinytra/Connector/issues/2134), OPEN).**
-   mcdebug ships `@Inject(method=["method_25295"])` with **no descriptor** on `GuiGraphics`, whose `blit`
-   family is heavily overloaded. With `injectors.defaultRequire = 1`, a bad pick = client startup failure.
-   → **Mitigation: add explicit method descriptors to every `method=` in the mixin annotations** (also removes
-   the ambiguity class entirely). Cheap.
-4. 🟠 **Nondeterministic transformation output ([Connector #2295](https://github.com/Sinytra/Connector/issues/2295), OPEN).**
-   FART race condition; *"1 broken output in 8 samples"*; already observed **on this exact consumer stack**
-   (IC2 Refabricate + FLK) and reported by the mcdebug account. Manifests as random `AbstractMethodError`.
-   → Not mitigable from mcdebug's side. Accept as a known flakiness source; a fix PR is linked in the issue.
-5. 🟠 **Client-plane scope is where the risk concentrates.** Every open client-side Connector bug I found
-   (`onInitializeClient` timing vs NeoForge model layers [#2313], `BlockColors` rewrites [#2169], `ItemStack`
-   mixin failure [#2151]) is on the *client*. And Carpet — the closest Fabric analogue of a scriptable
-   server tool — is **failing** on 1.21.1 via Probe.
-   → **Mitigation: ship/stage in two steps. Validate the server plane (NeoForge dedicated server + Connector +
-   FFAPI + mcdebug) first — it is low-risk and self-contained. Treat the client plane (`gui.*`) as a separate
-   milestone validated in a real client.**
-6. 🟡 **`gui.hotswap` will likely degrade**: it calls `FabricLauncherBase.getLauncher()` (an impl/internal
-   class) expecting Knot semantics; under Connector that is `FabricLauncherFML`. The code is already guarded
-   (falls back to raw file bytes; null-guards the mixin transformer), so expect "hotswap reports failure"
-   rather than a crash — but **[unverified]**.
-7. 🟡 **Kotlin-runtime coexistence**: if the user's pack has *Kotlin for Forge* alongside FLK, historic crashes
-   ([#1654](https://github.com/Sinytra/Connector/issues/1654), [#1671](https://github.com/Sinytra/Connector/issues/1671), both closed).
-   Probe tests FLK alone. **[unverified]** for FLK 1.14.x + current Kotlin for Forge.
+1. 🔴 **Loom 1.15 mixin 重映射问题，可主动修复。**
+   mcdebug 的 `gradle.properties` 使用 `loom_version=1.15-SNAPSHOT`，JAR 含 intermediary 名称且无 refmap。
+   [FFAPI #266](https://github.com/Sinytra/ForgifiedFabricAPI/issues/266) 记录 tiny-remapper
+   丢失方法描述符造成的崩溃，涉及 `@WrapOperation`，mcdebug 则只用 `@WrapOperation` / `@Inject`。
+   维护者确认 Loom 1.16 仍有问题，1.17 恢复描述符。
+   **措施：将 Loom 升到 ≥ 1.17**，成本低、风险低，也能独立改善构建质量。
+2. 🔴 **[FFAPI #260](https://github.com/Sinytra/ForgifiedFabricAPI/issues/260) 仍未关闭**，
+   涉及 Loom 1.14+ 构建的 Fabric 模组，标签为 `1.21.x`。
+   即使升级 Loom，也不能确认此类问题已消失。应预留排查成本，
+   在真实 NeoForge + Connector 客户端测试**打包后的 JAR**，不能只测 `runClient`。
+3. 🟠 **Mixin 注解的裸 intermediary 方法名有歧义**，见未关闭的
+   [Connector #2134](https://github.com/Sinytra/Connector/issues/2134)。
+   mcdebug 在大量重载的 GuiGraphics 上使用无描述符 `@Inject(method=["method_25295"])`，
+   `injectors.defaultRequire = 1` 会把选错目标变成启动失败。
+   **措施：为每个 mixin `method=` 添加显式描述符**，可低成本彻底消除此类歧义。
+4. 🟠 **非确定性转换输出**，见未关闭的
+   [Connector #2295](https://github.com/Sinytra/Connector/issues/2295)。
+   FART 竞态实测 8 个样本中 1 个损坏，已在同一 IC2 Refabricate + FLK 消费者组合中出现，
+   由 mcdebug 账号报告，表现为随机 `AbstractMethodError`。
+   mcdebug 侧无法规避，只能视为已知不稳定来源；问题中附有修复 PR。
+5. 🟠 **风险集中于客户端平面。** 找到的未关闭问题均在客户端，包含
+   `onInitializeClient` 与模型图层时序 #2313、BlockColors 改写 #2169、ItemStack mixin 失败 #2151。
+   最接近 Fabric 脚本化服务端工具的 Carpet 在 Probe 的 1.21.1 测试中也失败。
+   **措施：分两步验证与交付。** 先验证 NeoForge 专用服务端 + Connector + FFAPI + mcdebug，
+   服务端平面低风险且自包含；再把 `gui.*` 作为真实客户端中的单独里程碑。
+6. 🟡 **`gui.hotswap` 可能降级**：它通过内部 `FabricLauncherBase.getLauncher()` 期望 Knot 语义，
+   Connector 下实际为 FabricLauncherFML。代码已有原始文件字节回退和 mixin 转换器空值保护，
+   预期只会报告热替换失败而非崩溃，但仍为**[未验证]**。
+7. 🟡 **Kotlin 运行时共存**：Kotlin for Forge 与 FLK 曾导致崩溃，见已关闭的
+   [#1654](https://github.com/Sinytra/Connector/issues/1654)、
+   [#1671](https://github.com/Sinytra/Connector/issues/1671)。
+   Probe 只测 FLK 单独运行，FLK 1.14.x 与当前 Kotlin for Forge 共存仍为**[未验证]**。
 
-**Effort to a verdict: S.** Bump Loom → add mixin descriptors → build → run a NeoForge 1.21.1 dedicated server
-with Connector + FFAPI + mcdebug and exercise `server.status` / `world.*` / `storage.*` / `reflect.*`; then the
-same on a client and exercise `gui.status` / `gui.screenshot`. **That is a day or two of work to convert a
-"maybe" into a definitive yes/no**, and it produces a real answer instead of an estimate. Do the
-`currentRuntimeNamespace` check on the first boot — it gates everything else.
+**得到确定结论的工作量：小（S）。** 升级 Loom → 添加 mixin 描述符 → 构建 →
+在 NeoForge 1.21.1 专用服务端装 Connector + FFAPI + mcdebug，验证
+`server.status` / `world.*` / `storage.*` / `reflect.*`；随后在客户端验证 `gui.status` / `gui.screenshot`。
+**预计一两天即可将可能性转为明确可用或不可用的结论**，而非只给估算。
+第一次启动就检查 `currentRuntimeNamespace`，因为它是其他步骤的前提。
 
-**#2 — NATIVE MULTI-LOADER BUILD (Architectury or Stonecutter/Modstitch + a NeoForge source set).**
-Not "avoid a native port" — it *is* one — but it is the only path with **deterministic risk**, and it is the
-only path that could ever reach plain Forge 1.21.1.
+**第 2：原生多加载器构建，采用 Architectury 或 Stonecutter / Modstitch 加 NeoForge 源集。**
+这本身就是原生移植，但风险可控，也是最终支持原生 Forge 1.21.1 的唯一可能方向。
 
-- Architectury-loom **1.17** (2026-07-08) and Architectury API **13.0.11** (2026-07-23) are current and healthy
-  for 1.21.1, but **for Fabric + NeoForge only** — no Forge 1.21.1, and Architectury's own docs no longer
-  mention Forge as a target. Architectury also has **no first-class Kotlin support** (zero `kotlin` matches in
-  loom or docs), and the template generator repo is stale since 2023-11-12.
-- Effort is dominated **not** by the loader glue (a handful of lifecycle hooks, the transfer/storage mapping —
-  for which FFAPI's own `org.sinytra.fabric.transfer_api.compat` classes are a ready-made reference — and a
-  simplified `Mappings.kt`, since NeoForge runs Mojang-named and `MappingResolver` has no equivalent) but by
-  the **10-class client mixin set**: all currently intermediary-targeted and refmapless, re-pointed at Mojang
-  names and re-verified against NeoForge-patched `GuiGraphics`/`GameRenderer`/`Screen`/`RenderSystem`/
-  `Minecraft`, with `defaultRequire: 1` turning every miss into a startup failure and **no compatibility shim
-  available** for mixin targets.
-- Realistic effort: **M–L (weeks)**, mostly verification, not code.
-- **Do this after the Connector experiment, not instead of it** — the Connector experiment is what tells you
-  whether the client mixin set survives a different class-patch set *at all*, and the experiment is far cheaper
-  than the refactor.
-- Toolchain: if a **Forge** target is genuinely required, the only live option is a Stonecutter-based setup
-  (Gradle Plugin Portal: `dev.kikugie.stonecutter` `0.9.8`, 2026-08-31) — which is exactly what `mcpfabric`
-  uses to ship Fabric *and* NeoForge 1.21.1 jars from one tree — optionally starting from
-  `rotgruengelb/stonecutter-mod-template` (Fabric+NeoForge+Forge, pushed 2026-10-20). Modstitch
-  (`isxander`, last push 2026-04-01) is the (Neo)Forge-unifying alternative but its docs are thin.
+- Architectury Loom **1.17**，2026-07-08，以及 Architectury API **13.0.11**，2026-07-23，
+  在 1.21.1 仍活跃，但仅面向 Fabric + NeoForge，没有 Forge 1.21.1，官方文档也不再列 Forge。
+  Kotlin 没有专门支持，Loom 和文档搜索均无结果；模板生成仓库自 2023-11-12 起未更新。
+- 主要成本是 **10 个客户端 mixin 类**的改名和重新验证，加载器接缝本身只涉及少量生命周期钩子、
+  有 FFAPI `org.sinytra.fabric.transfer_api.compat` 可参考的存储映射，以及简化的 `Mappings.kt`。
+  NeoForge 已使用 Mojang 名称，不需要 MappingResolver 对应物。
+  Mixin 则须对 NeoForge 修补后的 `GuiGraphics` / `GameRenderer` / `Screen` / `RenderSystem` / `Minecraft`
+  逐个验证，`defaultRequire: 1` 使每次未命中都导致启动失败，且无兼容垫片可代替。
+- 现实工作量为 **中到大（M–L，数周）**，主要在验证而非编码。
+- 应在 Connector 试验后再做，不应取代该试验；先用较低成本确认 mixin 集合能否适应另一套类补丁，
+  才能合理评估重构成本。
+- 若确需 **Forge** 目标，仍活跃的选项是 Stonecutter：插件门户的
+  `dev.kikugie.stonecutter` `0.9.8`，2026-08-31。
+  mcpfabric 正是这样从同一源码树分发 Fabric 和 NeoForge 1.21.1 JAR。
+  可从 2026-10-20 推送、支持 Fabric + NeoForge + Forge 的 `rotgruengelb/stonecutter-mod-template` 起步。
+  Modstitch，由 isxander 维护、最后推送 2026-04-01，是统一 (Neo)Forge 工具链的另一选择，但文档较少。
 
-**#3 — KILT. Last. Wrong direction, wrong risk profile.**
-It is genuinely maintained (`v21.1.18`, 2026-10-28; tracks NeoForge 21.1.265) and it *is* download-able for
-1.21.1 — but it solves the mirror-image problem (*Forge mods on Fabric*), so it cannot put mcdebug on a
-NeoForge server. Using it means asking the user to **migrate their server from NeoForge to Fabric+Kilt**, and
-the project's own README calls Kilt *"highly unstable, may break worlds, may cause crashes"*, published as
-Alpha on Modrinth. It also has **no public compatibility matrix** comparable to Connector's Probe service, so
-risk for a given modpack is anecdotal. For a mod whose entire value is trustworthy assertions, this is the
-worst risk/benefit of the four.
+**第 3：Kilt，方向不符、风险收益最差。**
+它仍维护，`v21.1.18` 发布于 2026-10-28，对应 NeoForge 21.1.265，也能下载 1.21.1 构建。
+但它解决的是 Forge 模组在 Fabric 上运行，不能把 mcdebug 放到 NeoForge 服务端。
+使用它意味着要求用户把服务端从 NeoForge **迁到 Fabric + Kilt**。
+README 自称极不稳定、可能损坏世界或崩溃，Modrinth 以 Alpha 发布；
+没有类似 Probe 的公开兼容性矩阵，特定整合包风险只能依赖零散案例。
+对以可信断言为核心的模组，这是四种方案中风险收益最差的一种。
 
-⚠️ **But note the different question Kilt *does* answer**: "how does a Fabric-native mcdebug test a machine
-from a Forge-family mod?" — that is precisely why mcdebug's archived 1.20.1 line used a *"Kilt container test
-environment"* (AGENTS.md, header + §12). If the real requirement is "our own CI/tests need to drive a
-Forge-mod machine", Kilt remains a legitimate tool; it is just not a distribution channel for Forge-family
-users.
+⚠️ **Kilt 能回答另一个问题：Fabric 原生 mcdebug 如何测试 Forge 系模组的机器？**
+这正是已归档 1.20.1 线使用 Kilt 容器测试环境的原因，见 AGENTS.md 开头和第 12 节。
+若真实需求是自己的 CI 或测试驱动 Forge 模组机器，Kilt 仍是合理工具，
+只是它不是向 Forge 系用户分发 mcdebug 的渠道。
 
-**#4 — NATIVE FORGE 1.21.1 PORT. Highest cost, and the ecosystem is actively against it.**
-Forge 52.1.20 for 1.21.1 exists, but nothing in the compatibility ecosystem targets it: no Connector build, no
-Architectury API build, no Architectury docs mention. Undertaking this means betting on a loader the
-multi-loader toolchain has already left, for one mod version line, with the same 10-class client mixin problem
-as #2 plus a second, more divergent patch set. **Not recommended.**
+**第 4：原生 Forge 1.21.1 移植，成本最高且缺少生态配合。**
+Forge 52.1.20 虽存在，兼容生态均不面向它：没有 Connector 构建、Architectury API 构建或对应文档。
+投入意味着为单一模组版本线使用已被多加载器工具链放下的加载器，
+除第 2 条的 10 类 mixin 问题外，还要适应第二套差异更大的补丁集。**不推荐。**
 
-### Recommended sequence
+### 建议执行顺序
 
-1. **Cheap hardening first (hours, helps every path):** bump Loom `1.15-SNAPSHOT` → ≥ `1.17`; add explicit
-   method descriptors to every mixin `method=` value in `src/client/resources/mcdebug.client.mixins.json`'s
-   classes. Both fixes are justified by FFAPI #266 and Connector #2134 *independently of this decision*.
-2. **Server-plane Connector spike (hours):** NeoForge 1.21.1 dedicated server + Connector `2.0.0-beta.17+1.21.1`
-   + FFAPI `0.116.15+2.3.6+1.21.1` + FLK + mcdebug. On first boot, log
-   `FabricLoader.getInstance().mappingResolver.currentRuntimeNamespace`. Then run `server.status`, `world.*`,
-   `storage.*` (Transfer API), and `reflect.*` (both a Mojang and an intermediary class name) over the unix
-   socket and over TCP.
-3. **Client-plane spike (a day or two):** same stack on a real client; `gui.status`, `gui.screenshot`,
-   `gui.click --slot`, `gui.screen`, and specifically `gui.hotswap`. Watch for the Mixin Safeguard screen — its
-   appearance *is* the answer.
-4. **Decide.** If both spikes pass, document "Connector is a supported configuration on NeoForge 1.21.1" with
-   the exact version pins, and add it to the smoke scripts. If the client spike fails on mixins, the failure
-   mode is loud and specific, and you will know whether it is fixable (rename/re-describe annotations) or
-   structural — which is exactly the information needed to cost option #2 properly.
-5. **Plain Forge 1.21.1:** tell users the truth — move to NeoForge, or there is no path.
+1. **先做低成本加固，按小时计，对各路线都有帮助**：Loom `1.15-SNAPSHOT` 升到 ≥ `1.17`，
+   为 `src/client/resources/mcdebug.client.mixins.json` 所列类的每个 mixin `method=` 添加显式描述符。
+   两项改动独立于路线选择，分别由 FFAPI #266 和 Connector #2134 支持。
+2. **服务端平面 Connector 验证试验，按小时计**：NeoForge 1.21.1 专用服务端 +
+   Connector `2.0.0-beta.17+1.21.1` + FFAPI `0.116.15+2.3.6+1.21.1` + FLK + mcdebug。
+   首次启动记录 `FabricLoader.getInstance().mappingResolver.currentRuntimeNamespace`，
+   再通过 Unix 套接字与 TCP 测试 `server.status`、`world.*`、Transfer API `storage.*`、
+   使用 Mojang 和 intermediary 两种类名的 `reflect.*`。
+3. **客户端平面验证试验，一两天**：在真实客户端使用同一组合，测试 `gui.status`、
+   `gui.screenshot`、`gui.click --slot`、`gui.screen`，尤其是 `gui.hotswap`。
+   注意 Mixin 安全保护警告，它是否出现就是关键结果。
+4. **作出决定**：两次试验均通过后，记录 NeoForge 1.21.1 支持 Connector 配置并固定精确版本，
+   再加入冒烟脚本。若客户端因 mixin 失败，错误会具体且明确，
+   可判断是重命名或补描述符即可修复，还是结构性问题，从而合理估算第 2 条路线。
+5. **原生 Forge 1.21.1**：如实说明，迁到 NeoForge，否则没有现成路径。
 
-### Uncertainty ledger (explicitly unverified)
+### 明确尚未验证的事项
 
-- `FabricLoader.getInstance().mappingResolver.currentRuntimeNamespace == "mojang"` at runtime under Connector
-  1.21.1 — **verified only as a constant + config class in source, not at runtime.** This gates the entire
-  Connector verdict.
-- Whether `gui.hotswap` degrades gracefully or throws under `FabricLauncherFML`.
-- FLK 1.14.x coexisting with current *Kotlin for Forge* in one NeoForge pack.
-- Whether the *current* FFAPI 1.21.1 build actually loads a Loom-1.15/Loom-1.17-built, refmapless,
-  `@WrapOperation`-heavy mod — i.e. whether #260 still bites after #266's tiny-remapper fix.
-- Kilt's current documented support matrix beyond its (stale) README; no public compatibility data exists.
-- The Stonecutter GitHub `pushed_at` (2025-12-25) vs published plugin version 0.9.8 (2026-08-31) discrepancy.
-- Any official NeoForge "Fabric compatibility" claim — **I found none**; do not assert one.
-- mcpfabric's NeoForge build contents/licence hygiene and its telemetry statement's scope.
+- Connector 1.21.1 运行时是否满足
+  `FabricLoader.getInstance().mappingResolver.currentRuntimeNamespace == "mojang"`：
+  **只确认了源码常量与配置类，没有运行时确认**，这是整个 Connector 结论的前提。
+- `gui.hotswap` 在 FabricLauncherFML 下是正常降级还是抛错。
+- FLK 1.14.x 与当前 Kotlin for Forge 在同一 NeoForge 整合包中共存。
+- 当前 FFAPI 1.21.1 是否能真正加载由 Loom 1.15 / 1.17 构建、无 refmap 且大量使用
+  `@WrapOperation` 的模组，即 #266 的 tiny-remapper 修复后是否仍受 #260 影响。
+- Kilt 过时 README 之外的当前文档支持矩阵，未找到公开兼容性数据。
+- Stonecutter GitHub 的 `pushed_at`，2025-12-25，与插件 0.9.8 发布时间 2026-08-31 的矛盾。
+- NeoForge 官方原生兼容 Fabric 的说法，**本次未找到**，不应断言。
+- mcpfabric NeoForge 构建内容、许可证处理，以及遥测声明的适用范围。

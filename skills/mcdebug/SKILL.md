@@ -1,99 +1,95 @@
 ---
 name: mcdebug
-description: Drive a live Minecraft (Minecraft 26.3 on Fabric or NeoForge) game through the mcdebug CLI (`mdb` / `java -jar mcdebug-cli.jar`) - set blocks, NBT, inventories, storages, entities on the server plane; screenshot, click, hover and hot-reload GUI Screens on the client plane; assert with wait.until. Use when testing or debugging a mod's blocks, machines or GUIs in a running game, or when operating a server through its mcdebug RPC socket.
+description: 通过 mcdebug CLI（mdb / java -jar mcdebug-cli.jar）操作正在运行的 Minecraft 26.3（Fabric 或 NeoForge）：在服务端平面设置方块、NBT、库存、存储和实体，在客户端平面截图、点击、悬停及热重载 GUI Screen，并用 wait.until 断言。用于测试或调试运行中模组的方块、机器、GUI，或通过 mcdebug RPC 套接字操作服务端。
 ---
 
-# mcdebug CLI
+# mcdebug CLI 使用说明
 
-This build targets Minecraft 26.3 (JDK 25 for the game; CLI Java 17+). It keeps the CLI’s
-existing GLFW numeric key codes and 0=left/1=right/2=middle mouse buttons, translating them to SDL.
+本构建面向 Minecraft 26.3，游戏需要 JDK 25，CLI 支持 Java 17+。
+保留 CLI 原有的 GLFW 数值键码和鼠标按钮编号（0 左键 / 1 右键 / 2 中键），内部转换为 SDL。
 
-mcdebug is a mod (one jar, server + client) that serves JSON-RPC over a Unix socket; the CLI talks
-to it. Every subcommand has a detailed `--help` with schemas and pitfalls: **read it before
-guessing options.** `mcdebug raw <method> '<json>'` reaches any RPC, including ones without a
-subcommand.
+mcdebug 是通过 Unix 套接字提供 JSON-RPC 的模组，一个 JAR 同时包含服务端和客户端，CLI 与之通信。
+每个子命令的 `--help` 都包含详细结构和注意事项，**先读帮助，不要猜选项**。
+`mcdebug raw <method> '<json>'` 可调用任意 RPC，包括没有专用子命令的方法。
 
-## 0. Find or install the CLI
+## 0. 查找或安装 CLI
 
-Use the first one that exists: `mcdebug` on `PATH`, `mdb` on `PATH` (native build from
-`scripts/build-native.sh`, ~11 ms start), or a cached jar under
-`${XDG_DATA_HOME:-~/.local/share}/mcdebug/<version>/mcdebug-cli.jar`.
+按顺序使用第一个可用入口：`PATH` 中的 `mcdebug`、`PATH` 中的 `mdb`
+（由 `scripts/build-native.sh` 构建的原生程序，约 11 毫秒启动），或缓存中的
+`${XDG_DATA_HOME:-~/.local/share}/mcdebug/<version>/mcdebug-cli.jar`。
 
-If none is there, download the release jar into that cache (one directory per version) and
-put a launcher on `~/.local/bin` (on `PATH` in most distros). It needs Java 17+ (`java -version`;
-`gui hotswap` additionally needs a full JDK). Pick the version of the mod in the game
-(`modVersion` in `status`), or the newest release:
+若均不存在，把发布 JAR 下载到该缓存，每个版本使用独立目录，再将启动脚本放入
+`~/.local/bin`，多数发行版默认将其加入 `PATH`。需要 Java 17+，用 `java -version` 检查；
+`gui hotswap` 另需完整 JDK。选择游戏内模组的版本，即 `status` 中的 `modVersion`，或最新发布版本：
 
 ```bash
-V=0.6.3   # newest: gh release list -R yu1745/mcdebug -L 1, or the GitHub releases page
+V=0.6.3   # 最新版本见 gh release list -R yu1745/mcdebug -L 1 或 GitHub 发布页面
 D="${XDG_DATA_HOME:-$HOME/.local/share}/mcdebug/$V"
 U="https://github.com/yu1745/mcdebug/releases/download/v$V"
 mkdir -p "$D" "$HOME/.local/bin"
 curl -fL -o "$D/mcdebug-cli.jar" "$U/mcdebug-cli.jar"
-echo "$(curl -fsL "$U/mcdebug-cli.jar.sha256")  $D/mcdebug-cli.jar" | sha256sum -c -   # must say OK
+echo "$(curl -fsL "$U/mcdebug-cli.jar.sha256")  $D/mcdebug-cli.jar" | sha256sum -c -   # 必须显示 OK
 printf '#!/bin/sh\nexec java -jar "%s" "$@"\n' "$D/mcdebug-cli.jar" > "$HOME/.local/bin/mcdebug"
 chmod +x "$HOME/.local/bin/mcdebug"
 mcdebug --version
 ```
 
-Releases before v0.6.3 have no `mcdebug-cli.jar` asset. From a source checkout instead:
-`./gradlew :cli:copyCliJar` writes `./mcdebug-cli.jar`. The CLI carries the mod jar of **both
-loaders** and this skill, all of its own version: `mcdebug jar --output <gameDir>/mods` installs
-the Fabric mod, `mcdebug jar --loader neoforge --output <gameDir>/mods` the NeoForge one (each
-removes the other/older jars), `mcdebug skill` refreshes this skill to match the CLI.
-`mcdebug skill --name neoforge-fabric-port` installs the bundled port workflow and all its reference files.
+v0.6.3 之前的发布没有 `mcdebug-cli.jar` 附件。也可从源码构建：
+`./gradlew :cli:copyCliJar` 会生成 `./mcdebug-cli.jar`。
+CLI 内嵌**两个加载器**的模组 JAR 和本技能，均与 CLI 同版本：
+`mcdebug jar --output <gameDir>/mods` 安装 Fabric 模组，
+`mcdebug jar --loader neoforge --output <gameDir>/mods` 安装 NeoForge 模组，
+两者都会移除另一加载器或旧版本的 JAR。`mcdebug skill` 将本技能刷新为 CLI 对应版本。
+`mcdebug skill --name neoforge-fabric-port` 安装内嵌移植工作流和全部参考文件。
 
-Below, `mcdebug` means whichever of these you found.
+下文的 `mcdebug` 代表找到的任一入口。
 
-## 1. Get a target
+## 1. 选择目标
 
-- **Own dev client (preferred for mod work)**: a managed session starts the project's `runClient`
-  and finds both planes for you:
+- **自有开发客户端，模组开发时优先使用**：托管会话会启动工程的 `runClient` 并发现两个平面：
+
   ```bash
-  mcdebug jar --output run/mods                     # same-version mod jar into the consumer's mods/ (removes old ones)
-  mcdebug session start dev --project . --world "New World"                  # world = saves/ dir name
-  mcdebug --session dev status                      # every later call: --session dev
-  mcdebug session stop dev                          # owned sessions only; saves the world
+  mcdebug jar --output run/mods                     # 将同版本模组装入消费者的 mods/，移除旧版本
+  mcdebug session start dev --project . --world "New World"                  # world 是 saves/ 下的目录名
+  mcdebug --session dev status                      # 后续每次调用都带 --session dev
+  mcdebug session stop dev                          # 仅限自有会话，会保存世界
   ```
-  Multi-project builds: `--game-dir core/run` is enough, the task becomes `:core:runClient` (a bare
-  `runClient` there would start every subproject's client at once). One client per gameDir:
-  a second one falls back to the title screen ("session.lock: already locked").
-  Startup to `world_ready` takes tens of seconds (project-dependent). If MC or the build dies first, `start` returns `failed`
-  at once with the crash line in `lastError`; `session logs dev` has the full output. A Fabric
-  loader error (remap, missing dependency) also gives `failed`, but its error window can keep the
-  JVM open: `session stop --force`.
-  `--width/--height` lose to `programArgs '--width' ...` in the project's `loom.runs.client`
-  (the session record still shows the requested size; `gui status` shows the real window).
-  `--render` defaults to **demand** for a managed session (the mod's own global default is
-  continuous); pass `--render continuous` when a task needs a normal continuous frameloop.
-  States: `starting` → `client_ready` (title screen) → `world_ready` (needs `--world`, must be
-  in-world *and* singleplayer), then `stopping`/`stopped`; failures are `failed` (see `lastError`)
-  and `dead`. `session logs NAME --lines N` tails the session log (the option is `--lines`; there
-  is no `--tail`).
-  After `session stop` the discovery files (`mcdebug/port`, `clientPort`, locks, `client.json`,
-  `session-stop.json`) stay; only the sockets are removed, so an existing `port` file does not mean
-  a live endpoint. The Gradle wrapper of a stopped session can linger ~10 s after `stop` already
-  reports `stopped`: an immediate "no leftover process" check can false-alarm, and an immediate
-  restart in the same gameDir can collide with it.
-  Records live in `$XDG_STATE_HOME/mcdebug/sessions/<name>.json` (`--sessions-dir` to change, or the
-  `MCDEBUG_SESSIONS_DIR` environment variable);
-  `session remove NAME` forgets an attached record any time (the game keeps running) and an owned
-  one once it is stopped/failed/dead. Never delete lock or discovery files by hand: they guard
-  against driving the wrong JVM.
-  Transport flags are per plane: `--socket`/`--tcp` address the **server** plane,
-  `--client-socket`/`--client-tcp` the client plane, and `--session NAME` routes each call by its
-  method. Passing `--socket` to a `gui.*` method is silently ignored (that call still uses client
-  discovery), and discovery without an explicit flag resolves relative to the **current directory**
-  — run from the game/project directory or pass absolute paths.
-  A unix socket path over the OS limit (~107 bytes, deep gameDirs) or a JVM without AF_UNIX makes
-  the mod fall back to loopback TCP; discovery then holds `tcp:127.0.0.1:N` and the CLI follows it.
-  That is normal, not an error.
-- **Existing server/client**: `--socket <gameDir>/mcdebug/socket` (server plane),
-  `--client-socket <gameDir>/mcdebug/clientSocket` (client plane), or `--tcp host:port` across
-  machines. Running inside the gameDir discovers them automatically.
-- `mcdebug status` / `mcdebug gui status --brief` first. A CLI/mod version mismatch prints a warning.
 
-## 2. Server plane: set up and assert
+  多工程构建中，指定 `--game-dir core/run` 即可，任务会变为 `:core:runClient`；
+  裸 `runClient` 会同时启动各子工程的客户端。每个 gameDir 只运行一个客户端，
+  第二个实例会因 `session.lock: already locked` 回到标题界面。
+  到达 `world_ready` 通常需要几十秒，取决于工程。若 MC 或构建提前退出，`start` 会立即返回
+  `failed`，`lastError` 包含崩溃行，`session logs dev` 提供完整输出。
+  Fabric 加载器错误，如重映射或缺少依赖，也会返回 `failed`，但错误窗口可能使 JVM 继续存活，
+  此时使用 `session stop --force`。
+  `--width/--height` 的优先级低于工程 `loom.runs.client` 中的 `programArgs '--width' ...`。
+  会话记录仍显示请求尺寸，`gui status` 显示实际窗口。
+  托管会话的 `--render` 默认是 **demand**，模组全局默认仍是 continuous。
+  任务需要正常连续帧循环时传入 `--render continuous`。
+
+  状态为 `starting` → `client_ready`（标题界面）→ `world_ready`（需要 `--world`，且必须已进入单人世界），
+  随后为 `stopping` / `stopped`；失败状态为 `failed`（检查 `lastError`）和 `dead`。
+  `session logs NAME --lines N` 读取日志尾部，选项是 `--lines`，不存在 `--tail`。
+  `session stop` 后保留发现文件 `mcdebug/port`、`clientPort`、锁、`client.json`、`session-stop.json`，
+  只移除套接字，因此 `port` 文件存在不代表端点存活。
+  即使停止已报告 `stopped`，Gradle 包装进程仍可能残留约 10 秒；立即检查残留进程可能误报，
+  在同一 gameDir 立即重启也可能冲突。
+
+  记录位于 `$XDG_STATE_HOME/mcdebug/sessions/<name>.json`，可用 `--sessions-dir` 或环境变量
+  `MCDEBUG_SESSIONS_DIR` 更改。`session remove NAME` 可随时移除连接会话记录，游戏继续运行；
+  自有会话须先到达 stopped / failed / dead。不要手动删除锁或发现文件，它们用于防止操作错误的 JVM。
+  传输选项按平面区分：`--socket` / `--tcp` 指向**服务端**，
+  `--client-socket` / `--client-tcp` 指向客户端，`--session NAME` 按方法自动路由。
+  向 `gui.*` 传 `--socket` 会被静默忽略，仍走客户端发现；未显式指定时，以**当前目录**发现端点，
+  因此应在游戏或工程目录执行，或使用绝对路径。
+  Unix 套接字路径超过操作系统上限，通常约 107 字节，或 JVM 不支持 AF_UNIX 时，
+  模组会回退到回环 TCP，发现文件记录 `tcp:127.0.0.1:N`，CLI 自动遵循，此为正常行为。
+- **已有服务端或客户端**：使用 `--socket <gameDir>/mcdebug/socket` 连接服务端平面，
+  `--client-socket <gameDir>/mcdebug/clientSocket` 连接客户端平面，或 `--tcp host:port` 跨机器连接。
+  在 gameDir 中执行可自动发现。
+- 先运行 `mcdebug status` / `mcdebug gui status --brief`。CLI 与模组版本不一致会输出警告。
+
+## 2. 服务端平面：布置与断言
 
 ```bash
 mcdebug raw world.setBlock '{"pos":[100,64,100],"block":"mymod:machine"}'
@@ -103,333 +99,286 @@ mcdebug raw be.getNbt      '{"pos":[100,64,100]}'
 mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeoutTicks":400}'
 ```
 
-- Block state: `"stateProps":{"facing":"east"}` (or `"state"`; CLI `--state k=v`, repeatable);
-  properties you leave out keep their default. Without properties the block takes the shape its
-  neighbours imply, like `/setblock` (wire connects, fences join); placement logic does not run
-  otherwise (no facing toward a player, no item-placement side effects). Put things on a solid
-  floor: wire, levers, gravity blocks and the player all drop off air.
-- Positions are `[x,y,z]`; boxes `{"from":[..],"to":[..]}`, both corners inclusive, passed under
-  a `box` key: `raw scan.findEntities '{"box":{"from":[0,60,0],"to":[10,80,10]}}'`.
-- `inv.*` only reaches block-entity containers. The **player inventory**: `scan.findEntities`
-  (box around the player) for the uuid, then `raw entity.getNbt '{"uuid":"..."}'` -> `Inventory[]`
-  (its `Slot` is the player's own numbering), or `gui screen` while a container GUI is open.
-  To give the player an item: `raw server.runCommand '{"command":"give @p minecraft:diamond 4"}'`
-  (any server command works this way; it is also how to clear, teleport, set time).
-- `storage list` shows which handles a block exposes. `storage.*` is the generic item/fluid/energy API (handles `vanilla:inventory`, `fabric:item`,
-  `fabric:fluid`, `teamreborn:energy` — the same handle names on both loaders, the implementation
-  behind them is Fabric's Transfer API resp. NeoForge capabilities).
-  **Amounts use each loader's native unit** — read `server.status.fluidUnit` (`droplet` on Fabric,
-  81000 = 1 bucket; `mb` on NeoForge, 1000 = 1 bucket) and `server.status.energyUnit` (`E` on
-  Fabric, `FE` on NeoForge) before comparing numbers across loaders. On NeoForge, `fluid.*`'s
-  `--index` only selects which tank is *reported* (fill/drain go through the whole
-  `IFluidHandler`), and `supportsInsertion/supportsExtraction` describe the **current** state
-  (a full tank answers `supportsInsertion:false` although it can be drained) while Fabric's are
-  capability flags — do not compare the two across loaders, and do not treat `false` as "this
-  storage can never take it".
-  `reflect.*` uses official names on both loaders in 26.3; short names are Fabric-only. Both `reflect get`
-  and `reflect set` take `--path`; `set` writes the **last** segment (`--path overworld.dayTime`
-  writes `dayTime` on `overworld`), and `--field` is the direct form. Big collections come back
-  summarised: a ref answer carries `size` and, when the summary was cut, `truncated:true` +
-  `returned:N`; an inline plain-value array appends a final `{"$truncated":<how many more>}`
-  element. Read `size` before concluding a key does not exist. Page through the rest with `--limit N` (1..10000) and
-  `--offset M` on `reflect get`/`call`: e.g. every recipe id is
-  `reflect get --root server --path 'recipeManager.byName.keySet()' --limit 10000`. To keep mobs still between reflect
-  calls (AI moves them every tick), run `/tick freeze` first and `/tick unfreeze` after.
-  Many commands at once: put them in a world datapack function (`<world>/datapacks/<p>/data/<ns>/function/x.mcfunction`,
-  `functions/` on 1.20.x), `reload`, then one `server.runCommand` of `function <ns>:x`; read results back with one scan.
-  `inserted`/`extracted` can be far below `amount`: the block's own transfer limit applies, and
-  it is usually **per tick**, so repeating the call within the same tick (a tight loop, `--batch`)
-  gets 0. `remaining` is about this call only; read the result back with `storage get`. To fill
-  quickly, write the block entity's NBT instead of looping.
-- **Entities on a server without players do not stay**: vanilla despawns mobs with no player
-  nearby (measured ~3 s on a dedicated server, even with `PersistenceRequired`), so
-  `entity spawn` -> `scan.findEntities` can look broken when the entity is simply gone. Pad the
-  floor (spawn does **not** snap to the ground: a pig dropped 120 -> 111), keep the whole
-  spawn-assert sequence in one `-c` batch (one round trip, sub-second), and re-check the entity
-  count with `scan.findEntities` before concluding anything.
-- **Slow transformations — fast-forward, don't wait in real time**: for anything that takes MC
-  minutes/days (crop growth, machines with long recipes, environment-driven conversion), use
-  `mcdebug wait until "<pred>" --timeout-ticks 72000 --sprint`: the server requests a vanilla
-  `/tick sprint` budget (timeout + slack) and runs its own ticks at full speed; the sprint stops
-  automatically on match, timeout or disconnect. Manual variants through the same vanilla
-  engine: `raw server.runCommand '{"command":"/tick sprint 3d"}'` (bounded burst, auto-stops;
-  `"/tick sprint stop"` ends early) or `"/tick rate 200"` for a sustained rate (**no
-  auto-revert** — restore with `/tick rate 20`). `server health` shows the real TPS while
-  accelerated (cap follows the target rate). Only tick-driven state accelerates: wall-clock
-  mod cooldowns (`System.currentTimeMillis`-style) do not; don't mix manual `/tick sprint` with
-  `--sprint`; on an integrated server the game must not be paused.
-- Item arguments: `--nbt` is the **`minecraft:custom_data` compound only** (`inv.getSlot` echoes
-  it back, so "it round tripped" does not prove the mod read it). Registry-backed or vanilla data
-  (enchantments, stored enchantments, potion contents, damage, custom name...) goes through
-  `--components` / `"components"`, the vanilla patch form:
-  `--components '{"minecraft:enchantments":{"levels":{"minecraft:unbreaking":3}}}'`, `"!minecraft:id":{}`
-  removes a default. Every item-taking command has it (`world use-on-block/use-item/attack-block/...`,
-  `inv set-slot/insert`, `storage insert/extract/transfer --item`, armor/stack JSON objects), and
-  every returned stack shows its non-default components under `components` (custom data stays
-  under `nbt`; components that cannot be encoded are listed under `components."#errors"`).
-- Players: `status` lists real players (`playerList`: name, uuid, dim, pos) — use the uuid for
-  `entity teleport/get-nbt`.
-- Server-side menus (`screen open-block`) first try the block's `MenuProvider`; when the loader
-  rejects it (Fabric extended screen handlers, menus that write extra open data) mdb right-clicks
-  the block with an empty hand like a player, and the answer says `openedBy: menu_provider|use_block`.
-  `screen click-button --button N` presses a menu button (vanilla `clickMenuButton`: stonecutter
-  recipes, loom patterns, enchanting options, modded recipe/fluid selectors); `accepted` is the
-  menu's answer. Together with `inv set-slot` + `screen quick-move` a whole crafting-table-style
-  flow runs headless.
-- `wait until` can watch any storage: `storage[x,y,z].<item|fluid|energy|inventory>.<path into the
-  storage get answer>`, e.g. `'storage[0,64,0].fluid.tanks.0.amount >= 81000'`. Note `slots` lists
-  only non-empty slots (match on `slots.N.index`/`stack.item`, not on position).
-- **Verifying pixels against a scene**: a container/UI screen can be pinned down (`--mode gui` crops
-  to the GUI, `gui screen` gives slot rectangles), but a *world* frame cannot be cropped to a
-  region (no region flag) and weather/entity animation makes two unedited frames differ by tens of
-  percent of pixels. For world scenes assert logically (`gui open-block` succeeded, the draw log
-  contains the item you placed, the server reads the same state) and use `pixelHash` only as a
-  "this frame changed" signal; reserve `gui compare` for stable UI frames with `--ignore` regions.
-- Slot coordinates differ per plane: `gui screen` slots are **absolute GUI units** (the same space
-  as `gui click --gui`), while `screen.*`'s `slotDetails` (and the server-side menu) use
-  container-relative coordinates; convert with the container's `gui.left/top` from `gui screen`.
-  `snapshot`/`storage` report a slot's `capacity` as what that slot can actually take
-  (`min(slot limit, the stack's own max size)`, 64 for an empty slot), so it can change when the
-  slot's item changes — not a fixture to compare across different items.
-- `trace get` frames are `{tick, snapshot}` objects (the snapshot is the same shape `snapshot.*`
-  returns), so a trace is diffed by reading the field you care about per frame, not by comparing
-  whole frames.
-- `snapshot capture` is the method for taking a box snapshot (`snapshot.take` does not exist);
-  `snapshot --help` lists the operations, and there is no generic "list all RPC methods" command —
-  use per-group `--help` and this skill.
-- `be.setNbt` loads the given tag into the block entity; what happens to keys you leave out is
-  up to that block entity's load code. Write only the keys you mean to change. `be set-field`
-  writes one path, reads it back and answers `ok:false reason:NOT_APPLIED` when the load code
-  ignored it (unknown key, derived value); a plain number takes the existing field's numeric type.
-  A field can still change right after (the block's own tick): it was applied, the game moved on. One value may be
-  stored in several fields (a mirror, a split long): verify through the API that matters
-  (`storage get`, `inv.getSlot`, the GUI), not by reading the NBT back.
-- `raw craft.craft` takes `{"grid":[ ... 9 cells ... ]}` where each cell is **null or an object**
-  like `{"item":"minecraft:oak_log","count":1}` (a bare string is a shape error and answers
-  `-32602` naming `grid[i]`); `craft do <item>` is the shortcut that builds the grid for you.
-- Slot numbers of a block are its own: find input/output slots with `gui screen` (GUI open) or
-  `inv get-size` + `inv get-slot`, never by guessing. `inv extract` needs `--item` (it is a
-  storage-style extract); for a whole slot use `inv set-slot` with an empty item.
-- **Ticks are never driven**: wait with `wait.until` (predicate DSL: `be[..].<path>`,
-  `inv[..].<slot>.count`, `block[..].id`, `block[..].prop.lit == true`, `AND/OR/NOT`, `sum(inv[..].*.count)`; see `wait --help`).
-  **Prefer short waits** (a few seconds of ticks) and wait again if the condition is merely slow:
-  a timeout costs nothing and the next wait resumes, but a long wait on a wrong predicate (typo
-  in a path, wrong slot, machine without power) burns its full timeout for nothing. Before a
-  real wait, read the values the predicate uses (`be.getNbt`, `inv.getSlot`) or run it once with
-  `timeoutTicks` 1-20 and look at `lastValue`: a `null`/unexpected value means the predicate,
-  not the game, is wrong.
-  The one exception, `be.tick` (`ticks` 0..12000), runs a single block entity's ticker
-  synchronously: it is fast, but world time does not advance and neighbours do not tick, so
-  anything another block does to this one (pushing energy/items, redstone) does not happen. It
-  is the real ticker, so it consumes what a real tick consumes (energy, fuel, inputs).
-  `wait.until` answers with `ranTicks`: how long the condition actually took.
-- `trace start` records snapshots every `--interval-ticks` (`--max-ticks` auto-stops) and prints a
-  `traceId` for `trace get`/`trace stop`; it shares snapshot's `--include` (`block`, `inventory`,
-  `entity`, ...): machine slots need `inventory`. `trace get` returns every frame: pipe it through
-  a filter rather than reading it whole.
-- `snapshot capture` + `snapshot diff` compare state (metadata `/tick` `/time` ignored by default);
-  diff paths are JSON pointers into the capture (`/blocks/13/...` is an array index, not a
-  coordinate), and one stack can show up once per storage handle that exposes it; entities and
-  their bookkeeping NBT change on their own, so narrow `--include` to what the test is about;
-  captures hold absolute positions, so the same build at another origin is all "changed".
-- `fixture capture` saves a block region as JSON; block-entity contents (chest items, machine
-  NBT) only with `--include-nbt`. `fixture load --origin` places it anywhere.
-- `redstone`: `set-lever --powered|--unpowered`, `pulse`, `get-power` (`received`, per-side
-  `inputs`/`outputs`), `notify-neighbors` after edits that skipped updates.
-- `reflect` reaches anything else. Start from `--root server|level|be|entity|player` (`--pos`,
-  `--uuid`, `--name`, `--dim`), then `--path a.b[0].c`: a segment is a field, else a no-arg
-  method, else `getX`/`isX`; there are no arguments or expressions (use `reflect call`). Mojang
-  names work; `reflect resolve --root ... --path ... --members` lists what
-  is there. Objects come back as `{"$ref":N}`, usable by later commands (bounded, gone when the
-  server stops); prefer one `--path` over hopping ref to ref. `reflect set` writes a non-final
-  field (numbers take the field's type) and prints before/after; an ambiguous overload in
-  `reflect call` asks for `--arg-types int,long`. It bypasses the block's own logic: no sync,
-  no `setChanged`; prefer the normal APIs when they exist.
-  Client-side state (the open Screen, widgets, client caches) is the same command with
-  `--client`, rooted at `minecraft|screen|player|level|server`; e.g.
-  `reflect get --client --root screen --path 'children[0].message.string'`. Its refs live in
-  the client process, so `--client` must be on every call that uses one.
-  Client block entities carry **no items**: a client-side chest/machine BE always reads empty
-  even when the GUI shows contents (vanilla syncs inventories into the open menu, not the BE).
-  For what the client shows use `--root screen --path 'menu.slots[N].item'`; for truth use the
-  server plane. Server → client state is a packet behind: `gui settle` before reading.
-  `reflect set` on the client also skips `options.txt`: `OptionInstance.set` changes the live
-  value (visible in `gui status`/Video Settings) but nothing is written to disk.
-- `screen.*` is a **server-side fake-player menu** (slot JSON, no pixels). Pixels only come from `gui.*`.
+- 方块状态使用 `"stateProps":{"facing":"east"}` 或 `"state"`，CLI 使用可重复的 `--state k=v`。
+  省略的属性保留默认值。不指定属性时会按邻居调整形状，类似 `/setblock`，例如红石线连接和栅栏相连；
+  不执行其他放置逻辑，如朝向玩家或物品放置副作用。要有实心地板，红石线、拉杆、重力方块和玩家都会从空中掉落。
+- 坐标为 `[x,y,z]`；盒状区域为 `{"from":[..],"to":[..]}`，两角均包含在内，须放在 `box` 键下，
+  如 `raw scan.findEntities '{"box":{"from":[0,60,0],"to":[10,80,10]}}'`。
+- `inv.*` 只访问方块实体容器。访问**玩家背包**时，先用玩家周围的 `scan.findEntities` 获得 UUID，
+  再通过 `raw entity.getNbt '{"uuid":"..."}'` 读取 `Inventory[]`，其中 `Slot` 是玩家自身编号；
+  或在容器 GUI 打开时使用 `gui screen`。
+  给玩家物品使用 `raw server.runCommand '{"command":"give @p minecraft:diamond 4"}'`；
+  清空、传送、设置时间等任意服务端命令也可通过此方式执行。
+- `storage list` 显示方块暴露的句柄。`storage.*` 是通用物品、流体和能量 API，
+  句柄为 `vanilla:inventory`、`fabric:item`、`fabric:fluid`、`teamreborn:energy`，
+  两个加载器名称相同，底层分别由 Fabric Transfer API 或 NeoForge 能力实现。
+  **数量使用加载器原生单位**，跨加载器比较前先读取 `server.status.fluidUnit`：
+  Fabric 为 `droplet`，81000 = 1 桶；NeoForge 为 `mb`，1000 = 1 桶。
+  能量读取 `server.status.energyUnit`，Fabric 为 `E`，NeoForge 为 `FE`。
+  NeoForge 的 `fluid.* --index` 只选择**报告**哪个罐，填充与抽取通过整个 `IFluidHandler` 路由；
+  `supportsInsertion/supportsExtraction` 表示**当前状态**，例如满罐返回 `supportsInsertion:false` 但仍可抽取，
+  Fabric 则使用能力标志。不要跨加载器比较这两个值，也不要将 false 理解为永远不接收。
+  26.3 两个加载器的 `reflect.*` 均使用官方名称，只有 Fabric 支持短类名。
+  `reflect get` 和 `reflect set` 均接收 `--path`；`set` 写入**最后**一段，
+  例如 `--path overworld.dayTime` 写入 overworld 的 dayTime；`--field` 是直接形式。
+  大集合返回摘要，引用含 `size`，被截断时附带 `truncated:true` 和 `returned:N`；
+  内联普通值数组以 `{"$truncated":<how many more>}` 结束。
+  判断键不存在前先读 `size`，通过 `reflect get` / `call` 的 `--limit N`（1..10000）和 `--offset M` 分页。
+  例如读取全部配方 ID：`reflect get --root server --path 'recipeManager.byName.keySet()' --limit 10000`。
+  要使生物在多次反射调用间不移动，先 `/tick freeze`，完成后 `/tick unfreeze`。
+  大量命令可写入世界数据包函数 `<world>/datapacks/<p>/data/<ns>/function/x.mcfunction`，
+  1.20.x 使用 `functions/`，执行 `reload` 后一次 `server.runCommand` 调用 `function <ns>:x`，再用一次扫描读取结果。
+  `inserted` / `extracted` 可能远小于 `amount`，因为方块自身通常有**每 tick** 传输限制；
+  同一 tick 中紧密循环或 `--batch` 重试会得到 0。`remaining` 只描述本次调用，应用 `storage get` 复查。
+  想快速填满时应写方块实体 NBT，不要反复调用传输。
+- **没有玩家的服务端不会持续保留实体**：原版会移除附近无玩家的生物，专用服务端实测约 3 秒，
+  即使设置 `PersistenceRequired` 也一样。因此 `entity spawn` → `scan.findEntities` 看似失效时可能只是实体已消失。
+  先铺地板，生成不会自动贴地，猪曾从 120 掉到 111。
+  将生成与断言放在一次 `-c` 批处理中，一次往返且耗时不足 1 秒；下结论前再用 `scan.findEntities` 核对数量。
+- **缓慢过程用快进**：对作物生长、长配方机器和环境转化等耗时多个游戏分钟或天的过程，
+  用 `mcdebug wait until "<pred>" --timeout-ticks 72000 --sprint`。
+  服务端申请原版 `/tick sprint` 预算，即超时加余量，由引擎全速运行自己的 tick，
+  命中、超时或断连时自动停止。也可通过同一原版引擎手动执行
+  `raw server.runCommand '{"command":"/tick sprint 3d"}'`，有界且自动停止，
+  `"/tick sprint stop"` 提前停止；或 `"/tick rate 200"` 持续提速，**不会自动恢复**，须用 `/tick rate 20` 还原。
+  `server health` 显示加速后的实际 TPS，上限随目标速率变化。
+  只有 tick 驱动的状态会加速，按 `System.currentTimeMillis` 等墙钟计时的冷却不会。
+  不要混用手动 `/tick sprint` 和 `--sprint`；集成服务器必须未暂停。
+- 物品参数中的 `--nbt` **只表示 `minecraft:custom_data` 复合标签**。
+  `inv.getSlot` 会原样回传，因此往返一致不能证明模组已读取它。
+  注册表数据或原版数据，如附魔、储存附魔、药水内容、损伤、自定义名称，须使用 `--components` / `"components"`，
+  格式为原版补丁：`--components '{"minecraft:enchantments":{"levels":{"minecraft:unbreaking":3}}}'`；
+  `"!minecraft:id":{}` 移除默认组件。所有接收物品的命令均支持，包括
+  `world use-on-block/use-item/attack-block/...`、`inv set-slot/insert`、
+  `storage insert/extract/transfer --item` 及护甲或堆叠 JSON 对象。
+  返回堆叠的非默认组件位于 `components`，自定义数据仍位于 `nbt`，无法编码的组件列在 `components."#errors"`。
+- `status` 的 `playerList` 列出真实玩家的 name、uuid、dim、pos，UUID 可用于 `entity teleport/get-nbt`。
+- 服务端菜单 `screen open-block` 优先使用方块的 `MenuProvider`。加载器拒绝时，例如 Fabric 扩展菜单或
+  需要额外打开数据的菜单，mdb 会像玩家一样空手右键，结果包含 `openedBy: menu_provider|use_block`。
+  `screen click-button --button N` 调用原版 `clickMenuButton`，可选择切石配方、织布图案、附魔选项或模组配方和流体，
+  `accepted` 是菜单返回值。配合 `inv set-slot` 和 `screen quick-move` 可无图形运行完整工作台类流程。
+- `wait until` 可观察任意存储：`storage[x,y,z].<item|fluid|energy|inventory>.<path into the storage get answer>`，
+  例如 `'storage[0,64,0].fluid.tanks.0.amount >= 81000'`。
+  `slots` 只列非空槽，应按 `slots.N.index` / `stack.item` 匹配，不要按数组位置猜槽位。
+- **场景的像素验证**：容器或 UI 可固定，`--mode gui` 裁剪到 GUI，`gui screen` 给出槽位矩形。
+  世界帧没有区域裁剪选项，天气和实体动画可使两张未经编辑的帧有数十个百分点的像素差异。
+  世界场景应用逻辑断言，如 `gui open-block` 成功、绘制日志含所放物品、服务端状态一致；
+  `pixelHash` 只表示帧发生变化，`gui compare` 应用于稳定 UI，并设置 `--ignore` 区域。
+- 两个平面的槽位坐标不同：`gui screen` 使用**绝对 GUI 单位**，与 `gui click --gui` 一致；
+  `screen.*` 的 `slotDetails` 和服务端菜单使用容器相对坐标，须用 `gui screen` 中的 `gui.left/top` 转换。
+  `snapshot` / `storage` 中的槽位 `capacity` 是实际可接收容量，
+  即 `min(slot limit, the stack's own max size)`，空槽按 64。
+  槽中物品变化时容量也可能变化，不能作为不同物品间固定比较的夹具值。
+- `trace get` 的帧是 `{tick, snapshot}` 对象，snapshot 结构与 `snapshot.*` 相同；
+  比较轨迹应逐帧读取关心字段，不要比较整个帧。
+- 捕获盒状区域快照用 `snapshot capture`，不存在 `snapshot.take`。
+  `snapshot --help` 列出操作，没有通用的列出全部 RPC 方法命令，应使用各命令组的 `--help` 和本技能。
+- `be.setNbt` 将给定标签加载到方块实体，未提供的键如何处理取决于该实体的加载代码，只写需要修改的键。
+  `be set-field` 写入单一路径后回读；加载代码忽略未知键或派生值时，返回 `ok:false reason:NOT_APPLIED`。
+  普通数字沿用已有字段的数值类型。应用后字段可能立即被方块自身 tick 改变，不代表未应用。
+  一个值可能分布于镜像字段或拆分 long 等多个字段，应通过 `storage get`、`inv.getSlot` 或 GUI 等实际 API 验证，
+  不能只回读 NBT。
+- `raw craft.craft` 接收 `{"grid":[ ... 9 cells ... ]}`，每格必须为 **null 或对象**，
+  如 `{"item":"minecraft:oak_log","count":1}`；裸字符串会返回 `-32602` 并指出 `grid[i]`。
+  `craft do <item>` 是自动构造合成网格的快捷方式。
+- 方块槽位编号由其自身定义，应通过打开的 `gui screen` 或 `inv get-size` 加 `inv get-slot` 确认输入和输出，不能猜。
+  `inv extract` 是存储式抽取，要求 `--item`；清空整个槽用空物品的 `inv set-slot`。
+- **不驱动世界 tick**：用 `wait.until` 等待，谓词 DSL 支持 `be[..].<path>`、`inv[..].<slot>.count`、
+  `block[..].id`、`block[..].prop.lit == true`、`AND/OR/NOT` 和 `sum(inv[..].*.count)`，见 `wait --help`。
+  **优先短等待**，设置几秒 tick，条件只是较慢时再等待；超时不破坏状态，下次可继续。
+  错误路径、错误槽位或未供电机器上的长等待只会耗尽整个超时时间。
+  正式等待前，先用 `be.getNbt` / `inv.getSlot` 读取谓词字段，或用 `timeoutTicks` 1–20 试跑并检查 `lastValue`。
+  null 或非预期值通常表示谓词错误。唯一例外 `be.tick`（`ticks` 为 0..12000）同步运行单个方块实体的真实 ticker，
+  速度快但不推进世界时间，也不 tick 邻居，其他方块的供能、推送物品和红石作用均不会发生；
+  该真实 ticker 仍会消耗能量、燃料和输入。`wait.until` 的 `ranTicks` 表示条件实际用了多久。
+- `trace start` 每 `--interval-ticks` 记录快照，`--max-ticks` 自动停止，返回 `traceId` 用于 `trace get` / `trace stop`。
+  与快照共用 `--include`，如 `block`、`inventory`、`entity`；机器槽位需要 `inventory`。
+  `trace get` 返回全部帧，应通过过滤器提取，不要一次阅读全部内容。
+- `snapshot capture` 加 `snapshot diff` 比较状态，默认忽略元数据 `/tick` / `/time`。
+  差异路径是快照中的 JSON 指针，`/blocks/13/...` 是数组索引而非坐标。
+  一个堆叠可能在每个暴露它的句柄中各出现一次；实体和记账 NBT 自身会变化，须将 `--include` 缩小到被测内容。
+  快照包含绝对坐标，同样的结构搬到另一原点也会全部显示变化。
+- `fixture capture` 将区域保存为 JSON，只有 `--include-nbt` 才包含箱中物品和机器 NBT；
+  `fixture load --origin` 可将其放到任意位置。
+- `redstone` 提供 `set-lever --powered|--unpowered`、`pulse`、`get-power`（`received` 和分面的 `inputs` / `outputs`），
+  修改时跳过更新的可用 `notify-neighbors` 补发。
+- 其他状态用 `reflect`。从 `--root server|level|be|entity|player` 和 `--pos` / `--uuid` / `--name` / `--dim` 出发，
+  沿 `--path a.b[0].c` 访问；每段先查字段，再查无参方法，最后查 `getX` / `isX`，不支持参数或表达式，
+  带参调用用 `reflect call`。支持 Mojang 名称，`reflect resolve --root ... --path ... --members` 可列出成员。
+  对象返回 `{"$ref":N}`，可在后续命令使用，数量有界且服务端停止后失效。优先一次 `--path`，少在引用间往返。
+  `reflect set` 写非 final 字段，数字转换为字段类型，报告修改前后值；
+  `reflect call` 重载有歧义时要求 `--arg-types int,long`。
+  它绕过方块自身逻辑，不同步、不执行 `setChanged`，有正常 API 时优先用正常 API。
+  客户端的 Screen、控件和缓存使用同一命令加 `--client`，根为 `minecraft|screen|player|level|server`，
+  如 `reflect get --client --root screen --path 'children[0].message.string'`。
+  引用位于客户端进程，后续每次使用都必须带 `--client`。
+  客户端方块实体**不携带物品**，即使 GUI 显示内容，客户端箱子或机器 BE 仍为空，
+  原版将库存同步到打开的菜单，而非 BE。读取客户端显示用 `--root screen --path 'menu.slots[N].item'`，
+  权威状态用服务端平面。服务端到客户端相差一个数据包，读取前先 `gui settle`。
+  客户端 `reflect set` 也不会写 options.txt；`OptionInstance.set` 只改变运行值，
+  可在 `gui status` 或视频设置看到，但不会保存到磁盘。
+- `screen.*` 是**服务端假玩家菜单**，只有槽位 JSON，没有像素；像素只能来自 `gui.*`。
 
-## 3. Client plane: the GUI loop
+## 3. 客户端平面：GUI 操作流程
 
-> **Tooltips need the lite render mode.** On a headless/CI box (no window manager) the game window
-> is never focused, and Minecraft ignores real cursor movement while unfocused — so in the default
-> `continuous` mode `gui hover` moves the pointer but the game keeps computing the hover from its
-> stale position (symptom: `tooltips: []`, `hoveredSlot` pointing at the wrong inventory slot).
-> Start the client with `clientRenderMode=demand` (or `gui-only`) — in lite mode the mod feeds a
-> **virtual cursor** into the frame it renders, so hover works unfocused. Clicks, screenshots,
-> `gui screen`, `scroll`, `key`, `type` and `drag` work in either mode.
-
+> **无焦点环境中的提示框需要轻量渲染模式。** 无窗口管理器的无头或 CI 环境中，
+> 游戏窗口不会取得焦点，Minecraft 在失焦时忽略真实光标移动。
+> 默认 `continuous` 模式下，`gui hover` 虽移动指针，游戏却仍用旧位置计算悬停，
+> 表现为 `tooltips: []` 或 `hoveredSlot` 指向错误背包槽。
+> 应以 `clientRenderMode=demand` 或 `gui-only` 启动，模组会向渲染帧提供**虚拟光标**，
+> 失焦时也能悬停。点击、截图、`gui screen`、`scroll`、`key`、`type` 和 `drag` 在两类模式中均可使用。
 
 ```bash
-mcdebug gui open-block --x 100 --y 64 --z 100            # or: gui open-screen pkg.Fixtures#myScreen
-mcdebug gui screenshot --mode gui --annotate             # *.annotated.png: cyan = slot ids, magenta = widget ids
-mcdebug gui screen --brief                               # slots + widgets as JSON (GUI units)
-mcdebug gui click --slot 0 --shot gui                    # click -> settle -> screenshot, one round trip
-mcdebug gui hover --slot 0                               # tooltips really drawn that frame
-mcdebug gui hover --slot 0 --hold-shift                  # same, with shift held for that frame ("Hold Shift for ..." variants)
-mcdebug gui screenshot --mode gui --draw-log             # every blit/fill/text with GUI rect + texture UV
-mcdebug gui problems --brief                             # WARN/ERROR log + caught render faults
+mcdebug gui open-block --x 100 --y 64 --z 100            # 也可用 gui open-screen pkg.Fixtures#myScreen
+mcdebug gui screenshot --mode gui --annotate             # *.annotated.png：青色为槽位编号，品红为控件编号
+mcdebug gui screen --brief                               # 槽位和控件 JSON，使用 GUI 单位
+mcdebug gui click --slot 0 --shot gui                    # 点击、界面稳定、截图，一次往返完成
+mcdebug gui hover --slot 0                               # 返回该帧真实绘制的提示框
+mcdebug gui hover --slot 0 --hold-shift                  # 本帧按住 Shift，用于按住 Shift 显示更多的提示
+mcdebug gui screenshot --mode gui --draw-log             # 各次 blit、填充、文字及其 GUI 矩形和纹理 UV
+mcdebug gui problems --brief                             # WARN / ERROR 日志和被捕获的渲染异常
 ```
 
-- **`--slot N` is the index in the open menu** (`gui screen` `slots[].index`, the cyan numbers),
-  not a player-inventory number: the menu lists the block's own slots first, so the player's
-  `Inventory` Slot N sits at a different, menu-specific index. To find an item, filter
-  `gui screen` slots by `item` and use that index.
-- Click targets: `--slot N`, `--widget N` (the `[N]` in `gui screen --brief`), `--text "Label"`
-  (substring, case-insensitive; also matches text drawn in renderBg or list rows that are not
-  widgets, e.g. world-list entries), `--gui X,Y`, `--png X,Y` (pixels of the previous screenshot).
-- Scroll lists: an entry scrolled out of view is `[clipped]` in `gui screen`; clicking it fails with
-  `WIDGET_CLIPPED`. `gui scroll --dy -N --gui X,Y` (over the list) first. Only rendered rows have
-  current coordinates, so mdb renders a frame before `gui screen`/targets on such Screens.
-- `open-block` walks the real client use path: the player must be in reach, the hand empty (the
-  default) and the block present **on the client**. `reason:NO_BLOCK` + `block` show what the
-  client saw (e.g. a gravity block like an anvil fell off the air you placed it on);
-  `reason:OUT_OF_REACH` + `distance`/`reach`: teleport the player next to it first.
-- Slot clicks obey the menu's rules: a slot whose `mayPlace` rejects the item leaves it on the
-  cursor (`changed:false`, `carried` still set). Check `slotAfter`/`carried`, not `ok`.
-- `gui close` = Esc: a sub-screen returns to its parent (Video Settings -> Options), so closing to
-  the world may take several. Closing a container with a carried stack hands it back to vanilla.
-- `gui key`/`type` go to the current Screen only (no Screen: `-32020`). `type` appends to the
-  focused EditBox, and boxes often start pre-filled (an anvil shows the item's name): use
-  `gui type --text X --clear` to replace. `handled:false` means nothing took the characters (no
-  focus, or a disabled box, e.g. an anvil with an empty input slot). Typing can also succeed
-  (`handled:true`, the value sets) while the container still refuses the result — an anvil
-  needs XP for a rename: `click --slot 2` then reports `changed:false`. Judge by the click
-  report, not by `handled`.
-- Inside `gui act`, a follow-up view that fails (e.g. `--shot gui` on a screen that just
-  navigated to options) no longer discards the action: the result is kept and the failure
-  arrives as `screenshotError`/`screenError` with `ok:false`.
-- `--text` matches substrings across the whole Screen: a label also inside a button ("New World"
-  in "Create New World") hits the first widget. Narrow the screen first (a search box), pass
-  `--index`, or click the row's `--gui X,Y` from `gui screen`/a screenshot.
-  A key that navigates (Esc, Enter) returns `ok:true reason:CHANGED_BY_INPUT`.
-- `gui drag` with a carried stack over slots is vanilla drag-splitting (QUICK_CRAFT).
-- Errors: a plain `gui click/hover/...` that cannot act exits 2 with `error [-320xx]` on stderr
-  (e.g. `-32021 WIDGET_CLIPPED`); inside `gui act` the same failure is JSON `ok:false` + `error`
-  with exit 0, so check `ok` there.
-- `gui hover` returns `tooltips:[]` with `ok:true` when nothing was drawn; `reason:EMPTY_SLOT`
-  (plus `stack`) means the slot holds nothing: you hovered the wrong index, do not retry.
-- `gui scroll --dy` is in wheel notches (an options list moves about one row per notch, negative
-  = down); overshooting is harmless, so `--dy 30` returns to the top.
-- `gui open-screen` fills constructors from Screen/Player/Minecraft/Options only; anything needing
-  other arguments (ChatScreen(String), creative inventory) needs a `pkg.Class#factory`.
-- Options/Video Settings clicks change the real `options.txt` of that gameDir.
-- `gui disconnect` keeps the client on the title screen and removes the server-plane socket; get
-  back in with `gui click --text Singleplayer`, `gui type --text <save>` (search box),
-  `gui click --text <save>`, `gui click --text "Play Selected World"`.
-- After server-plane writes run `mcdebug gui settle` before looking; clicks settle themselves.
-- Read results from data (`gui screen`, the click report, `be.getNbt`), not from pixels alone.
-- A Screen that throws while rendering no longer crashes the client: it stops drawing and
-  `gui problems` shows the trace.
+- **`--slot N` 是当前菜单的索引**，即 `gui screen` 的 `slots[].index` 和青色数字，不是玩家背包编号。
+  菜单先列方块自身槽位，因此玩家 `Inventory` 的 Slot N 对应另一个菜单索引。
+  找物品时先按 `item` 过滤 `gui screen` 的槽位，再使用其索引。
+- 点击目标支持 `--slot N`、`--widget N`（`gui screen --brief` 中的 `[N]`）、`--text "Label"`、
+  `--gui X,Y` 和上一张截图像素坐标的 `--png X,Y`。
+  文字按不区分大小写的子串匹配，也匹配 renderBg 中绘制的文字和非控件列表行，例如世界列表项。
+- 滚出可视区域的条目在 `gui screen` 中标为 `[clipped]`，点击会返回 `WIDGET_CLIPPED`。
+  先在列表上执行 `gui scroll --dy -N --gui X,Y`。
+  只有已渲染行的坐标有效，因此在此类 Screen 上查询 `gui screen` 或解析目标前，mdb 会先渲染一帧。
+- `open-block` 走真实客户端使用路径：玩家必须在交互距离内，默认空手，且方块必须已存在于**客户端**。
+  `reason:NO_BLOCK` 和 `block` 表示客户端所见，例如铁砧从空中掉落。
+  遇到 `reason:OUT_OF_REACH` 和 `distance` / `reach` 时，先将玩家传送到附近。
+- 槽位点击遵循菜单规则。`mayPlace` 拒绝物品时，物品仍留在光标上，表现为 `changed:false` 且 `carried` 非空。
+  应检查 `slotAfter` / `carried`，不要只看 `ok`。
+- `gui close` 等同 Esc，子界面返回父界面，例如视频设置返回选项，回到世界可能需要多次关闭。
+  关闭容器时，光标上的堆叠交回原版处理。
+- `gui key` / `type` 只作用于当前 Screen，没有 Screen 时返回 `-32020`。
+  `type` 向有焦点的 EditBox 追加文字，许多文本框已预填内容，如铁砧中的物品名称，
+  替换时使用 `gui type --text X --clear`。
+  `handled:false` 表示没有控件接收字符，可能无焦点或文本框禁用，例如铁砧输入槽为空。
+  `handled:true` 且文字已改变时，容器仍可能拒绝输出；铁砧改名需要经验，
+  此时 `click --slot 2` 仍返回 `changed:false`。以点击报告为准，不要只看 `handled`。
+- `gui act` 中后续视图失败不会丢失已执行动作，例如跳到选项后 `--shot gui` 失败。
+  动作结果保留，错误以 `screenshotError` / `screenError` 和 `ok:false` 返回。
+- `--text` 对整个 Screen 做子串匹配，如按钮文字也含标签文字，可能先命中按钮；
+  例如 `New World` 同时包含在 `Create New World` 中。
+  先用搜索框缩小范围、传 `--index`，或根据 `gui screen` / 截图点击该行的 `--gui X,Y`。
+  Esc、Enter 等导致跳转的按键返回 `ok:true reason:CHANGED_BY_INPUT`。
+- 携带堆叠在槽位上执行 `gui drag`，会触发原版拖拽分配 `QUICK_CRAFT`。
+- 普通 `gui click/hover/...` 无法执行时退出码为 2，标准错误包含 `error [-320xx]`，
+  如 `-32021 WIDGET_CLIPPED`；相同错误在 `gui act` 中以 JSON `ok:false` 加 `error` 返回，退出码仍为 0，须检查 `ok`。
+- `gui hover` 没绘制内容时返回 `tooltips:[]` 和 `ok:true`。
+  `reason:EMPTY_SLOT` 及 `stack` 表示槽位为空，是悬停索引错误，不应盲目重试。
+- `gui scroll --dy` 的单位是滚轮刻度，选项列表每刻度约一行，负数向下。
+  超量滚动无害，`--dy 30` 可回到顶部。
+- `gui open-screen` 只自动填充 Screen / Player / Minecraft / Options 构造参数。
+  需要其他参数的类，如 `ChatScreen(String)` 或创造模式背包，须提供 `pkg.Class#factory`。
+- 点击选项或视频设置会修改该 gameDir 的真实 `options.txt`。
+- `gui disconnect` 将客户端留在标题界面并移除服务端平面套接字。
+  可通过 `gui click --text Singleplayer`、`gui type --text <save>` 搜索，
+  再 `gui click --text <save>` 和 `gui click --text "Play Selected World"` 重新进入。
+- 服务端写入后，观察前先执行 `mcdebug gui settle`；点击会自行等待稳定。
+- 从 `gui screen`、点击报告、`be.getNbt` 等数据读取结果，不要只凭像素。
+- Screen 渲染异常不再使客户端崩溃，只停止该 Screen 绘制，`gui problems` 提供堆栈。
 
-### 3b. Flags vs raw parameters
+### 3b. CLI 选项与原始 RPC 参数
 
-The CLI flags are the friendly face of the RPC parameters; when you use `raw` you must spell the
-parameters the way the handler reads them:
+CLI 选项是 RPC 参数的便捷形式。使用 `raw` 时，必须按处理器实际读取的名称传参：
 
-| CLI flag | raw parameter |
+| CLI 选项 | 原始 RPC 参数 |
 |---|---|
-| `gui screenshot --mode window\|gui` | `mode: "window" \| "gui"` (there is **no** `crop` — `mode:"gui"` crops to the container rectangle; use `--out` + a local crop otherwise) |
-| `gui screenshot --hash-only` | `format: "none"` (no PNG, no file) |
-| `gui screenshot --hide-cursor` | `cursor: "hide"` (also `"keep"`, default) |
-| `gui screenshot --annotate` / `--draw-log` | `annotate: true` / `drawLog: true` (+ `delayTicks`, `inline`, `name`) |
+| `gui screenshot --mode window\|gui` | `mode: "window" \| "gui"`；**没有** `crop` 参数，`mode:"gui"` 裁剪容器矩形，其他裁剪用 `--out` 后在本机处理 |
+| `gui screenshot --hash-only` | `format: "none"`，不生成 PNG 或文件 |
+| `gui screenshot --hide-cursor` | `cursor: "hide"`，默认也可用 `"keep"` |
+| `gui screenshot --annotate` / `--draw-log` | `annotate: true` / `drawLog: true`，另有 `delayTicks`、`inline`、`name` |
 | `gui click --slot/--widget/--text/--png/--gui` | `slot` / `widget` / `text` / `png:[x,y]` / `gui:[x,y]` |
 
-Unknown raw parameters are **silently ignored** (a typo in `crop` returns the full window instead of
-an error) — check `transform.crop`/`pngSize` in the response when the result matters.
-`gui click --gui`/`--png` report only the landing point (`guiX/guiY`), not `via`/`before`, unlike
-`--slot`/`--widget`/`--text`. `gui drag` echoes the **end** point only; keep your `--from` yourself.
-When no screen is open, `gui key`/`gui type` fail with the same `-32020 CLIENT_NOT_READY` code used
-for "client not ready" — distinguish by `data.reason` ("no Screen is open").
+未知原始参数会被**静默忽略**，拼错 `crop` 可能返回整个窗口而非报错。
+关注结果尺寸时，应检查响应中的 `transform.crop` / `pngSize`。
+`gui click --gui` / `--png` 只报告落点 `guiX/guiY`，不像 `--slot` / `--widget` / `--text`
+那样包含 `via` / `before`。`gui drag` 只回显**终点**，须自行保存 `--from`。
+没有 Screen 时，`gui key` / `gui type` 与客户端未就绪共用 `-32020 CLIENT_NOT_READY`，
+应根据 `data.reason` 的原文 `no Screen is open` 区分。
 
-- `gui open-screen` takes a **runtime class name** (or the `inventory` alias); there is no command
-  that lists Screen classes and an unknown one answers `CLASS_NOT_FOUND` with only the name you
-  guessed. To discover names, read them off a live screen: `gui screen` / `gui status` print the
-  current screen's class, and `reflect resolve --client --root screen` gives the exact runtime name
-  to reuse. Screens from your own project are addressed by their own factory (`pkg.Fixtures#make`,
-  dev classpath only).
+- `gui open-screen` 接收**运行时类名**或 `inventory` 别名，没有列出全部 Screen 类的命令。
+  未知名称返回 `CLASS_NOT_FOUND`，仅附带猜测的类名。
+  应从运行中的界面获取：`gui screen` / `gui status` 输出当前类，
+  `reflect resolve --client --root screen` 给出可直接复用的完整运行时名称。
+  自己工程的 Screen 可通过仅在开发类路径中的 `pkg.Fixtures#make` 工厂访问。
 
-## 4. Change code without restarting
+## 4. 无需重启的代码更新
 
 ```bash
-./gradlew classes                                                # split source sets: clientClasses for client code
-mcdebug gui hotswap --classes build/classes/kotlin/client        # method bodies only; all or nothing; re-inits the Screen
-mcdebug gui reload-screen --classes build/classes/kotlin/client  # open Screen's own class: any change, same menu
-mcdebug gui reload-resources                                     # textures / lang / models
+./gradlew classes                                                # 分离源集时，客户端代码使用 clientClasses
+mcdebug gui hotswap --classes build/classes/kotlin/client        # 仅方法体，全部成功才应用，并重新初始化 Screen
+mcdebug gui reload-screen --classes build/classes/kotlin/client  # 当前 Screen 自身类可任意变化，沿用同一菜单
+mcdebug gui reload-resources                                     # 纹理、语言和模型
 ```
 
-Use the output dirs your build really writes (`build/classes/java/main`, `.../kotlin/client`, ...).
-Hotswap reports `failed[].changes` when a class gained or lost members: then use reload-screen (for
-the Screen class) or restart the session. Neither one reruns constructors of existing objects.
-Cost: the build dominates (the first incremental compile after an edit is much slower than the
-next ones); the swap itself is well under a second, versus a full client restart. `attached:true` = this call loaded the hotswap agent
-into the JVM, `false` = it was already loaded (normal, not a failure).
+使用构建实际输出的目录，如 `build/classes/java/main`、`.../kotlin/client`。
+类增删成员时，热替换通过 `failed[].changes` 报告；Screen 类可改用 reload-screen，其他情况重启会话。
+两种方式都不会重新运行已有对象的构造器。耗时主要在构建，编辑后的首次增量编译明显比后续更慢；
+热替换自身远小于 1 秒，比完整重启快。`attached:true` 表示本次将热替换代理装入 JVM，
+false 表示已经装入，是正常情况而非失败。
 
-- `changed:0` with a stderr note = no newer class files in that dir: wrong dir or wrong compile task.
-  Relative `--classes` resolve against the CLI's current directory, not the game's: pass absolute
-  paths when the shell is elsewhere.
-- A Screen shown by reload-screen is a copy in its own class loader. A later hotswap redefines the
-  real class (`skippedReloadCopies` lists the copies) but not that open copy: the `hint` says so;
-  run reload-screen again, or close and reopen the GUI to get the real (hotswapped) class.
-- Failure exits 2 and redefines nothing (all or nothing).
-- `reload-screen`'s `reloads` counts reloads of this Screen so far; `classes` lists what was loaded.
+- `changed:0` 加标准错误提示表示目录中没有更新的类，可能选错目录或编译任务。
+  相对 `--classes` 基于 CLI 当前目录，而非游戏目录；在其他目录执行时传绝对路径。
+- reload-screen 显示的是独立类加载器中的副本。后续 hotswap 修改真实类，
+  `skippedReloadCopies` 列出被跳过副本，不会修改当前副本，`hint` 会说明。
+  再次 reload-screen，或关闭并重新打开 GUI，才能使用已热替换的真实类。
+- 失败时退出码为 2，不重新定义任何类，操作全部成功才应用。
+- `reload-screen` 的 `reloads` 是该 Screen 到目前为止的重载次数，`classes` 列出已加载内容。
 
-## 4b. Two planes, one CLI
+## 4b. 两个平面共用一个 CLI
 
-`world.*`/`be.*`/`inv.*`/`storage.*`/`scan.*`/`wait.*`/`reflect.*` go to the **server** plane,
-`gui.*` to the **client** plane. `--session NAME` picks the plane per method; with explicit
-transports you must pick it yourself (`--socket`/`--tcp` = server, `--client-socket`/`--client-tcp`
-= client). Calling a client method with only a server transport is refused by the CLI (exit 1)
-*before* the request is sent — you will never see the server's `-32601 method not found` for this
-case, and `--socket` passed to a `gui.*` method is silently ignored (that call uses client
-discovery, which resolves relative to the current directory).
+`world.*` / `be.*` / `inv.*` / `storage.*` / `scan.*` / `wait.*` / `reflect.*` 使用**服务端**平面，
+`gui.*` 使用**客户端**平面。`--session NAME` 按方法选择平面；显式传输须自己选择，
+`--socket` / `--tcp` 指向服务端，`--client-socket` / `--client-tcp` 指向客户端。
+只指定服务端传输却调用客户端方法时，CLI 会在发送前拒绝，退出码为 1，
+不会得到服务端 `-32601 method not found`。
+向 `gui.*` 传入的 `--socket` 会被静默忽略，该调用仍使用相对于当前目录的客户端发现。
 
-## 5. Regression
+## 5. 回归验证
 
-- `gui compare` exits 1 on a mismatch and prints a JSON line **plus** a human `error: ...` line on
-  stdout — parse the exit code, or the JSON line, not the whole stream. Same-view frames still
-  differ where the player model animates (the cursor-hide interpolation does too): pass
-  `--ignore x,y,w,h` for that region or the comparison is noise. Size mismatch fails immediately and
-  writes no diff image.
+- `gui compare` 不匹配时退出码为 1，标准输出同时含 JSON 行和便于阅读的 `error: ...` 行。
+  应解析退出码或 JSON 行，不能把整个输出流当成 JSON。
+  相同视图仍会因玩家模型动画和隐藏光标时的插值产生差异，应对相关区域设置 `--ignore x,y,w,h`。
+  尺寸不匹配会立即失败，不写差异图。
 
-`mcdebug gui screenshot --mode gui --hide-cursor --out new.png`, then
-`mcdebug gui compare --expected golden.png --actual new.png --ignore x,y,w,h --report r.html`
-(exit 1 on mismatch; `--ignore` is in PNG pixels, w and h > 0; read `$?` without a pipe or with
-`set -o pipefail`, `| head` hides it). Only an explicit `--accept` writes the golden.
-`--mode gui` crops to the **container** GUI rectangle, so it needs an open container Screen
-(chest/furnace/inventory); on options-style Screens it fails (`NO_CONTAINER_SCREEN`) — use
-`--mode window` there. Even then translucent texture edges still blend with the world
-behind it: if two identical shots differ by 1 per channel, use `--channel-tolerance 2`. `--annotate`
-with `--out x.png` also writes `x.annotated.png` (copies: `path` stays under
-`<gameDir>/mcdebug/screenshots/`, `copiedTo` is yours). `--hash-only` is the cheap "did it change?" probe.
+先执行 `mcdebug gui screenshot --mode gui --hide-cursor --out new.png`，再执行
+`mcdebug gui compare --expected golden.png --actual new.png --ignore x,y,w,h --report r.html`。
+不匹配退出码为 1；`--ignore` 使用 PNG 像素且宽高必须大于 0。
+读取 `$?` 时不要加管道，或先 `set -o pipefail`，因为 `| head` 会掩盖退出码。
+只有显式 `--accept` 才写基准图。
+`--mode gui` 裁剪**容器** GUI，因此必须打开箱子、熔炉或背包等容器 Screen；
+选项类 Screen 会返回 `NO_CONTAINER_SCREEN`，应使用 `--mode window`。
+即便如此，半透明纹理边缘仍会与世界背景混合；相同截图仅每通道差 1 时，可用 `--channel-tolerance 2`。
+`--annotate` 配合 `--out x.png` 还会写入 `x.annotated.png`；原始 `path` 仍位于
+`<gameDir>/mcdebug/screenshots/`，本机副本位于 `copiedTo`。
+`--hash-only` 可低成本检测是否发生变化。
 
-`--draw-log` adds `drawLog: {count, truncated, coordinateSpace, entries[]}`; each entry has `op`
-(`blit`/`fill`/`text`/`item`/`tooltip`...), `rect` `[x,y,w,h]` in GUI units, and per op `text`,
-`color` (`#AARRGGBB`), `texture`, `uv`. The same text can be drawn more than once (a Screen may park
-the vanilla label off-screen and draw its own): keep entries whose `rect` lies inside the GUI.
-`gui problems` covers the whole JVM, startup noise from other mods included: compare `--since`
-cursors around your action rather than reading the full list.
+`--draw-log` 增加 `drawLog: {count, truncated, coordinateSpace, entries[]}`。
+每项含 `op`，如 `blit` / `fill` / `text` / `item` / `tooltip`，
+以 GUI 单位表示的 `rect` `[x,y,w,h]`，以及各操作的 `text`、`color`（`#AARRGGBB`）、`texture`、`uv`。
+相同文字可能被绘制多次，例如 Screen 把原版标签放在屏幕外再绘制自定义标签，
+应保留 `rect` 位于 GUI 内的条目。
+`gui problems` 覆盖整个 JVM，包含其他模组的启动噪声，应比较动作前后的 `--since` 游标，不要读全部列表。
 
-## Costs
+## 开销
 
-With `java -jar`, JVM start-up dominates a single call; the RPC itself is usually a fraction of
-it (screenshots and settles cost a few frames/ticks more). Many steps in a row: one JVM with
-`mcdebug --session dev --batch -c "..." -c "..."`, one round trip with `gui act` (action + settle +
-screenshot + screen), or the native `mdb`. Inside `-c` a JSON argument may be written bare
-(`-c 'raw be.getNbt {"pos":[0,64,0]}'`); large params go in a file: `raw method @params.json`.
-`reload-resources` reloads every pack: seconds, not ms.
+使用 `java -jar` 时，单次调用的主要开销是 JVM 启动，RPC 自身通常只占一小部分，
+截图和稳定等待另需几帧或几 tick。
+连续多步可在同一 JVM 中使用 `mcdebug --session dev --batch -c "..." -c "..."`，
+通过 `gui act` 一次往返获取动作、稳定、截图与 Screen，或使用原生 `mdb`。
+`-c` 内的 JSON 可直接写成 `-c 'raw be.getNbt {"pos":[0,64,0]}'`，大参数放文件，用 `raw method @params.json`。
+`reload-resources` 重载所有资源包，耗时按秒计，不是毫秒。
 
-## Exit codes and errors
+## 退出码与错误
 
-0 ok (including business `ok:false`), 1 usage error, 2 RPC error, 3 method not found (older mod).
-`-32602` = bad/missing param (the message names it), `-32603` = server exception (`data.exception`,
-`data.at` stack frames), `-32020` = client not ready / not in a world, `-32021` = GUI element not
-found (data lists candidates).
+`0` 表示成功，包括业务 `ok:false`；`1` 为用法错误，`2` 为 RPC 错误，`3` 为方法不存在，通常模组过旧。
+`-32602` 表示参数缺失或错误，消息会指出名称；`-32603` 为服务端异常，
+附带 `data.exception` 和 `data.at` 堆栈；`-32020` 为客户端未就绪或未进入世界；
+`-32021` 为 GUI 元素未找到，数据中列出候选项。

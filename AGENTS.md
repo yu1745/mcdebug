@@ -1,21 +1,23 @@
 # mcdebug — AGENTS.md（贡献者指南）
 
+仓库说明文档、示例说明与技能正文统一使用中文。命令、API、类名、字段、路径、版本号和原始输出保留原文；示例中的解释性注释使用中文。翻译标题时同步更新引用它的章节链接。
+
 ## 26.3 分支说明（优先于下文保留的 1.21 开发指南）
 
 - 基线为原生 `1.21.1` 分支 `72a70c2`，工作树 `../mcdebug-wt-263`；本分支只编译 Minecraft 26.3，不在源码内添加旧版条件分支。
 - JDK 25、Gradle 9.6.0、非 remap Loom 1.17.21；Fabric Loader 0.20.1 / API 0.166.2+26.3；NeoForge 26.3.0.103 / MDG 2.0.148。
-- 两个 loader 都使用官方运行时名字；Fabric 的 `generateReflectMappings` 只生成短类名索引，不生成 intermediary 映射。发布产物来自 `jar`，没有 `remapJar`。
-- 查 API 先读本工作树 `mc_source/`（`./gradlew genSources` 后解压源 jar）或 `fabric-api_source/`；NeoForge 源码在 `neoforge/build/source-reference/`，patched MC 源 jar 在 `neoforge/build/moddev/artifacts/`。这些都是忽略的参考文件。
+- 两个加载器都使用官方运行时名字；Fabric 的 `generateReflectMappings` 只生成短类名索引，不生成 intermediary 映射。发布产物来自 `jar`，没有 `remapJar`。
+- 查 API 先读本工作树 `mc_source/`（`./gradlew genSources` 后解压源 JAR）或 `fabric-api_source/`；NeoForge 源码在 `neoforge/build/source-reference/`，patched MC 源 JAR 在 `neoforge/build/moddev/artifacts/`。这些都是忽略的参考文件。
 - GUI 已迁移至 `GuiGraphicsExtractor` / `GuiTextRenderState`；Screen 状态位于 `Minecraft.gui`。截图用原版异步 GPU 读回，不能调用旧版 OpenGL 直接读帧缓冲的 API。
 - CLI 的按键码、按钮编号、修饰键位保持基线格式，由 `InputEvents` 转换为 SDL 事件。GUI 输入只派发到 Screen，不注入全局输入。
 - NeoForge 存储使用事务型 `ResourceHandler` / `EnergyHandler` / `ItemAccess`；禁止恢复旧 `IItemHandler` / `IFluidHandler`。物品和流体搬运必须在同一事务内提交或回滚。
-- 保留两平面、loader 接缝、自包含 jar、被动 tick、隔离测试、进程清理等基线约束。26.3 的差异与验证记录见 `docs/port-26.3.md`。
+- 保留两平面、加载器接缝、自包含 JAR、被动 tick、隔离测试、进程清理等基线约束。26.3 的差异与验证记录见 `docs/port-26.3.md`。
 - **用户要求：不添加基线中不存在的测试，除非 26.3 的实现与 1.21 不同且使用新 API。**优先运行和适配现有测试、冒烟脚本及 GUI 验证流程。
-- JVM 前端拆分为 `sdk/`（`com.mcdebug.sdk`：RPC、类型化 API、截图比较、session）和 `testkit/`（JUnit）；CLI 依赖 SDK。`frontend/` 独立构建与暂存这三个 JVM 模块及预构建的 NeoForge agent，消费者使用 GitHub `maven` 分支的标准 Maven 依赖，版本由 `maven_version` 统一锁定。新增测试前端的宿主测试与消费者实机用例不属于 Minecraft 移植新增的后端用例。使用与生命周期约定见 `docs/testkit.md`。
+- JVM 前端拆分为 `sdk/`（`com.mcdebug.sdk`：RPC、类型化 API、截图比较、会话）和 `testkit/`（JUnit）；CLI 依赖 SDK。`frontend/` 独立构建与暂存这三个 JVM 模块及预构建的 NeoForge 代理，消费者使用 GitHub `maven` 分支的标准 Maven 依赖，版本由 `maven_version` 统一锁定。新增测试前端的宿主测试与消费者实机用例不属于 Minecraft 移植新增的后端用例。使用与生命周期约定见 `docs/testkit.md`。
 
 本文件是 mcdebug 的唯一开发指南（仓库/协议/验证规则）。1.20.1 线（`main` 分支，yarn 映射，Kilt 容器测试环境）已归档，不再回移。
 
-Fabric 1.21.1（Mojang 官方映射）+ Kotlin Mod，提供 JSON-RPC 服务，让 Kotlin CLI / JUnit runner 远程读写世界/方块实体/物品栏/资源存储/快照/GUI，**用于 Mod 开发者自动化测试自己的机器方块**（Kotlin JUnit 5，见 ic2-fabric 的 `core/src/mcdebugTest/`）。
+Fabric 1.21.1（Mojang 官方映射）+ Kotlin Mod，提供 JSON-RPC 服务，让 Kotlin CLI / JUnit 运行器远程读写世界/方块实体/物品栏/资源存储/快照/GUI，**用于 Mod 开发者自动化测试自己的机器方块**（Kotlin JUnit 5，见 ic2-fabric 的 `core/src/mcdebugTest/`）。
 
 ```
 ┌─────────────────┐  JSON-RPC 2.0   ┌──────────────────┐
@@ -34,14 +36,14 @@ Fabric 1.21.1（Mojang 官方映射）+ Kotlin Mod，提供 JSON-RPC 服务，�
 
 ## 1. 硬性约束
 
-- **绝对不要**把 `build/libs/*.jar` 复制到 **mcdebug 自己的** `run/mods/`。Loom dev-launch-injector 会自动从 `build/classes/kotlin/main`（客户端平面是 `build/classes/kotlin/{main,client}`）注入 classpath，副本会和注入版本冲突，源码改了也不生效。
-- 反过来，**别的项目（消费者项目 A）的 `run/mods/` 就是发布 jar 的正常部署位置**：把 `build/libs/mcdebug-<version>.jar` 拷进去当普通 mod 用，一个 jar 同时提供服务端平面和客户端平面。放新 jar 前先删掉旧版本（`mods/` 里两份同 modid 会加载失败/加载到旧的）。
-- **绝对不要**暴露 `tick.run` / `tick.runUntil` 之类主动推进 server tick 的 RPC。tick 由游戏引擎驱动，mod 只观察不控制。断言统一走 `wait.until`（注册 `ServerTickEvents.END_SERVER_TICK` 回调检查条件）。
-  - 唯一例外 `be.tick`：在 server 线程把**单个** BE 的 ticker 同步跑 N 次（0..12000，上限防止卡死 server 线程），不推进世界时间、不 tick 邻居。ic2 机器测试靠它把十几秒的自然等待压到毫秒级。不要以它为先例增加别的驱动型 RPC。
+- **绝对不要**把 `build/libs/*.jar` 复制到 **mcdebug 自己的** `run/mods/`。Loom dev-launch-injector 会自动从 `build/classes/kotlin/main`（客户端平面是 `build/classes/kotlin/{main,client}`）注入类路径，副本会和注入版本冲突，源码改了也不生效。
+- 反过来，**别的项目（消费者项目 A）的 `run/mods/` 就是发布 JAR 的正常部署位置**：把 `build/libs/mcdebug-<version>.jar` 拷进去当普通模组用，一个 JAR 同时提供服务端平面和客户端平面。放新 JAR 前先删掉旧版本（`mods/` 里两份同 modid 会加载失败/加载到旧的）。
+- **绝对不要**暴露 `tick.run` / `tick.runUntil` 之类主动推进服务端 tick 的 RPC。tick 由游戏引擎驱动，模组只观察不控制。断言统一走 `wait.until`（注册 `ServerTickEvents.END_SERVER_TICK` 回调检查条件）。
+  - 唯一例外 `be.tick`：在服务端线程把**单个** BE 的 ticker 同步跑 N 次（0..12000，上限防止卡死服务端线程），不推进世界时间、不 tick 邻居。ic2 机器测试靠它把十几秒的自然等待压到毫秒级。不要以它为先例增加别的驱动型 RPC。
   - **快进例外（0.8.0）**：时间压缩不新造 tick 驱动 RPC，一律复用原版 tick-rate manager：手动加速直通 `server.runCommand` + `/tick rate`、`/tick sprint`；`wait.until` 的 `sprint:true` 只是申请一份原版 sprint 预算（timeout+poll+20 ticks）并在命中/超时/求值异常/断连时 `stopSprinting()`（`SprintOwnership` 保证并发 wait 只有最后一个结束才停全局 sprint）。引擎仍自己决定何时 tick，mcdebug 只是去掉 50ms 步进——与"不驱动 tick"原则一致。
 - 服务端默认监听 `0.0.0.0`，容器部署时通过端口发布规则或防火墙限制访问范围。
 - 不要在 `src/main/resources/assets/mcdebug/` 之外加资源（避免污染上游资源命名空间）。
-- **两个 loader（Fabric / NeoForge 21.1.x）共用同一份源码**：`src/main`、`src/client`、`contract` 里**不允许**出现 `net.fabricmc.*` / `net.neoforged.*` 的 import，一律走接缝（§2 的 `loader/` 与 `client/loader/`）；loader 专属代码只能放 `src/main/kotlin/com/mcdebug/loader/fabric/**`、`src/client/kotlin/com/mcdebug/client/loader/fabric/**`、两个 entrypoint 和 `neoforge/`。改共享源码后**两个构建都要绿**（§8）。
+- **两个加载器（Fabric / NeoForge 21.1.x）共用同一份源码**：`src/main`、`src/client`、`contract` 里**不允许**出现 `net.fabricmc.*` / `net.neoforged.*` 的 import，一律走接缝（§2 的 `loader/` 与 `client/loader/`）；加载器专属代码只能放 `src/main/kotlin/com/mcdebug/loader/fabric/**`、`src/client/kotlin/com/mcdebug/client/loader/fabric/**`、两个入口和 `neoforge/`。改共享源码后**两个构建都要绿**（§8）。
 
 ## 2. 目录结构
 
@@ -54,7 +56,7 @@ mcdebug/
 ├── settings.gradle
 ├── AGENTS.md
 ├── contract/                 # 共享契约（方法名清单 + DTO 样板，零依赖）
-├── sdk/                      # JVM SDK（RPC、类型化 API、session、截图比较）
+├── sdk/                      # JVM SDK（RPC、类型化 API、会话、截图比较）
 ├── testkit/                  # JUnit 前端与原有 server-grid runner
 ├── frontend/                 # SDK/testkit/contract 的独立 JVM 构建与 Maven 暂存入口
 ├── cli/                      # Kotlin CLI（clikt）；依赖 SDK
@@ -65,13 +67,13 @@ mcdebug/
 │   ├── delegate.gradle        # 根构建里 :neoforge:build/runServer/runClient 的转发任务
 │   └── src/main/kotlin/com/mcdebug/loader/neoforge/{McDebugNeoForge,McDebugNeoForgeClient,
 │       NeoForgeLoaderApi,NeoForgeClientLoaderApi,NeoForgeStorageApi}.kt + java/…/NeoCapabilities.java
-│                              #   + java/com/mcdebug/client/mixin/MixinTargets.java（每个 loader 一份的注入点常量）
+│                              #   + java/com/mcdebug/client/mixin/MixinTargets.java（每个加载器一份的注入点常量）
 ├── mcdebug-cli.jar            # :cli:copyCliJar 产物（不进 git；发版由 release.yml 作为 Release 附件上传，
 │                              #   内含 mod.jar 与 mod-neoforge.jar 两份；`mcdebug jar --loader` 选一份写出）
 ├── src/main/
 │   ├── kotlin/com/mcdebug/
-│   │   ├── McDebugMod.kt         # **Fabric** server entrypoint，注册 server lifecycle 钩子（+ ServerPlane）
-│   │   ├── loader/               # loader 中立接缝：LoaderApi（环境/生命周期/tick/use-entity/命名）、
+│   │   ├── McDebugMod.kt         # **Fabric** 服务端入口，注册服务端 lifecycle 钩子（+ ServerPlane）
+│   │   ├── loader/               # 加载器中立接缝：LoaderApi（环境/生命周期/tick/use-entity/命名）、
 │   │   │                         #   RuntimeNames（映射表）、StorageApi（item/fluid/energy 句柄）
 │   │   │                         #   + fabric/ 下的 Fabric 实现（唯一允许 import fabric 的服务端目录）
 │   │   ├── rpc/                  # 传输 + 协议层（JsonRpc/RpcServer/RpcDispatcher/RpcErrors/RpcHandler/TransportConfig）
@@ -85,29 +87,29 @@ mcdebug/
 │   │   ├── wait/WaitOps.kt       # wait.until — 被动观察
 │   │   └── util/{NbtJson,ServerContext,Mappings}.kt   # Mappings：reflect.* 的 intermediary↔Mojang 名字翻译
 │   └── resources/
-│       ├── fabric.mod.json       # environment "*" + server/client 两个 entrypoint（普通 Java adapter，入口为可实例化 class）
+│       ├── fabric.mod.json       # environment "*" + server/client 两个入口（普通 Java 适配器，入口为可实例化 class）
 │       ├── mcdebug.mixins.json   # 服务端 mixin 配置（当前为空占位）
 │       └── modid.mixins.json     # ← Fabric 模板遗留，别删也别用
-└── src/client/                   # 客户端平面（gui.*），由 client entrypoint 加载，见 §14
+└── src/client/                   # 客户端平面（gui.*），由客户端入口加载，见 §14
     ├── kotlin/com/mcdebug/client/{McDebugClientMod,GuiOps,GuiScreenOps,GuiDevOps,ClientTasks,ClientRpc,ClientInfo,ClientPlane,ClientReflectOps,GuiParams}.kt
-    │                             # 根包只留引导/RPC 注册/参数工具；ClientPlane 与 loader 无关，两个 entrypoint 共用
-    │                             # + loader/{ClientLoaderApi.kt,fabric/FabricClientLoaderApi.kt}（客户端接缝）
-    │                             # + render/{Capture,Annotator,DrawRecorder,RenderControl,RenderSchedule,WidgetFrames}（抓帧/渲染调度/draw log）
-    │                             # + input/{GuiClickOps,GuiPointerOps,GuiInputOps,GuiInputParams,GuiInputState,GuiSettle}（点击/hover/键入/拖拽/settle）
-    │                             # + devloop/{Hotswap,ScreenReload,ProblemLog,ScreenGuard}（agent 迭代回路，见 §14）
+    │                             # 根包只留引导/RPC 注册/参数工具；ClientPlane 与加载器无关，两个入口共用
+    │                             # + 加载器/{ClientLoaderApi.kt,fabric/FabricClientLoaderApi.kt}（客户端接缝）
+    │                             # + 渲染/{Capture,Annotator,DrawRecorder,RenderControl,RenderSchedule,WidgetFrames}（抓帧/渲染调度/绘制日志）
+    │                             # + input/{GuiClickOps,GuiPointerOps,GuiInputOps,GuiInputParams,GuiInputState,GuiSettle}（点击/hover/键入/拖拽/稳定等待）
+    │                             # + devloop/{Hotswap,ScreenReload,ProblemLog,ScreenGuard}（代理迭代回路，见 §14）
     ├── java/com/mcdebug/client/mixin/{AbstractContainerScreenAccessor,…,GuiGraphicsMixin,ClientPacketListenerMixin,RenderSystemMixin}.java
     └── resources/mcdebug.client.mixins.json
 ```
 
-## 2b. 两个 loader 的构建形态
+## 2b. 两个加载器的构建形态
 
 | | Fabric 1.21.1（根构建） | NeoForge 21.1.x（`neoforge/` 嵌套构建） |
 |---|---|---|
 | 插件 | Fabric Loom 1.15 + Kotlin | ModDevGradle 2.0.148 + Kotlin 2.3.10 |
 | 源码 | `src/main` + `src/client` 原处 | `Sync` 到 `neoforge/build/generated/shared` 再编译：`src/main/kotlin`（去掉 `McDebugMod.kt` 与 `loader/fabric/**`）+ `src/client/kotlin`（去掉 `McDebugClientMod.kt` 与 `client/loader/fabric/**`）+ `src/client/java`（去掉 `MixinTargets.java`）+ `contract/src/main/kotlin` |
-| 元数据 | `fabric.mod.json`（两个 entrypoint） | `META-INF/neoforge.mods.toml`（`@Mod` 两个类 + `[[mixins]]` 引用**同一份** `mcdebug.client.mixins.json`） |
-| Kotlin 运行时 | jar 内嵌 kotlin-stdlib（不重定位），无 FLK 前置 | jar 内嵌 kotlin-stdlib（不重定位），`modLoader="javafml"`，`@Mod class`，无 KFF 前置 |
-| 命名空间 | dev=Mojang、生产=intermediary（要映射表） | dev 与生产都是 **Mojang 官方名**（`reflect.*` 不需要表，短类名不支持） |
+| 元数据 | `fabric.mod.json`（两个入口） | `META-INF/neoforge.mods.toml`（`@Mod` 两个类 + `[[mixins]]` 引用**同一份** `mcdebug.client.mixins.json`） |
+| Kotlin 运行时 | JAR 内嵌 kotlin-stdlib（不重定位），无 FLK 前置 | JAR 内嵌 kotlin-stdlib（不重定位），`modLoader="javafml"`，`@Mod class`，无 KFF 前置 |
+| 命名空间 | 开发=Mojang、生产=intermediary（要映射表） | 开发与生产都是 **Mojang 官方名**（`reflect.*` 不需要表，短类名不支持） |
 | 任务 | `./gradlew build\|runServer\|runClient` | `./gradlew :neoforge:build\|:neoforge:runServer\|:neoforge:runClient`（= 进 `neoforge/` 跑同名任务） |
 | 冒烟 | `scripts/fabric-smoke.sh`（51 条断言） | `scripts/neoforge-smoke.sh`（45 条断言 + 契约 79/79） |
 
@@ -130,12 +132,12 @@ mcdebug/
   - `ScreenOps` ↔ `screen.*`（服务端假玩家菜单 `AbstractContainerMenu`，只有槽位 JSON，**没有像素**；名字沿用旧称，不是 Mojang 的 `Screen`）
   - `GuiOps` ↔ `gui.*`（`src/client`，真实客户端渲染/截图/Screen 事件，**像素只能由这里产生**）
 - 错误码：JSON-RPC 标准 `-32700..-32603` + 自定义 `-32001..-32021`（在 `RpcErrors` 中）。客户端平面新增 `-32020 CLIENT_NOT_READY`（客户端没起来/没进世界）、`-32021 GUI_ELEMENT_NOT_FOUND`（`gui.click --text` 找不到控件，data 里带可选控件列表）
-- **平面（plane）**：`world.*`…=服务端平面（`src/main`，`server` entrypoint）；`gui.*`=客户端平面（`src/client`，`client` entrypoint）。两边在同一份 jar 里，方法名清单由 `contract/Methods.kt` 的 `SERVER_METHODS` / `CLIENT_METHODS` 声明（`RpcContractTest` 双向校验服务端侧 + 两平面不相交；客户端侧的注册表在客户端启动时自检，见 §14）
-- 传输：**双通道并行**（0.5.1+）。unix domain socket（AF_UNIX SOCK_STREAM，默认 `<gameDir>/mcdebug/socket`）是主通道，本机访问、多客户端并发、网络不可达；TCP（默认 25580，wildcard `0.0.0.0`）是辅助通道，用于跨机访问，同样多客户端并发。无鉴权，TCP 侧靠端口发布规则/防火墙限制。**容错语义**：两个监听各自独立 try/catch，单边绑定失败只记 WARN、不影响启动；仅当两边都失败才报错。
+- **平面（plane）**：`world.*`…=服务端平面（`src/main`，`server` 入口）；`gui.*`=客户端平面（`src/client`，`client` 入口）。两边在同一份 JAR 里，方法名清单由 `contract/Methods.kt` 的 `SERVER_METHODS` / `CLIENT_METHODS` 声明（`RpcContractTest` 双向校验服务端侧 + 两平面不相交；客户端侧的注册表在客户端启动时自检，见 §14）
+- 传输：**双通道并行**（0.5.1+）。Unix domain socket（AF_UNIX SOCK_STREAM，默认 `<gameDir>/mcdebug/socket`）是主通道，本机访问、多客户端并发、网络不可达；TCP（默认 25580，wildcard `0.0.0.0`）是辅助通道，用于跨机访问，同样多客户端并发。无鉴权，TCP 侧靠端口发布规则/防火墙限制。**容错语义**：两个监听各自独立 try/catch，单边绑定失败只记 WARN、不影响启动；仅当两边都失败才报错。
 
 ## 4. 传输配置解析顺序（两端统一）
 
-### 4a. unix socket 路径
+### 4a. Unix socket 路径
 
 1. JVM 系统属性 `-Dmcdebug.socket=<path>` / CLI `--socket <path>`（最优先）
 2. 环境变量 `MCDEBUG_SOCKET`
@@ -151,7 +153,7 @@ mcdebug/
 
 ### 4c. 发现文件（best effort）
 
-- `<gameDir>/mcdebug/port`：内容为 **unix socket 路径**（沿用旧文件名，0.4.x 时期内容是端口号，0.5.0 起变为 socket 路径）
+- `<gameDir>/mcdebug/port`：内容为 **Unix socket 路径**（沿用旧文件名，0.4.x 时期内容是端口号，0.5.0 起变为 socket 路径）
 - `<gameDir>/mcdebug/tcpPort`：内容为 **实际绑定的 TCP 端口号**（新文件，0.5.1+；仅 TCP 成功绑定时才写）
 
 客户端（CLI）默认走 socket 发现（`--socket` / `MCDEBUG_SOCKET` / `mcdebug/port` 文件）；跨机访问必须显式 `--tcp host:port`（或 `--host` + `--port`），CLI 不会在两种传输间自动回退。
@@ -188,7 +190,7 @@ java -jar mcdebug-cli.jar status    # 调用 server.status RPC（unix socket，�
 java -jar mcdebug-cli.jar --tcp <host>:25580 status   # 跨机访问（TCP）
 java -jar mcdebug-cli.jar jar --output ../consumer/run/mods            # Fabric 版（默认），并删掉同目录另一种 jar
 java -jar mcdebug-cli.jar jar --loader neoforge --output ../consumer/run/mods  # NeoForge 版（已内嵌 Kotlin 标准库）
-java -jar mcdebug-cli.jar skill --name neoforge-fabric-port  # 从本次构建安装 port skill 及 references；默认 skill 仍为 mcdebug
+java -jar mcdebug-cli.jar skill --name neoforge-fabric-port  # 从本次构建安装 port 技能及 references；默认技能仍为 mcdebug
 ```
 
 > 反编译 MC / Fabric API 源码（参考用，不参与编译、不进仓库）：`./gradlew genSources`，
@@ -197,13 +199,13 @@ java -jar mcdebug-cli.jar skill --name neoforge-fabric-port  # 从本次构建�
 
 ## 6. 添加新 RPC 方法的流程
 
-1. 在对应的 `*Ops.kt` 里加一个 `RpcHandler`（签名 `(MinecraftServer, JsonObject?) -> CompletableFuture<JsonElement>`），handler body 通过 `RpcContext.onServer(server) { ... }` 切到 server 线程
+1. 在对应的 `*Ops.kt` 里加一个 `RpcHandler`（签名 `(MinecraftServer, JsonObject?) -> CompletableFuture<JsonElement>`），处理器 body 通过 `RpcContext.onServer(server) { ... }` 切到服务端线程
 2. 错误抛出 `RpcException(code, message, data?)`（从 `RpcErrors` 选错误码）
 3. 类型在 `RpcHandlerGroup.methods(): Map<String, RpcHandler>` 注册
 4. **同步 `contract/src/main/kotlin/com/mcdebug/contract/Methods.kt`**：在对应组 setOf 中加方法名（`RpcContractTest` 会双向校验，漏加或写错直接构建失败）；有需要时同时补充 DTO 到 `contract/.../<Group>Dtos.kt`（字段名 = JSON 字段名，服务端 Gson 与未来 Kotlin 客户端共用）
 5. 对应在 `sdk/src/main/kotlin/com/mcdebug/sdk/DebugApi.kt` 加方法，参数与返回对齐
 6. CLI 命令在 `cli/src/main/kotlin/com/mcdebug/cli/commands/<Group>Commands.kt` 注册；没有专用 CLI 子命令时，至少更新 `raw`/REPL help 和 README 的 `mcdebug raw` 示例
-7. 重新 `./gradlew :cli:copyCliJar`（CLI fat jar）和 `./gradlew build`（契约测试 + 服务端）
+7. 重新 `./gradlew :cli:copyCliJar`（CLI fat JAR）和 `./gradlew build`（契约测试 + 服务端）
 
 ## 7. Tick 设计原则
 
@@ -217,40 +219,40 @@ java -jar mcdebug-cli.jar skill --name neoforge-fabric-port  # 从本次构建�
   - 字面量：数字（默认窄化为 NbtInt；NBT 写入要精确类型用 `be.setNbt` 的 `#nbt` 标注，见 §11b）/ 字符串 / `true` / `false` / `null`
   - 操作符：`==/!=/</<=/>/>=`
   - v1 的单比较谓词是 v2 DSL 的子集，完全向后兼容
-- 断连时服务端会取消该连接发起的 `wait.until`（`WaitOps.cancelConnection`），不依赖超时兜底；若该 wait 持有 sprint 油门，同一路径会跳回 server 线程收油门
+- 断连时服务端会取消该连接发起的 `wait.until`（`WaitOps.cancelConnection`），不依赖超时兜底；若该 wait 持有 sprint 油门，同一路径会跳回服务端线程收油门
 - `wait.until` 支持 `sprint:true`（快进，见 §1 例外条款）：要求有限 timeoutTicks，预算=timeout+pollInterval+20；墙钟计时逻辑不被加速，见 §11
 
 ## 8. 提交前验证
 
 - 改 Kotlin：`./gradlew build` 通过（0 warning, 0 error）
 - 改 Kotlin 逻辑（解析器/NBT/谓词/参数）：`./gradlew test` 通过（JUnit5，`src/test/kotlin/`）。服务端平面现有测试：`PredicateExprTest`（谓词 DSL）、`NbtJsonTest`（`#nbt` 标注+往返）、`ParamsTest`（参数校验与错误码）、`MappingsTest`（生成的映射表对应本 MC 版本）、`SnapshotOpsTest`、`RpcContractTest`、`RpcServerBindTest`
-- 新 handler 读参数一律用 `api/Params.kt`（`requirePos`/`requireBox`/`requireInt`/`requireObject`…），不要直接 `getAsJsonArray(...)`/`get(...).asInt`：缺参会变成 `-32603` 的 Kotlin 空检查文本。意外异常由 `RpcErrors.internal` 包成 `-32603`，`data` 里带异常类和栈顶几帧
+- 新处理器读参数一律用 `api/Params.kt`（`requirePos`/`requireBox`/`requireInt`/`requireObject`…），不要直接 `getAsJsonArray(...)`/`get(...).asInt`：缺参会变成 `-32603` 的 Kotlin 空检查文本。意外异常由 `RpcErrors.internal` 包成 `-32603`，`data` 里带异常类和栈顶几帧
 - 改 CLI/SDK：`./gradlew :cli:copyCliJar` 通过
-- 改 entrypoint/资源：手动 `./gradlew runServer` 启动一次确认 mod 加载 + RPC 监听
+- 改 entrypoint/资源：手动 `./gradlew runServer` 启动一次确认模组加载 + RPC 监听
 - 改冒烟脚本：`scripts/fabric-smoke.sh`（专用服）用 `scripts/contract-parity.py` 做契约+平面隔离校验（必须按 id 匹配响应、排除客户端平面 `gui.*`，曾因此报出假的 `inv.extract` 缺失），别再把解析内联回 shell
-- **改共享源码（`src/main`、`src/client`、`contract`）后两个 loader 都要绿**：`./gradlew build` + `scripts/fabric-smoke.sh`，以及 `./gradlew :neoforge:build` + `scripts/neoforge-smoke.sh`。只跑一边的“绿”不算绿：接缝两侧的实现很容易在**你没跑的那一侧**出现 parity bug（真实案例：NeoForge 侧 `insert` 误把示例栈 count 当上限，`storage.transfer` 只搬了 1 个，Fabric 侧一直是对的）
-- **跨 loader 验证有三层**（改共享源码/接缝时按需全跑）：① 两个冒烟脚本（Fabric 51 / NeoForge 45，含 storage 原子性护栏）；② `python3 scripts/parity-diff.py --a <fabric socket> --b <neoforge socket>`（53 条 loader 中立任务打在两个实例上，输出 DIFF/EXPECTED/RESET 分类，任务表 `scripts/parity-tasks.json`；**实体夹具用 armor stand 不用 pig**——`Mob` 在 0 玩家服务器上会被 `checkDespawn` 丢掉，曾经因此报过假 DIFF）；③ 黑盒验收（`docs/plan-neoforge-verification.md`：只给 CLI jar + `-h` + skill 的 agent 按批次跑任务，用 `scripts/neoforge-consumer/` 起发布 jar 的实例）。
-- **storage 搬运的 loader 语义不能拉平**：`storage.transfer` 先问 `StorageApi.moveItemsAtomically/moveFluidsAtomically`（Fabric 用 Transfer API 的 `Transaction`，语义是"目标收不下就整笔不发生"；NeoForge 没有事务，返回 null → 回退到 `StorageOps.moveBetween` 的 dry-run + 尽力回滚）。**不要**为了"两边代码一致"删掉这两个钩子：曾因此让 Fabric 侧丢掉原子性（目标部分接收 + 来源拒绝收回 = 资源消失）。两个冒烟都有护栏（目标箱子填满 → `transferred:0` 且来源数量不变）。
-- NeoForge 构建**没有自己的单测**（`neoforge/` 只有 `check` 里的 jar 自包含门禁）：共享代码的逻辑只在根构建（Fabric）跑 JUnit；NeoForge 侧的回归靠 `scripts/neoforge-smoke.sh`（45 条）与黑盒验收 `docs/plan-neoforge-verification.md` 兜。
+- **改共享源码（`src/main`、`src/client`、`contract`）后两个加载器都要绿**：`./gradlew build` + `scripts/fabric-smoke.sh`，以及 `./gradlew :neoforge:build` + `scripts/neoforge-smoke.sh`。只跑一边的“绿”不算绿：接缝两侧的实现很容易在**你没跑的那一侧**出现 parity 缺陷（真实案例：NeoForge 侧 `insert` 误把示例栈 count 当上限，`storage.transfer` 只搬了 1 个，Fabric 侧一直是对的）
+- **跨加载器验证有三层**（改共享源码/接缝时按需全跑）：① 两个冒烟脚本（Fabric 51 / NeoForge 45，含 storage 原子性护栏）；② `python3 scripts/parity-diff.py --a <fabric socket> --b <neoforge socket>`（53 条加载器中立任务打在两个实例上，输出 DIFF/EXPECTED/RESET 分类，任务表 `scripts/parity-tasks.json`；**实体夹具用 armor stand 不用 pig**——`Mob` 在 0 玩家服务器上会被 `checkDespawn` 丢掉，曾经因此报过假 DIFF）；③ 黑盒验收（`docs/plan-neoforge-verification.md`：只给 CLI JAR + `-h` + 技能的代理按批次跑任务，用 `scripts/neoforge-consumer/` 起发布 JAR 的实例）。
+- **storage 搬运的加载器语义不能拉平**：`storage.transfer` 先问 `StorageApi.moveItemsAtomically/moveFluidsAtomically`（Fabric 用 Transfer API 的 `Transaction`，语义是"目标收不下就整笔不发生"；NeoForge 没有事务，返回 null → 回退到 `StorageOps.moveBetween` 的 dry-run + 尽力回滚）。**不要**为了"两边代码一致"删掉这两个钩子：曾因此让 Fabric 侧丢掉原子性（目标部分接收 + 来源拒绝收回 = 资源消失）。两个冒烟都有护栏（目标箱子填满 → `transferred:0` 且来源数量不变）。
+- NeoForge 构建**没有自己的单测**（`neoforge/` 只有 `check` 里的 JAR 自包含门禁）：共享代码的逻辑只在根构建（Fabric）跑 JUnit；NeoForge 侧的回归靠 `scripts/neoforge-smoke.sh`（45 条）与黑盒验收 `docs/plan-neoforge-verification.md` 兜。
 - 改 `src/main/kotlin/com/mcdebug/loader/**` 或 `src/client/.../loader/**`：接口是契约，两套实现必须同时改；新增能力时**先在接口 KDoc 里写清语义**（例：`insert(stack, maxAmount)` 里 `stack` 只标识物品、`maxAmount` 才是数量）
 - 改 `src/client/**`（客户端平面）：`./gradlew compileClientKotlin` + `./gradlew build`（后者含 `verifyJarSelfContained`，见 §14）；真机验证要起 `runClient` 并用 CLI 打 `gui.*`（Java/Kotlin 改动必须重启客户端，只有贴图/语言/模型改动可以 `gui reload-resources`）
-- **发布 jar 必须自包含**：`verifyJarSelfContained` 已挂在 `check` 上，缺失入口点运行时用到的类/资源会直接构建失败。历史上 `implementation project(':contract')` 就是这么炸的（dev classpath 有、jar 里没有 → 别的项目里 `NoClassDefFoundError`）
+- **发布 JAR 必须自包含**：`verifyJarSelfContained` 已挂在 `check` 上，缺失入口点运行时用到的类/资源会直接构建失败。历史上 `implementation project(':contract')` 就是这么炸的（开发类路径有、JAR 里没有 → 别的项目里 `NoClassDefFoundError`）
 - 改了 API/CLI 协议：两端一起改，Kotlin 端 `DebugApi` 强类型签名是契约（`RpcContractTest` 双向校验方法名）
-- 改了 agent 工作流相关的 CLI 行为（命令名、默认值、推荐用法）：同步 `skills/mcdebug/SKILL.md`（给消费者项目里的 agent 用；命令细节留在 `--help`，skill 只写流程和坑）
+- 改了代理工作流相关的 CLI 行为（命令名、默认值、推荐用法）：同步 `skills/mcdebug/SKILL.md`（给消费者项目里的代理用；命令细节留在 `--help`，技能只写流程和坑）
 - 改了用户可见 RPC：更新 `README.md`，尤其要给 `mcdebug raw namespace.method '{...}'` 示例
-- 测试编排统一在消费者项目（Kotlin JUnit，`@McDebugTest` runner）；mod 端不做任何 test DSL / 注解扫描
+- 测试编排统一在消费者项目（Kotlin JUnit，`@McDebugTest` 运行器）；模组端不做任何 test DSL / 注解扫描
 - 改 mcdebug 默认端口 / 协议层：先在 plan 文件里讨论再动
 
 ## 9. 调试技巧
 
 - 看 RPC socket：`cat run/mcdebug/port`（内容为 socket 路径）；TCP 端口：`cat run/mcdebug/tcpPort`
-- 实时看 server 日志：`run/logs/latest.log`（loom 写文件 + stdout）
-- Loom 缓存了旧 remap jar：清 `run/.fabric/processedMods/`，再 `./gradlew build`
+- 实时看服务端日志：`run/logs/latest.log`（loom 写文件 + stdout）
+- Loom 缓存了旧 remap JAR：清 `run/.fabric/processedMods/`，再 `./gradlew build`
 - CLI 快速调试：`java -jar mcdebug-cli.jar raw world.getBlock '{"pos":[0,64,0]}'`（本机 socket，或用 native 版 `mdb`）；跨机：`--tcp host:port ...`
 
 ## 10. 版本更新规则
 
-版本唯一来源是 `gradle.properties` 的 `mod_version`（mod jar 名、`fabric.mod.json`、CLI manifest `Implementation-Version`、Release 都由它派生）。
+版本唯一来源是 `gradle.properties` 的 `mod_version`（模组 JAR 名、`fabric.mod.json`、CLI 清单 `Implementation-Version`、Release 都由它派生）。
 
 ```bash
 node scripts/set-version.mjs X.Y.Z
@@ -272,23 +274,23 @@ node scripts/set-version.mjs X.Y.Z
 ### 踩过的坑
 
 - **artifactId 用了项目名**：`cli` 子项目发布到 mavenLocal 时 artifactId 默认是 `cli`；已显式设为 `mcdebug-cli`。
-- **npm/pnpm 分发已全部移除**：0.4.x 的 TS 客户端（`mcdebug-client/`）0.5.0 退役；0.5.0–0.6.2 的根目录 npm 壳（`package.json` + `bin/mcdebug.js`，`pnpm dlx github:yu1745/mcdebug#vX`）0.6.3 删除，它是 CLI jar 必须进 git 的唯一原因。不要再加回 npm 包。
+- **npm/pnpm 分发已全部移除**：0.4.x 的 TS 客户端（`mcdebug-client/`）0.5.0 退役；0.5.0–0.6.2 的根目录 npm 壳（`package.json` + `bin/mcdebug.js`，`pnpm dlx github:yu1745/mcdebug#vX`）0.6.3 删除，它是 CLI JAR 必须进 git 的唯一原因。不要再加回 npm 包。
 
 ## 11. 已知小问题
 
 - `be.setNbt` 用 `readNbt` 重置整个 NBT；某些 BlockEntity 子类可能不会完全重新初始化（红石信号、缓存等）
-- `ScanOps.countByBlock` 在 box 很大时是 O(N)，加 chunk 进度回调再说
-- `world.getRegion` / `world.selectBlocks` 的 `ensureChunkLoaded` 只检查不加载，遇到未加载 chunk 直接抛 `CHUNK_NOT_LOADED`；而 `setBlock(s)` / `getBlock` 不做该检查，chunk 状态行为在 `world.*` 各方法间不完全一致
-- `FakePlayerPool` 是 per-(server,world) 单例且每次调用 mutate 其 position/yaw/手部状态：同一 ServerWorld 上并发 RPC（例如两个 CLI 连接同时 useOnBlock）会互相踩；test-runner 用网格隔离缓解了，但单连接内混用需注意
+- `ScanOps.countByBlock` 在 box 很大时是 O(N)，加区块进度回调再说
+- `world.getRegion` / `world.selectBlocks` 的 `ensureChunkLoaded` 只检查不加载，遇到未加载区块直接抛 `CHUNK_NOT_LOADED`；而 `setBlock(s)` / `getBlock` 不做该检查，区块状态行为在 `world.*` 各方法间不完全一致
+- `FakePlayerPool` 是 per-(服务端,world) 单例且每次调用 mutate 其 position/yaw/手部状态：同一 ServerWorld 上并发 RPC（例如两个 CLI 连接同时 useOnBlock）会互相踩；test-runner 用网格隔离缓解了，但单连接内混用需注意
 - `NbtJson.fromJson` 有损：JSON 数字统一成 `NbtInt`，无法区分 byte/short/int/long；某些 BE 字段（byte 标志位、long 坐标）需要精确类型时可能出错
-- MCP adapter 没做（对话中"Layer 4"）
-- 自定义 storage adapter SPI 没做；特殊资源类型后续扩展
-- **跨 loader 语义差异**（同一个 CLI 打两种实例时会遇到，完整表见 `docs/plan-neoforge-port.md` §11.4）：① 流体单位 Fabric=`droplet`（1 桶 81000）vs NeoForge=`mb`（1 桶 1000），读 `server.status.fluidUnit`；② `fluid.*` 的 `--index` 在 NeoForge 只能“选定并报告”那个罐，注/抽由 `IFluidHandler` 自己路由；③ `storage.get` 的 `supportsInsertion/Extraction`：Fabric 是能力标志，NeoForge 是**当前状态**推导（满罐→`supportsInsertion:false`、空罐→`supportsExtraction:false`），跨 loader 不要比；④ `reflect.*` 在 NeoForge 只吃 FQN 类名（没有映射表可查短名），且名字相同时不返回 `mojangClass` 字段；⑤ 两端 jar 均内嵌 Kotlin 标准库，无需 Kotlin 前置；⑥ 能量单位有协议字段了：`server.status.energyUnit` = `E`（Fabric）/`FE`（NeoForge），与 `fluidUnit` 同一模式
+- MCP 适配器没做（对话中"Layer 4"）
+- 自定义 storage 适配器 SPI 没做；特殊资源类型后续扩展
+- **跨加载器语义差异**（同一个 CLI 打两种实例时会遇到，完整表见 `docs/plan-neoforge-port.md` §11.4）：① 流体单位 Fabric=`droplet`（1 桶 81000）vs NeoForge=`mb`（1 桶 1000），读 `server.status.fluidUnit`；② `fluid.*` 的 `--index` 在 NeoForge 只能“选定并报告”那个罐，注/抽由 `IFluidHandler` 自己路由；③ `storage.get` 的 `supportsInsertion/Extraction`：Fabric 是能力标志，NeoForge 是**当前状态**推导（满罐→`supportsInsertion:false`、空罐→`supportsExtraction:false`），跨加载器不要比；④ `reflect.*` 在 NeoForge 只吃 FQN 类名（没有映射表可查短名），且名字相同时不返回 `mojangClass` 字段；⑤ 两端 JAR 均内嵌 Kotlin 标准库，无需 Kotlin 前置；⑥ 能量单位有协议字段了：`server.status.energyUnit` = `E`（Fabric）/`FE`（NeoForge），与 `fluidUnit` 同一模式
 - `modid.mixins.json` 是 Fabric 模板遗留；`mcdebug.mixins.json` 仍是空占位，真正在用的 mixin 位于客户端侧的 `mcdebug.client.mixins.json`（GUI 矩形访问器、渲染调度/新帧屏障、失焦策略/虚拟光标，见 §14）。三个配置文件都不要当成"没用的模板"删掉
 - `inv.*` 与 `storage.*` 有重叠：`inv.getSlot/setSlot` 是槽位级访问（storage 没有对应），保留；`inv.insert/extract` 和 `fluid.*` 是 `storage.*` 的特例，帮助文本已指向 storage，ic2 测试仍在用所以没删
-- 坐标参数在 CLI 有三种写法（`--x/--y/--z`、`--from "x,y,z"`、chunk 的 `--cx/--cz`），RPC 侧统一是 `[x,y,z]` 数组；没统一 CLI 是因为会破坏现有脚本
+- 坐标参数在 CLI 有三种写法（`--x/--y/--z`、`--from "x,y,z"`、区块的 `--cx/--cz`），RPC 侧统一是 `[x,y,z]` 数组；没统一 CLI 是因为会破坏现有脚本
 - `inv.insert` / `inv.extract` 对目标方块已消失（如过压爆炸成 air）时报 `-32004 no block entity`，错误不够友好；改进：目标无 BE 时返回 `INVALID_TARGET`/`STORAGE_NOT_FOUND` 类错误并带 `reason`（ic2-fabric 过压测试曾踩中：机器放下即炸后 insertItem 必然撞上）
-- 快进（`/tick sprint`、`wait.until sprint:true`）只加速 tick 域状态：mod 里用墙钟（`System.currentTimeMillis`/`Instant.now`）的冷却/进度不会被加速。sprint 期间原版以 `hasTimeLeft=false` 跑 tick，部分可选工作（区块任务等）被推迟，属原版语义；watchdog/autosave 是 rate-aware 的，不会误杀/刷存档。集成服务器需处于非暂停状态（暂停时 sprint 不推进）。手动 `/tick sprint` 与 `wait --sprint` 不要混用：后申请的预算覆盖前者
+- 快进（`/tick sprint`、`wait.until sprint:true`）只加速 tick 域状态：模组里用墙钟（`System.currentTimeMillis`/`Instant.now`）的冷却/进度不会被加速。sprint 期间原版以 `hasTimeLeft=false` 跑 tick，部分可选工作（区块任务等）被推迟，属原版语义；watchdog/autosave 是 rate-aware 的，不会误杀/刷存档。集成服务器需处于非暂停状态（暂停时 sprint 不推进）。手动 `/tick sprint` 与 `wait --sprint` 不要混用：后申请的预算覆盖前者
 
 ## 11b. 已完成变更记录
 
@@ -297,20 +299,20 @@ node scripts/set-version.mjs X.Y.Z
 
 不在计划内（已决定不做，不要再加回来）：
 - 鉴权：当前协议没有鉴权；服务端监听所有接口，部署时必须通过端口发布规则或防火墙限制访问范围。
-- `scan.countByBlock` chunk 进度回调：O(N) 可接受。
-- MCP adapter。
+- `scan.countByBlock` 区块进度回调：O(N) 可接受。
+- MCP 适配器。
 
-## 12. 已移除的子系统（避免被旧文档/旧 commit 误导）
+## 12. 已移除的子系统（避免被旧文档/旧提交误导）
 
-下列内容在历史 commit / 旧版文档中出现过，但**当前已不在仓库**，不要再加回来：
+下列内容在历史提交 / 旧版文档中出现过，但**当前已不在仓库**，不要再加回来：
 
-- **Gradle 插件**（`gradle-plugin/` 子项目，曾含 `McDebugPlugin` / `McDebugExtension` / `McDebugTestTask` / `mcdebugTest` task）——已移除。测试编排改由消费者项目（Kotlin JUnit，`com.mcdebug.runner`）承担。
-- **TS 客户端 / TS 测试 runner**（`mcdebug-client/`）——0.5.0 起退役，由 Kotlin CLI（`cli/`）+ JUnit runner 接替；TS 测试已全部移植为 Kotlin JUnit（见 ic2-fabric）。
+- **Gradle 插件**（`gradle-plugin/` 子项目，曾含 `McDebugPlugin` / `McDebugExtension` / `McDebugTestTask` / `mcdebugTest` 任务）——已移除。测试编排改由消费者项目（Kotlin JUnit，`com.mcdebug.runner`）承担。
+- **TS 客户端 / TS 测试运行器**（`mcdebug-client/`）——0.5.0 起退役，由 Kotlin CLI（`cli/`）+ JUnit 运行器接替；TS 测试已全部移植为 Kotlin JUnit（见 ic2-fabric）。
 - **Gradle 插件的 JitPack 构件**——已随 `gradle-plugin/` 子项目移除，不要恢复该插件或其坐标。
-- **Server mod jar 的 JitPack 构建仍在使用**。根项目是当前唯一的 Gradle 项目，`jitpack.yml` 通过 `publishToMavenLocal` 发布根项目的 `mavenJava` 构件。不要因为 Gradle 插件已移除而删除此配置。
+- **Server 模组 JAR 的 JitPack 构建仍在使用**。根项目是当前唯一的 Gradle 项目，`jitpack.yml` 通过 `publishToMavenLocal` 发布根项目的 `mavenJava` 构件。不要因为 Gradle 插件已移除而删除此配置。
   - `build.gradle` 里的 `maven { url "https://jitpack.io" }` 用于拉取第三方依赖，与本项目发布配置是两个不同用途。
-  - GitHub Release（`.github/workflows/release.yml`）同时提供 remapped jar，给不用 CLI 的人；它不取代 JitPack server jar 构建。
-  - CLI 自带同一次构建的 mod jar（`cli/build.gradle` 把 `remapJar` 产物放进 fat jar 的 `META-INF/mcdebug/mod.jar`，native-image 由 `resource-config.json` 带上），`mcdebug jar [--output 文件|mods目录]` 直接写出、不联网。0.6.3 之前它从 Release 下载 + sha256 校验，没打 tag 的版本会 404，已删除。
+  - GitHub Release（`.github/workflows/release.yml`）同时提供 remapped JAR，给不用 CLI 的人；它不取代 JitPack 服务端 JAR 构建。
+  - CLI 自带同一次构建的模组 JAR（`cli/build.gradle` 把 `remapJar` 产物放进 fat JAR 的 `META-INF/mcdebug/mod.jar`，native-image 由 `resource-config.json` 带上），`mcdebug jar [--output 文件|mods目录]` 直接写出、不联网。0.6.3 之前它从 Release 下载 + sha256 校验，没打 tag 的版本会 404，已删除。
 - **Kotlin test DSL / 注解扫描测试入口 / `scanPackages` 配置**——随 Gradle 插件一并移除。
 - **npm 壳包**（`package.json`、`bin/mcdebug.js`、`pnpm dlx` 用法）与进 git 的 `mcdebug-cli.jar`——0.6.3 移除，见 §10。
 - **Forge 1.20.1 原生移植**（`forge/` 嵌套 ForgeGradle 6 构建、`scripts/forge-smoke.sh`、`server.mantleInteract`/`server.forgeFluidCapability` 这两个 Kilt 时期的 Forge 诊断 RPC）——0.6.3 移除，1.20.1 线已归档。
@@ -337,57 +339,57 @@ node scripts/set-version.mjs X.Y.Z
 
 > 设计与取舍的完整记录（含未实现的 P1/P2、验证证据）：`docs/plan-gui-screenshot.md`。
 
-**为什么要有它**：服务端平面只能返回数据，永远拿不到像素——渲染是客户端的事。`screen.*`（服务端假玩家菜单）给的是槽位 JSON；`gui.*` 在**真实客户端**里截图与点击，agent 才能闭环调试 GUI（"摆方块/写 NBT → 打开 GUI → 截图 → 点击 → 再截图"）。
+**为什么要有它**：服务端平面只能返回数据，永远拿不到像素——渲染是客户端的事。`screen.*`（服务端假玩家菜单）给的是槽位 JSON；`gui.*` 在**真实客户端**里截图与点击，代理才能闭环调试 GUI（"摆方块/写 NBT → 打开 GUI → 截图 → 点击 → 再截图"）。
 
-### 14.0 怎么用（agent 工作流，先读这段）
+### 14.0 怎么用（代理工作流，先读这段）
 
 1. 摆场景走服务端平面（`world.setBlock` / `inv.setSlot` / `be.setNbt`），写完 `gui settle` 再看 GUI。
-   纯客户端 Screen（配置页/手册/自写 Screen）不用方块：`gui open-screen pkg.Fixtures#myScreen`（dev 源码集里的静态工厂，可带 Screen/Player/Minecraft/Options 参数）或 `gui open-screen inventory`。
-2. 看：`gui screenshot --mode gui --annotate`（`*.annotated.png` 里青色数字=槽位、品红数字=控件序号）+ `gui screen`；要核对 `renderBg` 里画的进度条/能量条/贴图偏移，用 `--draw-log`（每个 blit/fill/文字/物品/tooltip 及其 GUI 单位矩形、贴图与 texel UV）。tooltip 用 `gui hover --slot N|--gui X,Y`（返回那一帧真正画出的 tooltip，含 renderBg 里手画的能量条提示）。
-3. 动：`gui click --slot N|--widget N|--text|--png`，`gui scroll --dy N`，加 `--shot gui [--screen]` 一次往返拿"结果+settle+截图+期间日志"（底层 `gui.act`）；点击默认 settle 返回，不再固定睡 20 tick。`--text` 先匹配控件文字，找不到再匹配本帧画出的字符串（手画按钮/列表项，`mode:"drawnText"`）。
-4. 出问题先看 `gui problems --brief`（全 JVM WARN/ERROR + Screen 渲染异常）；Screen render 抛异常不再崩客户端（screen guard），`gui.status.screenGuard.fault` 有堆栈。
-5. 改代码：`./gradlew classes` → 方法体改动 `mcdebug gui hotswap --classes build/classes/kotlin/client`（全有或全无，自动 reinit）；当前 Screen 类本身加字段/方法/lambda/按钮 → `mcdebug gui reload-screen --classes ...`（新类加载器重建实例，容器沿用同一 menu）；只改资源用 `gui reload-resources`；其它类的结构改动要重启（或 JBR `-XX:+AllowEnhancedClassRedefinition`）。
+   纯客户端 Screen（配置页/手册/自写 Screen）不用方块：`gui open-screen pkg.Fixtures#myScreen`（开发源码集里的静态工厂，可带 Screen/Player/Minecraft/Options 参数）或 `gui open-screen inventory`。
+2. 看：`gui screenshot --mode gui --annotate`（`*.annotated.png` 里青色数字=槽位、品红数字=控件序号）+ `gui screen`；要核对 `renderBg` 里画的进度条/能量条/贴图偏移，用 `--draw-log`（每个 blit/fill/文字/物品/tooltip 及其 GUI 单位矩形、贴图与 texel UV）。提示框用 `gui hover --slot N|--gui X,Y`（返回那一帧真正画出的提示框，含 renderBg 里手画的能量条提示）。
+3. 动：`gui click --slot N|--widget N|--text|--png`，`gui scroll --dy N`，加 `--shot gui [--screen]` 一次往返拿"结果+稳定等待+截图+期间日志"（底层 `gui.act`）；点击默认稳定等待返回，不再固定睡 20 tick。`--text` 先匹配控件文字，找不到再匹配本帧画出的字符串（手画按钮/列表项，`mode:"drawnText"`）。
+4. 出问题先看 `gui problems --brief`（全 JVM WARN/ERROR + Screen 渲染异常）；Screen 渲染抛异常不再崩客户端（界面异常保护），`gui.status.screenGuard.fault` 有堆栈。
+5. 改代码：`./gradlew classes` → 方法体改动 `mcdebug gui hotswap --classes build/classes/kotlin/client`（全有或全无，自动重新初始化）；当前 Screen 类本身加字段/方法/lambda/按钮 → `mcdebug gui reload-screen --classes ...`（新类加载器重建实例，容器沿用同一 menu）；只改资源用 `gui reload-resources`；其它类的结构改动要重启（或 JBR `-XX:+AllowEnhancedClassRedefinition`）。
 6. 回归：`gui screenshot --hide-cursor`（该帧光标移出屏幕：无悬停高亮/tooltip/手持物）+ `gui compare --ignore x,y,w,h --report r.html`；只有显式 `--accept` 写基线。
 
 下面 14.1 起是**实现不变式**（改 `src/client/**` 时要守的规则）。
 
 ### 14.1 实现不变式
 
-- **entrypoint 语义（Fabric）**：`fabric.mod.json` 的 `environment` 是 `"*"`，`server` entrypoint = `com.mcdebug.McDebugMod`（`DedicatedServerModInitializer`），`client` entrypoint = `com.mcdebug.client.McDebugClientMod`（`ClientModInitializer`）。**两个 entrypoint 现在只做“装接缝 + 交给 `ClientPlane`/`ServerPlane`”**：客户端引导主体在 `ClientPlane.start()`（两个 loader 共用），客户端事件走 `ClientLoaderApi`（tick/started/stopping/gameDir/pre-mixin 字节），NeoForge 侧对应 `McDebugNeoForge`（common，含服务端平面）与 `McDebugNeoForgeClient`（`dist=CLIENT`，客户端平面）。loader 0.19.x **没有** `net.fabricmc.api.ServerModInitializer`，所以专用服务器不会触发 client entrypoint，而 client 上 server entrypoint **根本不触发**——单机客户端要两个平面都有，必须由 client entrypoint 自己调 `ServerPlane.installLifecycleHooks()`（它挂的是 `ServerLifecycleEvents`，集成服务器同样触发）。
+- **入口语义（Fabric）**：`fabric.mod.json` 的 `environment` 是 `"*"`，`server` 入口 = `com.mcdebug.McDebugMod`（`DedicatedServerModInitializer`），`client` 入口 = `com.mcdebug.client.McDebugClientMod`（`ClientModInitializer`）。**两个入口现在只做“装接缝 + 交给 `ClientPlane`/`ServerPlane`”**：客户端引导主体在 `ClientPlane.start()`（两个加载器共用），客户端事件走 `ClientLoaderApi`（tick/started/stopping/gameDir/pre-mixin 字节），NeoForge 侧对应 `McDebugNeoForge`（common，含服务端平面）与 `McDebugNeoForgeClient`（`dist=CLIENT`，客户端平面）。加载器 0.19.x **没有** `net.fabricmc.api.ServerModInitializer`，所以专用服务器不会触发客户端入口，而客户端上服务端入口 **根本不触发**——单机客户端要两个平面都有，必须由客户端入口自己调 `ServerPlane.installLifecycleHooks()`（它挂的是 `ServerLifecycleEvents`，集成服务器同样触发）。
 - **两个平面的端点必须区分**（单机客户端同进程同 gameDir）：服务端 `<gameDir>/mcdebug/socket` + 发现文件 `mcdebug/port`，TCP 25580 默认开；客户端 `<gameDir>/mcdebug/clientSocket` + `mcdebug/clientPort`，TCP **25581 默认关**（真实玩家客户端绝不能开）。配置键 `mcdebug.clientSocket`/`MCDEBUG_CLIENT_SOCKET`/json `clientSocket`（TCP 同理加 `client` 前缀）。`RpcServer` 的 `TransportConfig` 就是为这个抽的——它在 `RpcServer.kt` 里。
-- **线程规则**：`gui.*` handler 的入参在 RPC 连接线程，一切客户端状态读写都要 `ClientTasks.onClient(client)`（`client.execute{}`，在客户端线程时内联执行）。**续接 future 也要用 `ClientTasks.thenOnClient`**：`thenApply` 在前一个 future 已完成时会跑在 RPC 线程上。截图先入有界队列，`MinecraftRenderMixin` 调原 `GameRenderer.render` 并 flush 后再由 `Capture.afterFrame` 在客户端线程读回新帧，PNG 编码/落盘才丢到 `Util.ioPool()`。**tick 不是新帧屏障**；不要用 `RenderSystem.recordRenderCall` 代替明确渲染完成点。业务等待仍是被动 tick 回调，同 §7 的"只观察不驱动"。
+- **线程规则**：`gui.*` 处理器的入参在 RPC 连接线程，一切客户端状态读写都要 `ClientTasks.onClient(client)`（`client.execute{}`，在客户端线程时内联执行）。**续接 future 也要用 `ClientTasks.thenOnClient`**：`thenApply` 在前一个 future 已完成时会跑在 RPC 线程上。截图先入有界队列，`MinecraftRenderMixin` 调原 `GameRenderer.render` 并 flush 后再由 `Capture.afterFrame` 在客户端线程读回新帧，PNG 编码/落盘才丢到 `Util.ioPool()`。**tick 不是新帧屏障**；不要用 `RenderSystem.recordRenderCall` 代替明确渲染完成点。业务等待仍是被动 tick 回调，同 §7 的"只观察不驱动"。
 - **点击报告与坐标**：四种点击方式都返回 `guiX/guiY`（slot = 槽中心）。截图 `transform.pixelsPerGuiXY=[sx,sy]` 来自实际渲染投影，不能用经过 ceil 的 guiScaledWidth 反推；PNG 坐标 = `[guiX*sx-crop[0], guiY*sy-crop[1]]`，`cropInGui` 保留浮点精度。`gui click --png` 反算 Screen 坐标；变换不是 GLFW 窗口坐标。
 - **点击与光标**：`Screen.mouseClicked/mouseReleased` 直接派发，slot 走 `GameMode.handleInventoryMouseClick`，服务端裁定。continuous 模式保留真实光标 warp（失焦时 MC 不更新内部鼠标）；轻量模式使用虚拟 Screen 光标，让手持物品/提示/高亮在后台也跟随 RPC 点击，不干扰桌面指针。`--no-cursor-move` 禁止更新光标。状态确认仍以服务端数据为准，截图不等于网络确认。
 - **轻量运行**：见 `docs/plan-lightweight-client.md`。`RenderControl` + `RenderSchedule` 只门控 GameRenderer，不取消 runTick/自然 tick/网络/窗口事件泵。`clientRenderMode=continuous` 默认不变；`demand` 按需完整出帧，`gui-only` 显式跳世界/HUD（像素语义可能不同）。配置优先级 JVM属性 → 环境变量 → config/mcdebug.json；`clientLoopFps=20`（20..260）、`clientIdleFps=1`（0..loopFps，0=只响应截图/切屏）。仅在稳定世界/容器界面节流，加载/overlay/其他 Screen 保持正常渲染；模式不省略资源/GL初始化，不承诺低内存。失焦不自动暂停，显式暂停界面仍遵循引擎语义。
 - **探测要设上限**：CLI `--timeout` 管连接/握手（毫秒），`--request-timeout` 管请求（秒；0=无限）。普通请求默认30秒，`wait.until` 默认遵循服务端 tick timeout、不额外套墙钟限制；显式选项可覆盖。超时结束本地等待并关闭连接，**不代表远端操作取消/回滚**。版本检查读 server.ready，不再先发 status。发现 socket 只代表端点存在，世界就绪还需检查 `gui.status.inWorld`。
-- **mixins**：客户端有 `AbstractContainerScreenAccessor`（GUI矩形/hoveredSlot）、`AbstractWidgetRenderMixin`（只观察：给每个控件打"哪一帧画过"的戳，见下方 WidgetFrames）、`MinecraftRenderMixin`（渲染完成屏障/调度/限帧）、`GameRendererMixin`（失焦策略；`renderWithTooltip` 一个 MixinExtras `@WrapOperation` 同时做虚拟光标与 screen guard，别再拆回两个 `@ModifyArg`）、`RenderSystemMixin`（节流时可被 RPC 唤醒的 limitDisplayFPS）、`GuiGraphicsMixin`（draw log，只观察不改）、`ClientPacketListenerMixin`（只吞 settle barrier 自己的 suggestion 回包）、`NativeImageAccessor`/`ClientTextTooltipAccessor`。锁定1.21.1，不加旧版分支。Loom 1.15 在 remapJar 直接重映射注解值，不需要 refmap；**但它把单值 `at` 写成数组**，`@Redirect`/`@ModifyArg` 等 `at` 是单个 `At` 的注解在消费者项目里会让 MixinExtras 抛 `ClassCastException`（MC 启动即崩，mcdebug 自己的 dev 不重映射所以发现不了）——一律用 `@WrapOperation`/`@Inject`（`at` 是 `At[]`），验打包必须在消费者项目里起客户端；必须用真实客户端验证注入点，编译通过不等于注入成功（`defaultRequire: 1`，注入失败即启动失败）。`@Inject` handler 要么带全部目标参数要么一个都不带，多重载各写一个。
-- **契约与测试**：启动时仍将 `GuiOps.methods()` 与 `Methods.CLIENT_METHODS` 对账，将 mismatch 写进 `gui.status`。test classpath 含 client output，用于无GL的纯调度/几何单测；真实截图/线程/mixin 仍靠客户端冒烟验证。停止时取消截图和 tick waiters 并关闭客户端 RPC。
-- **自包含 jar（踩过的坑）**：发布 jar 是**单个**文件丢进 `mods/`，所以 `contract` 的源码被 `sourceSets.main.kotlin.srcDir` 直接编进 mod（不是 `implementation project(':contract')`，那样 dev 能跑、装到别的项目里就 `NoClassDefFoundError`）。`verifyJarSelfContained` 守住这条线。
+- **mixins**：客户端有 `AbstractContainerScreenAccessor`（GUI矩形/hoveredSlot）、`AbstractWidgetRenderMixin`（只观察：给每个控件打"哪一帧画过"的戳，见下方 WidgetFrames）、`MinecraftRenderMixin`（渲染完成屏障/调度/限帧）、`GameRendererMixin`（失焦策略；`renderWithTooltip` 一个 MixinExtras `@WrapOperation` 同时做虚拟光标与界面异常保护，别再拆回两个 `@ModifyArg`）、`RenderSystemMixin`（节流时可被 RPC 唤醒的 limitDisplayFPS）、`GuiGraphicsMixin`（绘制日志，只观察不改）、`ClientPacketListenerMixin`（只吞稳定等待屏障自己的 suggestion 回包）、`NativeImageAccessor`/`ClientTextTooltipAccessor`。锁定1.21.1，不加旧版分支。Loom 1.15 在 remapJar 直接重映射注解值，不需要 refmap；**但它把单值 `at` 写成数组**，`@Redirect`/`@ModifyArg` 等 `at` 是单个 `At` 的注解在消费者项目里会让 MixinExtras 抛 `ClassCastException`（MC 启动即崩，mcdebug 自己的开发不重映射所以发现不了）——一律用 `@WrapOperation`/`@Inject`（`at` 是 `At[]`），验打包必须在消费者项目里起客户端；必须用真实客户端验证注入点，编译通过不等于注入成功（`defaultRequire: 1`，注入失败即启动失败）。`@Inject` 处理器要么带全部目标参数要么一个都不带，多重载各写一个。
+- **契约与测试**：启动时仍将 `GuiOps.methods()` 与 `Methods.CLIENT_METHODS` 对账，将 mismatch 写进 `gui.status`。test 类路径含客户端 output，用于无GL的纯调度/几何单测；真实截图/线程/mixin 仍靠客户端冒烟验证。停止时取消截图和 tick waiters 并关闭客户端 RPC。
+- **自包含 JAR（踩过的坑）**：发布 JAR 是**单个**文件丢进 `mods/`，所以 `contract` 的源码被 `sourceSets.main.kotlin.srcDir` 直接编进模组（不是 `implementation project(':contract')`，那样开发能跑、装到别的项目里就 `NoClassDefFoundError`）。`verifyJarSelfContained` 守住这条线。
 - **一条命令进存档（快捷方式）**：MC 从 1.20 起支持 `--quickPlaySingleplayer <存档目录名>`，所以「起客户端 + 点存档」可以合成一行（`<存档目录名>` 是 `saves/` 下的**目录名**，不是显示名；Gradle `--args` 支持引号，带空格的目录名写成 `\"New World\"`）：
   ```bash
   DISPLAY=:0 ./gradlew :core:runClient --args="--width 1280 --height 720 --quickPlaySingleplayer \"New World\""
   ```
   已验证：客户端直接进世界，`mcdebug/socket`（集成服务器）随之出现，不需要点标题界面/存档列表。**没有这条需求时手动那套仍然有效**（`gui click --text Singleplayer` → `gui click --gui <存档行>` → `gui click --text "Play Selected World"`），存档列表坐标用 `gui screen --brief` 取。
   **坑**：同一个 gameDir 只能有一个客户端实例。上一个实例没死透时新实例会 `Failed to read level <name> data ... session.lock: already locked` 并**退回标题界面**（看起来就是"卡在大厅"）。重启前先确认 `ps -eo pid,args | grep devlaunchinjector` 为空，不要手删 `session.lock`。
-- **怎么验**：`DISPLAY=:0 ./gradlew runClient`（mcdebug 自己的 run/）验证代码；把发布 jar 拷到**消费者项目**的 `run/mods/` 再起它的 `runClient` 验证打包（Loom dev 会把生产 jar 重映射到官方名，`gui.status.jarPath` 显示 `run/.fabric/processedMods/...` 那个副本）。已按此在 ic2-fabric-1.21.1（1.21.1 + official mappings，窗口 2560x1440 @ 显示器 (640,360)、guiScale 6、`gui` 427x240）完整跑通「加载已有存档 → `inv.setSlot` 摆物品 → `gui open-block ic2_120:batbox` → `--mode gui` 截图（1073x1175）→ `gui click --slot 0`（报告中心 (188,47)、`slotAfter` 空、`carried` 红石 x7）→ 再截图（sha 变化）→ 服务端 `be.getNbt` 确认 `Items=[]`」；PNG→GUI 往返也精确：槽中心 (188,47) ↔ PNG (384,150) ↔ 回读 `guiX=187.98`。
+- **怎么验**：`DISPLAY=:0 ./gradlew runClient`（mcdebug 自己的 run/）验证代码；把发布 JAR 拷到**消费者项目**的 `run/mods/` 再起它的 `runClient` 验证打包（Loom 开发会把生产 JAR 重映射到官方名，`gui.status.jarPath` 显示 `run/.fabric/processedMods/...` 那个副本）。已按此在 ic2-fabric-1.21.1（1.21.1 + official mappings，窗口 2560x1440 @ 显示器 (640,360)、guiScale 6、`gui` 427x240）完整跑通「加载已有存档 → `inv.setSlot` 摆物品 → `gui open-block ic2_120:batbox` → `--mode gui` 截图（1073x1175）→ `gui click --slot 0`（报告中心 (188,47)、`slotAfter` 空、`carried` 红石 x7）→ 再截图（sha 变化）→ 服务端 `be.getNbt` 确认 `Items=[]`」；PNG→GUI 往返也精确：槽中心 (188,47) ↔ PNG (384,150) ↔ 回读 `guiX=187.98`。
 - **后续GUI增强已实现**：见 `docs/plan-gui-input-regression.md`。`GuiInputOps` 提供当前Screen的 key/type/drag；`GuiInputModifiers` + `ScreenInputMixin` 只在事件调用栈覆盖静态修饰键查询，禁止全局键盘注入/跨请求持键。拖拽单操作、被动tick、有界30秒，切屏/改尺寸/错误/停止时释放原目标一次；CLIENT_STOPPING先调用GuiInputOps.close再关ClientTasks。`gui.disconnect`在服务端自身线程请求正常halt，客户端被动等shutdown后走原版清理/标题页，不停止进程、不从RPC泵runTick。加载/连接中拒绝，超时不回滚已请求的保存。
-- **golden回归**：CLI-only `gui compare` 和 SDK `GuiApi.assertScreenshot`（远端inline PNG）可由消费者JUnit使用，无新DSL/plugin。PngCodec是有界CRC校验RGB/RGBA8非交错PNG实现，无AWT/ImageIO/native-image反射依赖；不支持格式明确拒绝。默认精确RGBA，可显式tolerance/差异比例；尺寸不同直接失败，diff不能覆盖输入/别名，不自动更新golden。比较不匹配CLI exit1、SDK AssertionError。单测stdout capture必须@Isolated，不能与其它命令并发抢System.out。
-- **settle（`GuiSettle`）**：barrier 用 `ServerboundCommandSuggestionPacket`（服务端主线程 `ensureRunningOnSameThread` 后按序处理，回包排在此前请求引起的包之后）；**不能用 ping**——`handlePingRequest` 在网络线程直接回 pong，可能早于点击被处理。barrier id 从 `Int.MIN_VALUE` 递增，绝不与 `ClientSuggestionProvider`（0 起、空闲 -1）冲突。指纹=Screen 身份/槽位/carried/控件（文本、位置、active/visible），**刻意不含 container data slots**（运行中的机器照样能 settle）。被动观察 client tick，`waitTicks`/`maxTicks` 只是上限，超时返回 `settled:false` 不报错。
-- **gui.act（`GuiDevOps`）**：动作白名单 click/key/type/drag/close/openBlock/reinit/none（不含 act/stop/disconnect）；顺序=动作→settle（click 自带 settle 时跳过）→**先截图再取 screen**（截图强制新帧，hover 状态与图一致）→ problems(cursor 起)。动作失败也返回 views（`ok:false` + `error`）。
+- **基准图回归**：CLI-only `gui compare` 和 SDK `GuiApi.assertScreenshot`（远端inline PNG）可由消费者JUnit使用，无新DSL/plugin。PngCodec是有界CRC校验RGB/RGBA8非交错PNG实现，无AWT/ImageIO/native-image反射依赖；不支持格式明确拒绝。默认精确RGBA，可显式tolerance/差异比例；尺寸不同直接失败，差异不能覆盖输入/别名，不自动更新基准图。比较不匹配CLI exit1、SDK AssertionError。单测stdout capture必须@Isolated，不能与其它命令并发抢System.out。
+- **稳定等待（`GuiSettle`）**：屏障用 `ServerboundCommandSuggestionPacket`（服务端主线程 `ensureRunningOnSameThread` 后按序处理，回包排在此前请求引起的包之后）；**不能用 ping**——`handlePingRequest` 在网络线程直接回 pong，可能早于点击被处理。屏障 id 从 `Int.MIN_VALUE` 递增，绝不与 `ClientSuggestionProvider`（0 起、空闲 -1）冲突。指纹=Screen 身份/槽位/carried/控件（文本、位置、active/visible），**刻意不含 container data slots**（运行中的机器照样能稳定等待）。被动观察客户端 tick，`waitTicks`/`maxTicks` 只是上限，超时返回 `settled:false` 不报错。
+- **gui.act（`GuiDevOps`）**：动作白名单 click/key/type/drag/close/openBlock/reinit/none（不含 act/stop/disconnect）；顺序=动作→稳定等待（click 自带稳定等待时跳过）→**先截图再取 screen**（截图强制新帧，hover 状态与图一致）→ problems(cursor 起)。动作失败也返回 views（`ok:false` + `error`）。
 - **截图（`Capture`）**：只 `glReadPixels` 裁剪矩形（绑 READ_FRAMEBUFFER 后恢复原绑定，flipY + alpha 置不透明，与 `Screenshot.takeScreenshot` 语义一致），失败回退旧的整图下载+裁剪。`pixelHash` 是 RGBA 像素 SHA-256（区别于 PNG 文件 `sha256`）。`format:"none"` 不编码不落盘，且**不更新** `--png` 点击用的 lastTransform。`annotate` 在干净 PNG 编码之后再画，写 `*.annotated.png`，主 PNG 永不带标注；标注目标在 afterFrame（客户端线程、同一 Screen）采集。`drawLog` 只在有请求要它的那一帧 arm（`RenderControl.renderFrame` 前后 begin/end），上限 5000 条。
-- **draw log 坐标**：pose 矩阵变换后的轴对齐包围盒，单位 = Screen/GUI 单位（与 `gui click --gui` 一致）；HUD 也会被记录（整帧）。
-- **screen guard（`ScreenGuard`）**：只包 `Screen.renderWithTooltip`，世界/HUD/overlay 异常照旧崩。捕获后该 Screen 实例不再绘制，`gui.reinit`/关屏清除；`clientScreenGuard=false`（JVM 属性/env/`config/mcdebug.json`）恢复原版崩溃。ERROR 日志经 appender 进 ProblemLog，不要再手动 record 一次（只在 appender 不可用时）。
-- **ProblemLog**：log4j root logger 加 WARN 级 appender，环形 500 条、单条截断；`since` 用返回的 `next` 游标。安装失败只 WARN 不阻止启动。
-- **hover/tooltip 的硬前提（黑盒验收发现）**：continuous 模式靠真实光标 warp，窗口失焦时 MC 根本不更新内部鼠标（headless/Xvfb/无窗口管理器就是这种状态），于是 `hover` 落点对了但 `hoveredSlot`/`tooltips` 还是旧位置的结果。lite（`demand`/`gui-only`）靠 `RenderControl.mouseX/mouseY` 注入虚拟光标，失焦也能 hover。**给 agent 用的会话（尤其 CI）要用 lite 模式**；这不是 loader 差异，Fabric/NeoForge 同理。
-- **`gui.status.jarPath` 必须问 loader**：`protectionDomain.codeSource` 在 Fabric（Knot）是 file URL，但在 NeoForge 模块层里退化成 `/`，所以走接缝 `LoaderApi.modJarPath()`（NeoForge 用 `ModList.getModFileById(...).file.filePath`）。这个字段的用途就是让 agent 发现 `mods/` 里的陈旧副本。
+- **绘制日志坐标**：pose 矩阵变换后的轴对齐包围盒，单位 = Screen/GUI 单位（与 `gui click --gui` 一致）；HUD 也会被记录（整帧）。
+- **界面异常保护（`ScreenGuard`）**：只包 `Screen.renderWithTooltip`，世界/HUD/overlay 异常照旧崩。捕获后该 Screen 实例不再绘制，`gui.reinit`/关屏清除；`clientScreenGuard=false`（JVM 属性/env/`config/mcdebug.json`）恢复原版崩溃。ERROR 日志经日志追加器进 ProblemLog，不要再手动 record 一次（只在日志追加器不可用时）。
+- **ProblemLog**：log4j 根日志器加 WARN 级日志追加器，环形 500 条、单条截断；`since` 用返回的 `next` 游标。安装失败只 WARN 不阻止启动。
+- **hover/tooltip 的硬前提（黑盒验收发现）**：continuous 模式靠真实光标 warp，窗口失焦时 MC 根本不更新内部鼠标（headless/Xvfb/无窗口管理器就是这种状态），于是 `hover` 落点对了但 `hoveredSlot`/`tooltips` 还是旧位置的结果。lite（`demand`/`gui-only`）靠 `RenderControl.mouseX/mouseY` 注入虚拟光标，失焦也能 hover。**给代理用的会话（尤其 CI）要用 lite 模式**；这不是加载器差异，Fabric/NeoForge 同理。
+- **`gui.status.jarPath` 必须问加载器**：`protectionDomain.codeSource` 在 Fabric（Knot）是 file URL，但在 NeoForge 模块层里退化成 `/`，所以走接缝 `LoaderApi.modJarPath()`（NeoForge 用 `ModList.getModFileById(...).file.filePath`）。这个字段的用途就是让代理发现 `mods/` 里的陈旧副本。
 - **唤醒（`RenderControl.wake`）**：只在我们的限帧器正在节流时 `glfwPostEmptyEvent`。**glfwInit 之前 post 会留下 GLFW 错误，原版 `_initGlfw` 的检查直接崩溃**（RPC 探测可能那么早到，真机冒烟踩过）。连续模式/非节流状态不接管原版 limitDisplayFPS。
-- **hotswap（`Hotswap` + CLI `AgentAttach`）**：Instrumentation 由 CLI 动态 attach 的单类 agent（`cli/src/main/java/com/mcdebug/agent/InstrumentationAgent.java`，纯 JDK，生成单类 jar，**不能**把 CLI fat jar 当 agent 加载——会把 kotlin/clikt 塞进目标 system classpath）放进 `System.getProperties()["mcdebug.instrumentation"]`。字节码：Knot classpath 读到的正是该文件时走 `getClassByteArray(name,true)`（Fabric pre-mixin 变换），再过 Mixin `transformClassBytes`。**全有或全无**：先用 `SchemaDiff`（ASM 读新字节 vs 反射读已加载类）列出每个类增删的方法/字段，有任何结构变化（非 JBR）就一个都不重定义；`redefineClasses` 本身对一批是原子的。**不要恢复"批量失败逐个重试"**——那会部分生效，新代码调用尚不存在的成员即 `NoSuchMethodError`（真机踩过）。只有全部成功才推进 `since`。CLI 端 attach 用反射（没有 jdk.attach 的运行时给明确错误）。
-- **reloadScreen（`ScreenReload` + `ScreenClassLoader`）**：只对当前 Screen 类、其嵌套类和显式 `also` 前缀 child-first，其余（mod 注册表/单例/MC）一律委托 Knot，绝不重复初始化。容器 Screen 用同一 menu 重建（`ScreenArgs` 按参数类型填 menu/Inventory/title/parent/player/Minecraft/Options，取参数最多的可填构造器），**不走 setScreen**：`AbstractContainerScreen.removed()` 会关掉 menu；按 setScreen 顺序 `added()`→`init()`→直接赋 `Minecraft.screen`。init 失败恢复旧 Screen。已知限制：新实例字段从零开始、Java 包私有访问跨加载器失败、Mixin 不作用于副本、之后正常打开 GUI 仍是原类。
+- **热替换（`Hotswap` + CLI `AgentAttach`）**：Instrumentation 由 CLI 动态 attach 的单类代理（`cli/src/main/java/com/mcdebug/agent/InstrumentationAgent.java`，纯 JDK，生成单类 JAR，**不能**把 CLI fat JAR 当代理加载——会把 kotlin/clikt 塞进目标 system 类路径）放进 `System.getProperties()["mcdebug.instrumentation"]`。字节码：Knot 类路径读到的正是该文件时走 `getClassByteArray(name,true)`（Fabric pre-mixin 变换），再过 Mixin `transformClassBytes`。**全有或全无**：先用 `SchemaDiff`（ASM 读新字节 vs 反射读已加载类）列出每个类增删的方法/字段，有任何结构变化（非 JBR）就一个都不重定义；`redefineClasses` 本身对一批是原子的。**不要恢复"批量失败逐个重试"**——那会部分生效，新代码调用尚不存在的成员即 `NoSuchMethodError`（真机踩过）。只有全部成功才推进 `since`。CLI 端 attach 用反射（没有 jdk.attach 的运行时给明确错误）。
+- **reloadScreen（`ScreenReload` + `ScreenClassLoader`）**：只对当前 Screen 类、其嵌套类和显式 `also` 前缀 child-first，其余（模组注册表/单例/MC）一律委托 Knot，绝不重复初始化。容器 Screen 用同一 menu 重建（`ScreenArgs` 按参数类型填 menu/Inventory/title/parent/player/Minecraft/Options，取参数最多的可填构造器），**不走 setScreen**：`AbstractContainerScreen.removed()` 会关掉 menu；按 setScreen 顺序 `added()`→`init()`→直接赋 `Minecraft.screen`。init 失败恢复旧 Screen。已知限制：新实例字段从零开始、Java 包私有访问跨加载器失败、Mixin 不作用于副本、之后正常打开 GUI 仍是原类。
 - **滚动列表（`WidgetFrames`）**：`AbstractSelectionList` 的条目只在被画的那一帧更新 x/y，滚出视野的条目保留旧坐标且可能仍落在列表矩形内，所以"最近一帧没画到"是唯一可靠的裁剪信号。含滚动列表的 Screen 上，`gui.screen` 与 widget/text 目标解析先强制出一帧再读；未画到的列表后代标 `clipped:true`，`--widget` 命中报 `WIDGET_CLIPPED`，`--text` 跳过它们。
-- **截图裁剪取整**：GameRenderer 的 float 正交边界让缩放是 6.0000001 之类，直接 floor/ceil 会多出一列 GUI 背后的世界像素（golden 不稳）；`CaptureGeometry.clipGuiRect` 先把距整数 <1e-3 的像素坐标吸附到整数。
+- **截图裁剪取整**：GameRenderer 的 float 正交边界让缩放是 6.0000001 之类，直接 floor/ceil 会多出一列 GUI 背后的世界像素（基准图不稳）；`CaptureGeometry.clipGuiRect` 先把距整数 <1e-3 的像素坐标吸附到整数。
 - **gui key/type 的 ok**：按键自己导致切屏（Esc、Enter 点按钮）算成功（`ok:true reason:CHANGED_BY_INPUT`）；只有 drag 被切屏打断、或输入落地前就已切屏才是 `ok:false`。
-- **hotswap 与 reloadScreen 副本**：`allLoadedClasses` 会同时返回 `ScreenClassLoader` 里的冻结副本；必须排除（`skippedReloadCopies`），否则副本上的历史结构改动会让"全有或全无"永久否决该类。
-- **hover / drawn text（`GuiPointerOps`/`GuiTargets`）**：hover 移光标后强制渲染一帧（容器用 gui 模式，其余 window 模式，`format:none`+drawLog），tooltip 以该帧 draw log 的 `op:"tooltip"` 为准。`--text` 先匹配控件；没有控件匹配时 `prepare` 渲染一帧取 draw log 的 `op:"text"` 矩形中心，结果 `mode:"drawnText"`。click/hover/scroll 共用 `GuiTargets`。
+- **热替换与 reloadScreen 副本**：`allLoadedClasses` 会同时返回 `ScreenClassLoader` 里的冻结副本；必须排除（`skippedReloadCopies`），否则副本上的历史结构改动会让"全有或全无"永久否决该类。
+- **hover / drawn text（`GuiPointerOps`/`GuiTargets`）**：hover 移光标后强制渲染一帧（容器用 gui 模式，其余 window 模式，`format:none`+drawLog），提示框以该帧绘制日志的 `op:"tooltip"` 为准。`--text` 先匹配控件；没有控件匹配时 `prepare` 渲染一帧取绘制日志的 `op:"text"` 矩形中心，结果 `mode:"drawnText"`。click/hover/scroll 共用 `GuiTargets`。
 - **`cursor:"hide"`**：截图请求的光标策略决定它在哪一帧被采集——`RenderControl.renderFrame` 按队首请求的策略渲染，`afterFrame` 只取策略相同的请求，其余留到下一帧。hide 帧把传给 `renderWithTooltip` 的鼠标坐标换成屏幕外，下一帧恢复；实体预览（背包里的玩家）仍会动。
 - **仍未做**：`--repeat`连拍、离屏定尺寸截图、全局游戏键绑定/移动、IME组合输入、连接尚未完成时的独立取消RPC、跨GPU像素确定性/自动基线更新、reloadScreen 时把旧 Screen 字段状态迁移到新实例、Screen 类以外的结构改动免重启（需 JBR）。
 
@@ -395,17 +397,17 @@ node scripts/set-version.mjs X.Y.Z
 
 ## 14a. Session 管理（本机 Linux）
 
-性能实测见 `docs/client-performance.md` 和 `docs/plan-client-performance.md`；`scripts/client-performance.py` / `summarize-client-performance.py` 以独立空源码 consumer 测发布 jar，不能混用本仓库 dev classes。CPU 100%=一逻辑核；按实际/proc采样子窗口统计，不把RSS当堆/显存、不把软件GL收益外推硬件GPU。重跑前使用全新输出目录/离线存档副本，正常 owned stop 清理；Python 测试：`python3 -m unittest discover -s scripts -p 'test_*performance.py' -v`。
+性能实测见 `docs/client-performance.md` 和 `docs/plan-client-performance.md`；`scripts/client-performance.py` / `summarize-client-performance.py` 以独立空源码消费者测发布 JAR，不能混用本仓库开发 classes。CPU 100%=一逻辑核；按实际/proc采样子窗口统计，不把RSS当堆/显存、不把软件GL收益外推硬件GPU。重跑前使用全新输出目录/离线存档副本，正常自有 stop 清理；Python 测试：`python3 -m unittest discover -s scripts -p 'test_*performance.py' -v`。
 
-设计见 `docs/plan-session-management.md`。CLI 新目录 `cli/.../session/`：`SessionRecord` 显式 JSON schema（不用 Gson 类反射，兼顾 native CLI）、`SessionRegistry` 原子写/锁/CAS、`SessionRuntime` OS/RPC 边界、`SessionManager` 生命周期。命令 `session start|attach|list|status|logs|stop`，根 `--session NAME` 自动选择两平面，`--sessions-dir`/`MCDEBUG_SESSIONS_DIR` 控制 registry；无隐式全局 current session，batch 必须继承会话/registry。与显式 transport 参数互斥。
+设计见 `docs/plan-session-management.md`。CLI 新目录 `cli/.../session/`：`SessionRecord` 显式 JSON 类结构（不用 Gson 类反射，兼顾 native CLI）、`SessionRegistry` 原子写/锁/CAS、`SessionRuntime` OS/RPC 边界、`SessionManager` 生命周期。命令 `session start|attach|list|status|logs|stop`，根 `--session NAME` 自动选择两平面，`--sessions-dir`/`MCDEBUG_SESSIONS_DIR` 控制注册表；无隐式全局 current 会话，batch 必须继承会话/registry。与显式 transport 参数互斥。
 
-- 第一版 backend 是目标项目自己的 Gradle wrapper + runClient（qualified task 也只允许 runClient），Linux setsid、日志重定向，无新 daemon、无 Gradle 插件、无独立 MC 实现。**启动方式按项目类型分流**（`SessionManager.detectFlavor`）：Loom（Fabric）继续用 Gradle `--args="--gameDir … --width … --height …"`；ModDevGradle（NeoForge）**不能**用 `--args`——它的 `runClient` 主类是 `net.neoforged.devlaunch.Main`，第一个程序参数是它自己的参数文件，`--args` 会替换掉它并把 `--gameDir` 当主类（`ClassNotFoundException: --gameDir`，客户端直接起不来）。MDG 走 `--init-script <registry/<name>-<token>.init.gradle>`，脚本在 `projectsEvaluated` 里给 `runClient` 设 `gameDirectory` 并用 `args(...)` **追加**（`JavaArgs` 的 `args()` 是追加，CLI 的 `--args` 是替换）`--width/--height/--quickPlaySingleplayer`；已被真机验证（消费者项目 `world_ready` + 1000x600 窗口 + 直接进存档）。改这段前先读 `docs/plan-neoforge-port.md` §11.3 #11。project 默认 CWD、gameDir 默认 project/run，子模块须显式 gameDir；显式相对路径相对 CWD。world 必须是已有 saves 目录名，不自动建/删世界，拒绝路径穿越及逃逸 symlink。
-- Registry 默认 XDG_STATE_HOME/mcdebug/sessions 或 ~/.local/state/mcdebug/sessions，每会话 JSON 含 schemaVersion/recordId、本次 token、启动配置、wrapper 与真实 MC 的 PID/startTime、instanceId、端点和日志。recordId 是 CAS 世代，不能只用 sessionToken（attached token 可以为空）。锁不能跨主线程 RPC/长等待持有；同 canonical gameDir 的 mdb.lock + mdb-owner.json 覆盖跨 registry/bootstrap 窗口。
+- 第一版 backend 是目标项目自己的 Gradle 包装器 + runClient（qualified 任务也只允许 runClient），Linux setsid、日志重定向，无新守护进程、无 Gradle 插件、无独立 MC 实现。**启动方式按项目类型分流**（`SessionManager.detectFlavor`）：Loom（Fabric）继续用 Gradle `--args="--gameDir … --width … --height …"`；ModDevGradle（NeoForge）**不能**用 `--args`——它的 `runClient` 主类是 `net.neoforged.devlaunch.Main`，第一个程序参数是它自己的参数文件，`--args` 会替换掉它并把 `--gameDir` 当主类（`ClassNotFoundException: --gameDir`，客户端直接起不来）。MDG 走 `--init-script <registry/<name>-<token>.init.gradle>`，脚本在 `projectsEvaluated` 里给 `runClient` 设 `gameDirectory` 并用 `args(...)` **追加**（`JavaArgs` 的 `args()` 是追加，CLI 的 `--args` 是替换）`--width/--height/--quickPlaySingleplayer`；已被真机验证（消费者项目 `world_ready` + 1000x600 窗口 + 直接进存档）。改这段前先读 `docs/plan-neoforge-port.md` §11.3 #11。project 默认 CWD、gameDir 默认 project/run，子模块须显式 gameDir；显式相对路径相对 CWD。world 必须是已有 saves 目录名，不自动建/删世界，拒绝路径穿越及逃逸 symlink。
+- Registry 默认 XDG_STATE_HOME/mcdebug/sessions 或 ~/.local/state/mcdebug/sessions，每会话 JSON 含 schemaVersion/recordId、本次 token、启动配置、包装器与真实 MC 的 PID/startTime、instanceId、端点和日志。recordId 是 CAS 世代，不能只用 sessionToken（attached token 可以为空）。锁不能跨主线程 RPC/长等待持有；同 canonical gameDir 的 mdb.lock + mdb-owner.json 覆盖跨 registry/bootstrap 窗口。
 - server.ready 现在必须有 process 对象：pid、startTime（OS ProcessHandle 的 ISO Instant）、instanceId（每 JVM UUID）、sessionToken、canonical gameDir。两平面同 JVM 共用 RpcEnv 身份。客户端原子发布 mcdebug/client.json，gui.status 同样返回 process。Session 路由不额外调用 status；实际 RPC 连接握手绑定完整 expectedProcess，禁止端点换实例后继续操作。
 - 客户端在 RPC 绑定前持有 mcdebug/client.lock 的进程锁，直到 JVM shutdown；不替代/删除 MC 的 session.lock。被取消或被新 token 超越的延迟 bootstrap 不绑定 RPC/不覆盖发现文件，在 CLIENT_STARTED 正常退出；启动过程中新增 stop 标记也会在 CLIENT_STARTED 检查。
-- managed launch 显式关闭两平面 TCP，并将两 socket 固定在自身 gameDir。全局 mod 端口/默认配置不变；Session v1 不把远端/独立多人服务器冒充集成服，外部目标继续用不带 --session 的显式 transport。
-- start 有限等待：启动阶段 wrapper（gradlew，会一直等 runClient 结束）先退出且没有活着的匹配实例 = 构建失败或 MC 崩溃，立即 `failed` 并把日志尾部的 `Caused by`/崩溃行写进 lastError，不等到超时。未指定 world 返回 client_ready；指定后必须 inWorld 且 singleplayer 才 world_ready。超时/失败打印记录并非0退出，不能把遗留 socket 当就绪。logs 是有界 UTF-8 tail，不跟随。
-- 冒烟/收尾不要按进程名或 `$!` 猜游戏 PID：`(cd … && java …) &` 的 `$!` 是子 shell，`setsid` 又另开会话，按 PID/进程组都会漏（真实教训：攒下 7 个 1GB 专用服）。用 `scripts/stop-server.py`（`--socket` 读 `/proc/net/unix` 的 inode 找到持有它的进程，`--dir` 按 cwd 兜底，显式排除 `GradleDaemon`/`GradleWrapperMain`，绝不碰共享 daemon）。
-- stop 只允许 owned；attached 即使 --force 也拒绝。先核对真实 PID/startTime/instanceId/token，使用同一个已验证连接调用 gui.stop；--force 只能终止身份仍匹配的 owned MC，绝不枚举/杀共享 Gradle daemon。RPC 已关闭时 force 仍须核对完整发现身份和活 PID/startTime。启动中没有真实身份时，只写本 token 的 session-stop.json、取消自己且 PID/startTime 匹配的 wrapper；保留 stopping/占位，不谎报 stopped。保存世界期间仍持有 gameDir 锁。
-- 新 RPC `gui.stop` 参数必须带 instanceId/sessionToken，切客户端线程调 Minecraft.stop；同步了 Methods.CLIENT_METHODS 与 SDK。正常操作用 session stop，raw RPC 仅有实例校验，不是 owned/attached 权限边界或鉴权。token 是进程归属关联值，不是认证凭证。
-- 验证：CLI session 目录单测注入 SessionRuntime，不启动 MC/Gradle；临时 Unix/TCP 与假 shell wrapper 可测进程边界。帮助测试只用 parse 捕获 PrintHelpMessage，**不要在 JUnit 内调用 Clikt.main（会 exitProcess 杀掉测试 worker）**。真实集成验证须用隔离 gameDir/存档副本，通过 mdb 自己 start→双平面→截图→attach 禁止停止→owned stop，最后清理所有测试进程。
+- managed launch 显式关闭两平面 TCP，并将两 socket 固定在自身 gameDir。全局模组端口/默认配置不变；Session v1 不把远端/独立多人服务器冒充集成服，外部目标继续用不带 --session 的显式 transport。
+- start 有限等待：启动阶段包装器（gradlew，会一直等 runClient 结束）先退出且没有活着的匹配实例 = 构建失败或 MC 崩溃，立即 `failed` 并把日志尾部的 `Caused by`/崩溃行写进 lastError，不等到超时。未指定 world 返回 client_ready；指定后必须 inWorld 且 singleplayer 才 world_ready。超时/失败打印记录并非0退出，不能把遗留 socket 当就绪。logs 是有界 UTF-8 tail，不跟随。
+- 冒烟/收尾不要按进程名或 `$!` 猜游戏 PID：`(cd … && java …) &` 的 `$!` 是子 shell，`setsid` 又另开会话，按 PID/进程组都会漏（真实教训：攒下 7 个 1GB 专用服）。用 `scripts/stop-server.py`（`--socket` 读 `/proc/net/unix` 的 inode 找到持有它的进程，`--dir` 按 cwd 兜底，显式排除 `GradleDaemon`/`GradleWrapperMain`，绝不碰共享守护进程）。
+- stop 只允许自有；attached 即使 --force 也拒绝。先核对真实 PID/startTime/instanceId/token，使用同一个已验证连接调用 gui.stop；--force 只能终止身份仍匹配的自有 MC，绝不枚举/杀共享 Gradle 守护进程。RPC 已关闭时 force 仍须核对完整发现身份和活 PID/startTime。启动中没有真实身份时，只写本 token 的 session-stop.json、取消自己且 PID/startTime 匹配的包装器；保留 stopping/占位，不谎报 stopped。保存世界期间仍持有 gameDir 锁。
+- 新 RPC `gui.stop` 参数必须带 instanceId/sessionToken，切客户端线程调 Minecraft.stop；同步了 Methods.CLIENT_METHODS 与 SDK。正常操作用会话 stop，raw RPC 仅有实例校验，不是 owned/attached 权限边界或鉴权。token 是进程归属关联值，不是认证凭证。
+- 验证：CLI 会话目录单测注入 SessionRuntime，不启动 MC/Gradle；临时 Unix/TCP 与假 shell 包装器可测进程边界。帮助测试只用 parse 捕获 PrintHelpMessage，**不要在 JUnit 内调用 Clikt.main（会 exitProcess 杀掉测试工作进程）**。真实集成验证须用隔离 gameDir/存档副本，通过 mdb 自己 start→双平面→截图→attach 禁止停止→自有 stop，最后清理所有测试进程。

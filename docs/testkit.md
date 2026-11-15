@@ -1,36 +1,33 @@
-# JUnit test frontend
+# JUnit 测试前端
 
-Updated: 2026-11-15. Status: current API and consumer setup.
+最后更新时间：2026-11-15。状态：现行 API 与消费者接入说明。
 
-[README](../README.md) · [CLI usage](usage.md)
+[项目概览](../README.md) · [CLI 使用指南](usage.md)
 
-`mcdebug-testkit` runs ordinary JUnit 5 tests in a host JVM. It talks directly to the
-game's JSON-RPC endpoints through `mcdebug-sdk`; it neither executes the CLI nor loads
-Minecraft, Fabric, NeoForge, or the mod under test into the test worker. Gradle's standard
-`Test` task supplies test selection, assertion failures, and XML/HTML reports.
+`mcdebug-testkit` 在宿主 JVM 中运行普通 JUnit 5 测试，通过 `mcdebug-sdk` 直接连接
+游戏的 JSON-RPC 端点，不执行 CLI，也不向测试工作进程加载 Minecraft、Fabric、NeoForge
+或被测模组。Gradle 的标准 `Test` 任务负责选择测试、报告断言失败并生成 XML/HTML 报告。
 
-## Modules
+## 模块
 
-| Module | Responsibility |
+| 模块 | 职责 |
 | --- | --- |
-| `contract` | Method names and wire contracts |
-| `sdk` | RPC transport, typed APIs, image comparison, and managed session lifecycle |
-| `testkit` | JUnit integration, waits, failure evidence, and the existing server-grid runner |
-| `cli` | Command parsing and terminal output, using the same SDK |
+| `contract` | 方法名与通信协议契约 |
+| `sdk` | RPC 传输、类型化 API、图像比较和托管会话生命周期 |
+| `testkit` | JUnit 集成、等待、失败取证与原有服务端网格测试运行器 |
+| `cli` | 命令解析与终端输出，使用同一份 SDK |
 
-The JVM modules target Java 17 bytecode. Building them uses the existing JDK 25 toolchain.
-`frontend/` is an independent Gradle build for developing and publishing `contract`,
-`sdk`, and `testkit`, without configuring Loom or ModDevGradle.
-The game still needs its own loader and JDK requirements.
+JVM 模块生成 Java 17 字节码，构建使用现有 JDK 25 工具链。
+`frontend/` 是独立的 Gradle 构建入口，用于开发和发布 `contract`、`sdk` 与 `testkit`，
+无需配置 Loom 或 ModDevGradle。游戏仍须满足自身加载器和 JDK 的要求。
 
-## GitHub Maven dependency
+## GitHub Maven 依赖
 
-The public `maven` branch of [yu1745/mcdebug](https://github.com/yu1745/mcdebug/tree/maven)
-is a standard Maven repository. Gradle downloads prebuilt JARs, POMs, and module metadata
-directly from GitHub Raw. Consumers need neither a GitHub token nor a mcdebug checkout.
-No JitPack or local Maven repository is involved.
+[yu1745/mcdebug](https://github.com/yu1745/mcdebug/tree/maven) 的公开 `maven` 分支
+是标准 Maven 仓库。Gradle 直接从 GitHub Raw 下载预构建 JAR、POM 和模块元数据。
+消费者无需 GitHub Token 或 mcdebug 源码副本，也不使用 JitPack 或本地 Maven 仓库。
 
-In a consumer's `build.gradle`:
+在消费者的 `build.gradle` 中配置：
 
 ```groovy
 repositories {
@@ -47,18 +44,18 @@ repositories {
 }
 ```
 
-All four artifacts use the same immutable version, currently `0.8.0-mc26.3`:
+四个制品统一使用不可覆盖的版本号，当前为 `0.8.0-mc26.3`：
 
-| Coordinate | Usage |
+| 坐标 | 用途 |
 | --- | --- |
-| `com.mcdebug:mcdebug-testkit:0.8.0-mc26.3` | Host JUnit frontend; pulls SDK and contract transitively |
-| `com.mcdebug:mcdebug-sdk:0.8.0-mc26.3` | Direct RPC SDK for other frontends |
-| `com.mcdebug:mcdebug-contract:0.8.0-mc26.3` | Protocol contracts |
-| `com.mcdebug:mcdebug-neoforge:0.8.0-mc26.3` | Self-contained Minecraft 26.3 agent, NeoForge 26.3.0.103+ |
+| `com.mcdebug:mcdebug-testkit:0.8.0-mc26.3` | 宿主 JUnit 前端，传递引入 SDK 和协议模块 |
+| `com.mcdebug:mcdebug-sdk:0.8.0-mc26.3` | 供其他前端直接使用的 RPC SDK |
+| `com.mcdebug:mcdebug-contract:0.8.0-mc26.3` | 协议契约 |
+| `com.mcdebug:mcdebug-neoforge:0.8.0-mc26.3` | 自包含的 Minecraft 26.3 游戏端代理，要求 NeoForge 26.3.0.103+ |
 
-The version includes the Minecraft line. Keep the test frontend and game agent aligned.
-Resolve the game agent in a **separate** configuration and copy it to the dedicated game's
-`mods/` directory; do not add it to the host test classpath:
+版本号包含 Minecraft 版本线，测试前端与游戏端代理必须使用一致版本。
+通过**独立配置**解析游戏端代理，将其复制到专用游戏的 `mods/` 目录，
+不要把它放入宿主测试的类路径：
 
 ```groovy
 configurations {
@@ -69,13 +66,12 @@ configurations {
     }
 }
 dependencies { mcdebugAgent 'com.mcdebug:mcdebug-neoforge:0.8.0-mc26.3' }
-// A consumer-owned preparation task can copy configurations.mcdebugAgent into its mods directory.
+// 消费者自己的准备任务可将 configurations.mcdebugAgent 复制到测试游戏的 mods 目录。
 ```
 
-## Gradle task
+## Gradle 任务
 
-Use a separate host-side source set. Its classpath must not extend the mod's `main`
-runtime or loader classpath:
+使用独立的宿主源集，其类路径不得继承模组的 `main` 运行时或加载器类路径：
 
 ```groovy
 sourceSets { mcdebugTest }
@@ -97,16 +93,15 @@ tasks.register('mcdebugTest', Test) {
 }
 ```
 
-The example attaches to a running client in the explicitly selected game directory.
-It never stops an attached client. A missing endpoint, failed handshake, unloaded world,
-or RPC contract mismatch fails execution; the client frontend does not skip these tests.
-Keep this task opt-in instead of silently attaching it to a normal build with no game.
+此示例连接所选游戏目录中已运行的客户端，不会停止被连接的客户端。
+端点缺失、握手失败、世界未加载或 RPC 契约不匹配都会使执行失败，测试前端不会跳过这些情况。
+该任务应由开发者显式运行，不要把它悄悄挂到没有游戏实例的普通构建上。
 
-`@McDebugClientTest` serializes tests within a JUnit worker, including when a consumer
-enables JUnit parallel execution elsewhere. Keep `maxParallelForks = 1` as well: a Screen,
-cursor, and player inventory are shared state across tests using one game client.
+`@McDebugClientTest` 会在同一个 JUnit 工作进程中串行执行测试，即使消费者在其他地方
+启用了 JUnit 并行执行也一样。同时保留 `maxParallelForks = 1`：使用同一客户端的测试
+共享 Screen、光标和玩家背包。
 
-## A test
+## 测试示例
 
 ```java
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -120,7 +115,7 @@ import org.junit.jupiter.api.Test;
 class TankClientTest {
   @Test
   void opensRealTankMenu(ClientTestContext ctx) {
-    // The consumer fixture first places the tank and moves the player within reach.
+    // 消费者的测试夹具先放置液罐，并将玩家移到交互距离内。
     ctx.act("gui.openBlock", Map.of("pos", List.of(14, 200, 0), "face", "south"));
     var screen = ctx.getGui().screen().getAsJsonObject();
     assertEquals("motive.client.gui.FluidStorageScreen", screen.get("class").getAsString());
@@ -130,102 +125,89 @@ class TankClientTest {
 }
 ```
 
-Use `getServer()` for authoritative world/inventory state, `getGui()` for real client
-Screens, and `getClient()` for a client-plane SDK. `call(method, params)` routes using
-the contract and returns JSON. `act(method, params)` additionally fails on explicit
-top-level `ok:false` or `success:false`. Use raw `call` for deliberate rejections and
-idempotent vanilla commands that legitimately return zero. Assert their intended
-postconditions with JUnit instead of treating every successful RPC as a passing test.
+`getServer()` 用于读取世界和库存的权威状态，`getGui()` 操作真实客户端 Screen，
+`getClient()` 提供客户端平面 SDK。`call(method, params)` 根据协议契约路由并返回 JSON；
+`act(method, params)` 还会在顶层明确返回 `ok:false` 或 `success:false` 时使测试失败。
+对于刻意验证的拒绝路径，以及合法返回零的幂等原版命令，使用原始 `call`，
+再用 JUnit 断言预期后置条件，不要把 RPC 成功返回直接当作测试通过。
 
-`await(description, Duration, BooleanSupplier)` polls a condition and retries ordinary
-assertion failures until its monotonic wall-clock deadline. RPC/connection errors fail
-immediately. Each RPC also has its own finite deadline; polling does not roll back or
-cancel an operation already executed by the game. `waitServerTicks(n)` observes natural
-server ticks, and `wait.until` can observe server predicates through the SDK.
+`await(description, Duration, BooleanSupplier)` 轮询条件，在基于单调时钟的超时期限内
+重试普通断言失败；RPC 或连接错误则立即失败。每个 RPC 也有独立、有限的超时时间。
+轮询不会回滚或取消游戏已经执行的操作。`waitServerTicks(n)` 观察自然发生的服务端 tick，
+也可通过 SDK 的 `wait.until` 观察服务端谓词。
 
-Prepare and clean the consumer's own scene in `@BeforeEach` / `@AfterEach`. The testkit
-does not guess which world blocks belong to a test or clear an arbitrary region.
-Use real `gui.*` operations when testing client behavior: `screen.*` remains a server
-fake-player menu API. Coordinate clicks exercise Screen hit testing and custom controls;
-slot clicks are useful inventory shortcuts and go through the inventory-click path.
+在 `@BeforeEach` / `@AfterEach` 中准备和清理消费者自己的场景。
+测试工具包不会猜测哪些世界方块属于测试，也不会随意清空区域。
+测试客户端行为时使用真实的 `gui.*`；`screen.*` 仍是服务端假玩家菜单 API。
+坐标点击可以验证 Screen 命中检测和自定义控件；槽位点击是通过库存点击路径执行的便捷操作。
 
-## Managed client
+## 托管客户端
 
-The testkit can use the SDK's existing managed-session lifecycle. Set these additional
-system properties on the `Test` task:
+测试工具包可使用 SDK 已有的托管会话生命周期。在 `Test` 任务上额外设置以下系统属性：
 
-| Property | Meaning |
+| 属性 | 含义 |
 | --- | --- |
-| `mcdebug.launchProject` | Standalone loader runtime project with a `runClient` task |
-| `mcdebug.testProject` | Project running the tests; prevents launching that same Gradle build recursively |
-| `mcdebug.world` | Existing dedicated test save directory name under `saves/` |
-| `mcdebug.display` | Optional child `DISPLAY`, otherwise inherited |
-| `mcdebug.width`, `mcdebug.height` | Requested window, defaults 1920×1080 |
-| `mcdebug.sessionsDir` | Optional isolated registry, defaults beside the game directory |
-| `mcdebug.startTimeoutSeconds` | Startup deadline, defaults 180 seconds |
-| `mcdebug.requestTimeoutMs` | Positive per-RPC deadline, defaults 30000 ms |
+| `mcdebug.launchProject` | 包含 `runClient` 任务的独立加载器运行工程 |
+| `mcdebug.testProject` | 执行测试的工程，用于防止递归启动同一个 Gradle 构建 |
+| `mcdebug.world` | `saves/` 下已有的专用测试存档目录名 |
+| `mcdebug.display` | 可选的子进程 `DISPLAY`，默认继承环境 |
+| `mcdebug.width`, `mcdebug.height` | 请求的窗口尺寸，默认 1920×1080 |
+| `mcdebug.sessionsDir` | 可选的隔离会话注册表目录，默认位于游戏目录旁 |
+| `mcdebug.startTimeoutSeconds` | 启动超时，默认 180 秒 |
+| `mcdebug.requestTimeoutMs` | 每次 RPC 的超时，必须为正数，默认 30000 毫秒 |
 
-Managed launch currently inherits the SDK's Linux/`setsid` requirement. Use a dedicated
-runtime project containing the built mod and agent JARs. Launching the build that is
-already running the test worker can deadlock on Gradle project locks; making `Test`
-depend on the long-running `runClient` task would prevent tests from starting.
+托管启动沿用 SDK 的 Linux / `setsid` 要求。使用独立运行工程，装入已构建的模组和
+游戏端代理 JAR。若启动正在执行测试工作进程的同一个构建，可能因 Gradle 工程锁而死锁；
+若让 `Test` 依赖长期运行的 `runClient` 任务，测试又会一直无法开始。
 
-The runtime shares a client across the test run, verifies process identities, and stops
-only the client it launched when JUnit closes its root store. It does not delete saves
-or terminate shared Gradle daemons. `restartClient()` saves/stops that owned client,
-waits for its wrapper to exit, launches again, and reconnects with new identities.
-It is unavailable for attached clients.
+运行时在本次测试中共用一个客户端，校验进程身份，并在 JUnit 关闭根存储时，
+只停止由它启动的客户端。它不会删除存档或终止共享 Gradle 守护进程。
+`restartClient()` 保存并停止该自有客户端，等待包装进程退出，再重新启动并连接新的进程身份。
+连接到已有客户端时不能使用此方法。
 
-Managed readiness also waits for the joining Screen and overlay to disappear, then
-performs the GUI/server barrier. Merely observing `inWorld:true` is too early to send
-the first interaction after joining or restarting. Individual cases should still wait
-for their specific Screen, slots, or values rather than assuming any Screen change
-means the intended menu opened.
+托管客户端的就绪检查还会等待加入世界时的 Screen 和覆盖层消失，再执行 GUI / 服务端屏障。
+刚观察到 `inWorld:true` 时就发送加入或重启后的首次交互仍然过早。
+各测试用例仍应等待自己的目标 Screen、槽位或数值，不要把任意 Screen 变化当作目标菜单已打开。
 
-## Evidence and failures
+## 证据与失败处理
 
-Each invocation has a unique artifact directory, so a later passing run cannot reuse or
-overwrite an earlier failure. Each test prints its evidence path into the JUnit report.
+每次调用都有独立的产物目录，后续通过的运行不会复用或覆盖先前失败的证据。
+每个测试都会把证据路径写入 JUnit 报告。
 
-Calls through `call` and `act` record their method, parameters, result or error in
-`rpc.jsonl`. Typed SDK access remains available; failure snapshots also cover its state.
+通过 `call` 和 `act` 执行的调用会将方法、参数、结果或错误记录到 `rpc.jsonl`。
+仍可直接使用类型化 SDK，其状态也包含在失败快照中。
 
-- `capture(name)` saves a fresh full-window PNG, annotated PNG, and draw-log JSON on the
-  test host, using inline RPC bytes rather than assuming a remote filesystem path exists.
-- After a test method, newly logged ERROR entries fail the test even if its own assertions
-  passed. Startup messages precede the per-test cursor. WARN entries remain diagnostic;
-  a truncated error log also fails validation.
-- A failed assertion or lifecycle method records its stack, client status, Screen,
-  authoritative server status, new problems, and a screenshot. Diagnostic errors are
-  attached to the original failure. Scene cleanup still runs afterwards.
-- Standard reports remain under `build/test-results/<task>` and `build/reports/tests/<task>`.
+- `capture(name)` 使用 RPC 内联字节，在测试宿主上保存新的全窗口 PNG、标注 PNG 和绘制日志 JSON，
+  不假设远端文件系统路径在本机存在。
+- 测试方法执行后，新增 ERROR 日志会使测试失败，即使该测试自己的断言已通过。
+  启动消息位于每项测试的日志游标之前；WARN 仅作诊断，错误日志被截断也会使验证失败。
+- 断言或生命周期方法失败时，记录堆栈、客户端状态、Screen、权威服务端状态、新问题和截图。
+  诊断过程中发生的错误会附加到原始失败上，随后仍执行场景清理。
+- 标准报告仍位于 `build/test-results/<task>` 和 `build/reports/tests/<task>`。
 
-Prefer semantic assertions on state, slots, text, and network results. Image comparisons
-are available through the SDK for cases that need pixel evidence; approve baselines
-explicitly and handle animation, scale, and render backend differences deliberately.
-Capturing an image alone does not assert that a model or its animation is correct.
+优先对状态、槽位、文字和网络结果进行语义断言。需要像素证据时可使用 SDK 的图像比较；
+必须显式确认基线，并有意识地处理动画、缩放和渲染后端差异。
+仅保存截图不能证明模型或动画正确。
 
-## Coverage boundary
+## 覆盖边界
 
-This frontend exercises live GUI behavior, synchronization, storage effects, and rendering.
-Its key/type APIs currently dispatch into an open Screen; a complete movement/combat
-input driver is outside the current API. Keep game logic tests and client integration
-tests as complementary checks. A passing initial suite is evidence of feasibility,
-not proof of complete mod coverage or a line-coverage percentage.
+此前端验证真实 GUI 行为、同步、存储效果和渲染。
+按键与文字输入 API 目前只向打开的 Screen 派发事件，不包含完整的移动或战斗输入驱动。
+游戏逻辑测试与客户端集成测试应互相补充。初始套件通过说明方案可行，
+不代表模组已被完整覆盖，也不能据此给出源码行覆盖率。
 
-## Publishing
+## 发布
 
-Maintainers set `maven_version` in the root `gradle.properties`. Build the game agent,
-then stage a standard repository (JARs, sources, POMs, module metadata, and checksums):
+维护者在根 `gradle.properties` 中设置 `maven_version`。先构建游戏端代理，
+再暂存标准 Maven 仓库，包含 JAR、源码、POM、模块元数据和校验和：
 
 ```sh
 ./gradlew build :cli:copyCliJar
 ./gradlew -p frontend stageMavenRepository
 ```
 
-The default staging directory is `frontend/build/github-maven`; `-PmavenRepoDir=/path/to/repository`
-selects a checkout of the existing Maven branch instead. Preserve that branch's older
-versions and metadata when staging an update. Never replace an already published version;
-increase `maven_version` for every artifact change. The `publish Maven repository` workflow
-builds and publishes version changes on branch `26.3`, and records the source commit under
-`releases/<version>.txt` on the `maven` branch.
+默认暂存目录为 `frontend/build/github-maven`；`-PmavenRepoDir=/path/to/repository`
+可改为已有 Maven 分支的检出目录。暂存更新时保留该分支的旧版本和元数据。
+不得替换已发布版本，每次制品变化都要增加 `maven_version`。
+`publish Maven repository` 工作流会在 `26.3` 分支的版本号变更时构建并发布，
+并在 `maven` 分支的 `releases/<version>.txt` 中记录源码提交。

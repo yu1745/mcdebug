@@ -1,11 +1,11 @@
-# Isolated NeoForge release-jar consumer
+# 隔离的 NeoForge 发布 JAR 消费者
 
-Template only: **copy this project to a new temporary directory before running it** (same rule as
-`scripts/perf-consumer/`). It contains no mcdebug source sets or resources, so anything it loads in
-`run/mods` is the *published* jar — this is the black-box target used by
-`docs/plan-neoforge-verification.md` and by the port's own consumer check.
+此目录只是模板，**运行前必须复制到新的临时目录**，与 `scripts/perf-consumer/` 的规则相同。
+模板不包含 mcdebug 源码集或资源，因此从 `run/mods` 加载的始终是发布 JAR。
+[NeoForge 验证计划](../../docs/plan-neoforge-verification.md)和移植自身的消费者检查
+均以此作为黑盒目标。
 
-From the mcdebug repository root:
+在 mcdebug 仓库根目录执行：
 
 ```bash
 REPO="$PWD"
@@ -25,15 +25,15 @@ printf 'eula=true\nonline-mode=false\nserver-port=0\nspawn-protection=0\nmax-pla
 
 cd "$F/consumer"
 ./gradlew runServer --console=plain                 # 服务端平面
-DISPLAY=:0 ./gradlew runClient --console=plain      # 客户端平面（gui.*，需要 display）
+DISPLAY=:0 ./gradlew runClient --console=plain      # 客户端平面（gui.*，需要显示设备）
 ```
 
-Notes:
+说明：
 
-- Good for a **server** instance (no display, cheap) and for a **client** instance that also hosts the
-  integrated server plane (single-player, `--quickPlaySingleplayer <save>` via the project's
-  `programArguments`, or driven by `mcdebug session start`).
-- Both loader jars bundle Kotlin stdlib; no Kotlin language mod is required.
-  Two mcdebug jars in one `mods/` directory abort mod loading —
-  `mcdebug jar --loader …` deletes the other loader's jar for you.
-- Do not commit a copy of this directory with `run/` in it; the point is a fresh temporary instance.
+- 可用于**服务端**实例，无需显示设备且开销较低；也可用于同时承载集成服务器平面的
+  **客户端**实例，即单人游戏。通过工程的 `programArguments` 传入
+  `--quickPlaySingleplayer <save>`，或使用 `mcdebug session start` 启动。
+- 两个加载器的 JAR 均内嵌 Kotlin 标准库，无需 Kotlin 语言模组。
+  同一 `mods/` 中存在两份 mcdebug JAR 会中止模组加载；
+  `mcdebug jar --loader …` 会自动删除另一加载器的 JAR。
+- 不要提交包含 `run/` 的目录副本，此模板用于创建全新的临时实例。

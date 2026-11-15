@@ -1,6 +1,6 @@
 # 准备可检索的参考源码
 
-移植前准备四类源码，放在目标工程旁，供主代理和worker查询。
+移植前准备四类源码，放在目标工程旁，供主代理和工作代理查询。
 
 | 参考树 | 来源 |
 |---|---|
@@ -31,7 +31,7 @@ workspace/
 
 从源工程和目标工程核对MC、loader/API、映射、构建插件、Gradle与JDK版本。
 
-Gradle wrapper需有脚本、properties和gradle-wrapper.jar。缺jar时使用匹配版本的完整Gradle发行版；下文的`sh gradlew`相应替换为该Gradle可执行文件。
+Gradle 包装器需有脚本、properties和gradle-wrapper.jar。缺JAR时使用匹配版本的完整Gradle发行版；下文的`sh gradlew`相应替换为该Gradle可执行文件。
 
 ## 2. NeoForge：生成源端MC与API
 
@@ -190,10 +190,10 @@ python3 extract_reference.py "$mapped_api_module_archive" "$api_module_tree"
 
 对含Java的API模块循环提取；FML/EventBus分别调用。拆分的MC归档分别提取到common/client目录。
 
-在`port-reference/SOURCE.json`汇总各树路径、版本/映射、生成命令/日志和逐归档记录，供后续agent直接使用。
+在`port-reference/SOURCE.json`汇总各树路径、版本/映射、生成命令/日志和逐归档记录，供后续代理直接使用。
 
 ## 6. 完成检查
 
-确认四类源码可检索、版本与映射匹配，两端MC包含归档中`net/minecraft/`和`com/mojang/`的全部Java，实际使用的传递API已补齐，即可标记READY。缺项标PARTIAL并说明影响。
+确认四类源码可检索、版本与映射匹配，两端MC包含归档中`net/minecraft/`和`com/mojang/`的全部Java，实际使用的传递API已补齐，即可标记READY。缺项标部分通过并说明影响。
 
-参考源码不参与目标mod编译，也不提交到仓库。签名或行为差异在具体移植owner时结合两端源码核实。
+参考源码不参与目标模组编译，也不提交到仓库。签名或行为差异在具体移植责任模块时结合两端源码核实。
