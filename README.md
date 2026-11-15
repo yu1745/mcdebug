@@ -36,6 +36,7 @@ java -jar mcdebug-cli.jar --help
 - [界面自动化、截图与视觉断言](docs/usage.md#客户端平面gui)
 - [JUnit / Gradle 客户端测试](docs/testkit.md)
 - [原生可执行文件](docs/usage.md#原生可执行文件分发)
+- [CLI 启动与 RPC 开销实测](docs/experiments/cli-startup-cost.md)
 - [Minecraft 26.3 平台适配](docs/port-26.3.md)
 - [开发约定](AGENTS.md)
 
