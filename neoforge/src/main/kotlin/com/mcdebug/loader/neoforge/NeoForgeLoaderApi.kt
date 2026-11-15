@@ -5,6 +5,12 @@ import com.mcdebug.loader.MojangRuntimeNames
 import com.mcdebug.loader.RuntimeNames
 import com.mcdebug.loader.StorageApi
 import net.minecraft.server.MinecraftServer
+import net.minecraft.network.Connection
+import net.minecraft.network.protocol.Packet
+import net.minecraft.resources.Identifier
+import net.minecraft.server.level.ServerPlayer
+import net.minecraft.server.network.CommonListenerCookie
+import net.minecraft.server.network.ServerGamePacketListenerImpl
 import net.minecraft.world.InteractionHand
 import net.minecraft.world.InteractionResult
 import net.minecraft.world.entity.Entity
@@ -55,6 +61,19 @@ class NeoForgeLoaderApi : LoaderApi {
 
     override fun onServerTick(callback: (MinecraftServer) -> Unit) {
         NeoForge.EVENT_BUS.addListener { event: ServerTickEvent.Post -> callback(event.server) }
+    }
+
+    override fun fakePlayerPacketListener(
+        server: MinecraftServer,
+        connection: Connection,
+        player: ServerPlayer,
+        cookie: CommonListenerCookie,
+    ): ServerGamePacketListenerImpl = object : ServerGamePacketListenerImpl(server, connection, player, cookie) {
+        override fun send(packet: Packet<*>) {}
+
+        // 26.3 menu data sync probes extended payload support before send(). Like NeoForge's
+        // FakePlayer handler, avoid inspecting a Netty channel that this connection never opens.
+        override fun hasChannel(payloadId: Identifier): Boolean = false
     }
 
     /**

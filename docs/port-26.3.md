@@ -39,6 +39,9 @@ both builds use JDK 25. The CLI embeds the matching Fabric and NeoForge jars.
   `success_no_item_used` / `consume_partial` when their item context does not indicate item use.
   NeoForge now fires its interaction event inside `Player.interactOn`, so
   its explicit pre-hook returns PASS to avoid duplicate events.
+  Its fake-player packet listener also returns false for payload channel probes, following
+  NeoForge's own FakePlayer: menu data synchronization checks extended payload support before
+  sending, and a fake connection has no Netty channel to inspect.
 - `Minecraft.gui` owns Screen/overlay state. Input uses `KeyEvent`, `CharacterEvent` and
   `MouseButtonEvent`. `InputEvents` translates existing RPC GLFW codes, modifier masks and
   button numbers (0 left / 1 right / 2 middle) to SDL scancodes, keycodes and buttons.

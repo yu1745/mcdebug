@@ -7,9 +7,7 @@ import com.mojang.authlib.GameProfile
 import net.minecraft.world.entity.Entity
 import net.minecraft.network.Connection
 import net.minecraft.network.protocol.PacketFlow
-import net.minecraft.network.protocol.Packet
 import net.minecraft.server.MinecraftServer
-import net.minecraft.server.network.ServerGamePacketListenerImpl
 import net.minecraft.server.level.ServerPlayer
 import net.minecraft.server.level.ServerLevel
 import net.minecraft.world.level.GameType
@@ -109,11 +107,9 @@ internal object FakePlayerPool {
         // Criteria.trigger() / etc. doesn't NPE on null networkHandler.
         // Packets are silently dropped — no real client receives them.
         val connection = Connection(PacketFlow.CLIENTBOUND)
-        val handler = object : ServerGamePacketListenerImpl(server, connection, p, CommonListenerCookie.createInitial(profile, false)) {
-            override fun send(packet: Packet<*>) {
-                // no-op: silently drop all outbound packets
-            }
-        }
+        val handler = Loader.api.fakePlayerPacketListener(
+            server, connection, p, CommonListenerCookie.createInitial(profile, false),
+        )
         p.connection = handler
 
         // Spawn into the world through the same path real players use

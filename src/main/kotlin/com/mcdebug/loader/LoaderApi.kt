@@ -1,6 +1,11 @@
 package com.mcdebug.loader
 
 import net.minecraft.server.MinecraftServer
+import net.minecraft.network.Connection
+import net.minecraft.network.protocol.Packet
+import net.minecraft.server.level.ServerPlayer
+import net.minecraft.server.network.CommonListenerCookie
+import net.minecraft.server.network.ServerGamePacketListenerImpl
 import net.minecraft.world.InteractionHand
 import net.minecraft.world.InteractionResult
 import net.minecraft.world.entity.Entity
@@ -87,6 +92,16 @@ interface LoaderApi {
      * disconnects, so each discarded session player (and its advancement tracker) would stay reachable forever.
      */
     fun releaseConnection(handler: net.minecraft.server.network.ServerGamePacketListenerImpl) {}
+
+    /** No real client receives a fake player's packets; loaders may also disable channel probes. */
+    fun fakePlayerPacketListener(
+        server: MinecraftServer,
+        connection: Connection,
+        player: ServerPlayer,
+        cookie: CommonListenerCookie,
+    ): ServerGamePacketListenerImpl = object : ServerGamePacketListenerImpl(server, connection, player, cookie) {
+        override fun send(packet: Packet<*>) {}
+    }
 
     fun fireUseEntity(
         player: Player,
