@@ -173,7 +173,7 @@ object Hotswap {
             add("notLoaded", stringArray(changed.map { it.name }.filter { it !in loadedNames }))
             add("failed", failed)
             add("skippedReloadCopies", stringArray(copies.map { it.name }.distinct()))
-            if (copies.any { Minecraft.getInstance().screen?.javaClass == it }) addProperty("hint",
+            if (copies.any { Minecraft.getInstance().gui.screen()?.javaClass == it }) addProperty("hint",
                 "the open Screen is a gui.reloadScreen copy and is not redefined; run gui.reloadScreen to see this change")
             if (!failed.isEmpty) addProperty("applied", "none: nothing was redefined (all or nothing)")
             addProperty("enhancedRedefinition", enhanced)

@@ -49,19 +49,18 @@ object GuiInputOps : ClientRpcGroup {
             op.report.addProperty("clear", p.clear)
             if (p.clear) {
                 // Screen.isSelectAll explicitly requires !SHIFT and !ALT. Match vanilla's Mac control semantics.
-                keyPair(op, 65, if (Minecraft.ON_OSX) GuiInputValidation.SUPER else GuiInputValidation.CONTROL)
+                keyPair(op, 65, if ((net.minecraft.util.Util.getPlatform() == net.minecraft.util.Util.OS.OSX)) GuiInputValidation.SUPER else GuiInputValidation.CONTROL)
                 if (!op.changed() && !op.future.isDone) keyPair(op, 259, 0)
             }
-            // KeyboardHandler.charTyped dispatches Character.toChars for supplementary code points.
-            // A validated UTF-16 traversal is identical, while allowing stop after either callback.
+            // 26.3 CharacterEvent carries a complete codepoint, including supplementary characters.
             var dispatched = 0
             var handled = 0
-            for (c in p.text) {
+            for (codepoint in p.text.codePoints().toArray()) {
                 if (op.changed() || op.future.isDone) break
                 op.dispatch(p.modifiers) {
-                    dispatched++
+                    dispatched += Character.charCount(codepoint)
                     op.report.addProperty("dispatchedUtf16Units", dispatched)
-                    if (op.screen!!.charTyped(c, p.modifiers)) handled++
+                    if (op.screen!!.charTyped(net.minecraft.client.input.CharacterEvent(codepoint))) handled++
                     op.report.addProperty("handledCharEvents", handled)
                 }
                 op.publish()
@@ -94,7 +93,7 @@ object GuiInputOps : ClientRpcGroup {
                 op.gesture.finish {
                     op.report.addProperty("releaseDispatched", true)
                     val released = GuiInputModifiers.withMask(p.modifiers) {
-                        op.screen!!.mouseReleased(op.x, op.y, p.button)
+                        op.screen!!.mouseReleased(InputEvents.mouse(op.x, op.y, p.button, p.modifiers))
                     }
                     op.report.addProperty("released", released)
                 }
@@ -104,7 +103,7 @@ object GuiInputOps : ClientRpcGroup {
                 if (op.changed() || op.future.isDone) return@dispatch
                 op.gesture.beginPress() // claim before Screen code, even if mouseClicked throws
                 op.report.addProperty("pressDispatched", true)
-                op.report.addProperty("pressed", op.screen!!.mouseClicked(op.x, op.y, p.button))
+                op.report.addProperty("pressed", op.screen!!.mouseClicked(InputEvents.mouse(op.x, op.y, p.button, p.modifiers), false))
             }
             op.publish()
             if (op.changed() || op.future.isDone) {
@@ -143,7 +142,7 @@ object GuiInputOps : ClientRpcGroup {
                 if (op.changed() || op.future.isDone) return@dispatch
                 op.gesture.step()
                 op.report.addProperty("stepsCompleted", op.gesture.stepsCompleted)
-                val handled = op.screen!!.mouseDragged(op.x, op.y, p.button, dx, dy)
+                val handled = op.screen!!.mouseDragged(InputEvents.mouse(op.x, op.y, p.button, p.modifiers), dx, dy)
                 if (handled) op.dragHandled++
                 op.report.addProperty("handledDragEvents", op.dragHandled)
             }
@@ -161,7 +160,7 @@ object GuiInputOps : ClientRpcGroup {
                 op.keyReleases++
                 op.report.addProperty("keyReleaseEvents", op.keyReleases)
                 op.report.addProperty("releaseDispatched", true)
-                val released = GuiInputModifiers.withMask(mask) { op.screen!!.keyReleased(key, 0, mask) }
+                val released = GuiInputModifiers.withMask(mask) { op.screen!!.keyReleased(InputEvents.key(key, mask)) }
                 if (released) op.keyReleaseHandled++
                 op.report.addProperty("released", released)
                 op.report.addProperty("handledKeyReleases", op.keyReleaseHandled)
@@ -171,7 +170,7 @@ object GuiInputOps : ClientRpcGroup {
                 op.keyPresses++
                 op.report.addProperty("keyPressEvents", op.keyPresses)
                 op.report.addProperty("pressDispatched", true)
-                val pressed = op.screen!!.keyPressed(key, 0, mask)
+                val pressed = op.screen!!.keyPressed(InputEvents.key(key, mask))
                 if (pressed) op.keyPressHandled++
                 op.report.addProperty("pressed", pressed)
                 op.report.addProperty("handledKeyPresses", op.keyPressHandled)
@@ -242,7 +241,7 @@ object GuiInputOps : ClientRpcGroup {
         var releaseAction: (() -> Unit)? = null
 
         fun captureScreen() {
-            screen = client.screen ?: throw problem("CLIENT_NOT_READY", "no Screen is open")
+            screen = client.gui.screen() ?: throw problem("CLIENT_NOT_READY", "no Screen is open")
             width = screen!!.width
             height = screen!!.height
             val window = client.window
@@ -250,17 +249,17 @@ object GuiInputOps : ClientRpcGroup {
             windowHeight = window.getScreenHeight()
             framebufferWidth = window.getWidth()
             framebufferHeight = window.getHeight()
-            guiScale = window.getGuiScale()
+            guiScale = window.getGuiScale().toDouble()
             report.addProperty("screen", screen!!.javaClass.name)
         }
 
         fun changed(): Boolean {
             val original = screen ?: return false
-            val screenChanged = client.screen !== original
+            val screenChanged = client.gui.screen() !== original
             val window = client.window
             val sizeChanged = original.width != width || original.height != height ||
                 window.getScreenWidth() != windowWidth || window.getScreenHeight() != windowHeight ||
-                window.getWidth() != framebufferWidth || window.getHeight() != framebufferHeight || window.getGuiScale() != guiScale
+                window.getWidth() != framebufferWidth || window.getHeight() != framebufferHeight || window.getGuiScale().toDouble() != guiScale
             // Latch observations; never resume if a later callback restores the old screen/size.
             if (screenChanged) report.addProperty("screenChanged", true)
             if (sizeChanged) report.addProperty("sizeChanged", true)

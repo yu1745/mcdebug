@@ -25,7 +25,7 @@ test {
 	useJUnitPlatform()
 	testLogging {
 		events "FAILED", "PASSED", "SKIPPED"
-		exceptionFormat "full"
+		exceptionFormat = "full"
 	}
 }
 
@@ -56,7 +56,7 @@ tasks.named('processResources') {
 
 // The mod jar of this same build travels inside the CLI (`mcdebug jar` writes it out): versions
 // always match and nothing is downloaded. The root project is evaluated first, so remapJar exists.
-def modJar = rootProject.tasks.named('remapJar')
+def modJar = rootProject.tasks.named('jar')
 
 // The NeoForge jar of this same build travels inside the CLI as well (`mcdebug jar --loader neoforge`).
 // neoforge/ is an independent Gradle build, so this goes through the root delegate task
@@ -108,15 +108,14 @@ tasks.register('copyCliJar') {
 	}
 }
 
-// toolchain 21（JitPack 与本地都有）+ 字节码目标 17（root loom 的 MC 1.20.1
-// 要求 ≤17 运行时兼容）。不能用 jvmToolchain(17)：JitPack 只提供 JDK 21。
+// Build with the game's JDK 25; standalone CLI/contract bytecode remains Java 17 compatible.
 java {
 	sourceCompatibility = JavaVersion.VERSION_17
 	targetCompatibility = JavaVersion.VERSION_17
 }
 
 kotlin {
-	jvmToolchain(21)
+	jvmToolchain(25)
 	compilerOptions {
 		jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
 	}

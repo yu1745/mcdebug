@@ -15,14 +15,14 @@ displayTest="IGNORE_ALL_VERSION"
 [[dependencies.mcdebug]]
 modId="neoforge"
 type="required"
-versionRange="[21.1,)"
+versionRange="[26.3.0.103,)"
 ordering="NONE"
 side="BOTH"
 
 [[dependencies.mcdebug]]
 modId="minecraft"
 type="required"
-versionRange="[1.21.1,1.21.2)"
+versionRange="[26.3,26.4)"
 ordering="NONE"
 side="BOTH"
 

@@ -3,9 +3,7 @@ package com.mcdebug.loader.neoforge;
 import net.minecraft.core.BlockPos;
 import net.minecraft.core.Direction;
 import net.minecraft.server.level.ServerLevel;
-import net.minecraft.world.item.ItemStack;
 import net.neoforged.neoforge.capabilities.BlockCapability;
-import net.neoforged.neoforge.capabilities.ItemCapability;
 
 /**
  * Capability lookups for the Kotlin seam implementation.
@@ -24,8 +22,4 @@ public final class NeoCapabilities {
         return capability.getCapability(level, pos, level.getBlockState(pos), level.getBlockEntity(pos), side);
     }
 
-    /** Void-context item capability lookup (fluid handler / energy storage hosted by an item). */
-    public static <T> T item(ItemCapability<T, Void> capability, ItemStack stack) {
-        return capability.getCapability(stack, null);
-    }
 }

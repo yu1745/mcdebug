@@ -7,10 +7,9 @@ import com.mcdebug.loader.RuntimeNames
  * Facade over the loader's [RuntimeNames] implementation, kept because `reflect.*` code refers to
  * it by this name in several places:
  *
- *  - Fabric:   intermediary <-> Mojang table from `mappings/reflect.txt.gz` (production runs on
- *              intermediary names; dev runs on Mojang names)
- *  - NeoForge: identity ([com.mcdebug.loader.MojangRuntimeNames]) — MC 1.21.1 runs on official
- *              Mojang names in dev *and* production, so no table is needed at all
+ * Both loaders run official names in 26.3. Fabric additionally resolves short class names
+ * through its generated Minecraft class index.
+
  */
 object Mappings {
     private val impl: RuntimeNames get() = Loader.names

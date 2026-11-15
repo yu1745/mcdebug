@@ -84,7 +84,7 @@ object BlockEntityOps : RpcHandlerGroup {
             // 未标注 #nbt 的 JSON 数字一律是 NbtInt；字段已存在且是别的数值类型时按原类型写，
             // 否则很多 BE 的 load 用 getLong/getDouble 读到类型不符就当缺省值，写了等于没写。
             if (oldValue is NumericTag && newValue is IntTag && oldValue.id != newValue.id) {
-                newValue = coerceNumeric(oldValue, newValue.asLong)
+                newValue = coerceNumeric(oldValue, newValue.longValue())
             }
             NbtJson.setByPath(nbt, path, newValue)
             applyBeNbt(world, pos, be, nbt)
@@ -131,7 +131,7 @@ object BlockEntityOps : RpcHandlerGroup {
      * limitation; this helper covers the common inventory/comparator case.
      */
     private fun applyBeNbt(world: ServerLevel, pos: BlockPos, be: BlockEntity, nbt: CompoundTag) {
-        be.loadWithComponents(nbt, world.registryAccess())
+        be.loadWithComponents(com.mcdebug.util.NbtIo.input(world.registryAccess(), nbt))
         be.setChanged()
         val state = world.getBlockState(pos)
         world.sendBlockUpdated(pos, state, state, 3)
@@ -195,7 +195,7 @@ private fun tick(server: MinecraftServer, params: JsonObject?): CompletableFutur
         }
         JsonObject().apply {
             add("pos", ServerContext.posAsJson(pos))
-            addProperty("dim", world.dimension().location().toString())
+            addProperty("dim", world.dimension().identifier().toString())
             addProperty("ticked", ticked)
         }
     }

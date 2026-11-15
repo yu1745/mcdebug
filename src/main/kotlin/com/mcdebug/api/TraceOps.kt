@@ -131,7 +131,7 @@ object TraceOps : RpcHandlerGroup {
             addProperty("traceId", trace.id)
             addProperty("active", active)
             addProperty("autoStopped", autoStopped)
-            addProperty("dim", trace.world.dimension().location().toString())
+            addProperty("dim", trace.world.dimension().identifier().toString())
             addProperty("startedTick", trace.startedTick)
             addProperty("intervalTicks", trace.intervalTicks)
             addProperty("maxTicks", trace.maxTicks)

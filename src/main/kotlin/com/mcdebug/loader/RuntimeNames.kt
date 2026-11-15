@@ -5,8 +5,8 @@ package com.mcdebug.loader
  * what this repository compiles against; the implementation maps them to whatever the running
  * game actually uses.
  *
- *  - Fabric dev / NeoForge (all environments): runtime namespace **is** Mojang → [MojangRuntimeNames]
- *  - Fabric production: the loader remaps Minecraft to **intermediary** (`class_1309`) → table lookup
+ * Both loaders use official names in Minecraft 26.3. Fabric additionally carries a class
+ * index for resolving short names; members pass through unchanged.
  */
 interface RuntimeNames {
     fun ensureLoaded()
@@ -31,7 +31,7 @@ interface RuntimeNames {
 
 /**
  * Identity mapping: the runtime namespace already is Mojang, so names pass through unchanged.
- * Used by NeoForge (production and dev alike, MC 1.21.1) and by Fabric's dev environment.
+ * Used by NeoForge and as the base of Fabric's Minecraft 26.3 class-name resolver.
  */
 object MojangRuntimeNames : RuntimeNames {
     override fun ensureLoaded() {}

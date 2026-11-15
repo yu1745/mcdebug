@@ -1,5 +1,17 @@
 # mcdebug — AGENTS.md（贡献者指南）
 
+## 26.3 分支说明（优先于下文保留的 1.21 开发指南）
+
+- 基线为原生 `1.21.1` 分支 `72a70c2`，工作树 `../mcdebug-wt-263`；本分支只编译 Minecraft 26.3，不在源码内添加旧版条件分支。
+- JDK 25、Gradle 9.6.0、非 remap Loom 1.17.21；Fabric Loader 0.20.1 / API 0.166.2+26.3；NeoForge 26.3.0.103 / MDG 2.0.148。
+- 两个 loader 都使用官方运行时名字；Fabric 的 `generateReflectMappings` 只生成短类名索引，不生成 intermediary 映射。发布产物来自 `jar`，没有 `remapJar`。
+- 查 API 先读本工作树 `mc_source/`（`./gradlew genSources` 后解压源 jar）或 `fabric-api_source/`；NeoForge 源码在 `neoforge/build/source-reference/`，patched MC 源 jar 在 `neoforge/build/moddev/artifacts/`。这些都是忽略的参考文件。
+- GUI 已迁移至 `GuiGraphicsExtractor` / `GuiTextRenderState`；Screen 状态位于 `Minecraft.gui`。截图用原版异步 GPU 读回，不能调用旧版 OpenGL 直接读帧缓冲的 API。
+- CLI 的按键码、按钮编号、修饰键位保持基线格式，由 `InputEvents` 转换为 SDL 事件。GUI 输入只派发到 Screen，不注入全局输入。
+- NeoForge 存储使用事务型 `ResourceHandler` / `EnergyHandler` / `ItemAccess`；禁止恢复旧 `IItemHandler` / `IFluidHandler`。物品和流体搬运必须在同一事务内提交或回滚。
+- 保留两平面、loader 接缝、自包含 jar、被动 tick、隔离测试、进程清理等基线约束。26.3 的差异与验证记录见 `docs/port-26.3.md`。
+- **用户要求：不添加基线中不存在的测试，除非 26.3 的实现与 1.21 不同且使用新 API。**优先运行和适配现有测试、冒烟脚本及 GUI 验证流程。
+
 本文件是 mcdebug 的唯一开发指南（仓库/协议/验证规则）。1.20.1 线（`main` 分支，yarn 映射，Kilt 容器测试环境）已归档，不再回移。
 
 Fabric 1.21.1（Mojang 官方映射）+ Kotlin Mod，提供 JSON-RPC 服务，让 Kotlin CLI / JUnit runner 远程读写世界/方块实体/物品栏/资源存储/快照/GUI，**用于 Mod 开发者自动化测试自己的机器方块**（Kotlin JUnit 5，见 ic2-fabric 的 `core/src/mcdebugTest/`）。

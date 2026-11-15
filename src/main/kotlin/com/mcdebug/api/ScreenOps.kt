@@ -12,7 +12,7 @@ import com.mcdebug.util.ServerContext
 import com.mojang.authlib.GameProfile
 import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.world.inventory.AbstractContainerMenu
-import net.minecraft.world.inventory.ClickType
+import net.minecraft.world.inventory.ContainerInput
 import net.minecraft.server.MinecraftServer
 import net.minecraft.server.level.ServerPlayer
 import net.minecraft.network.chat.Component
@@ -85,7 +85,7 @@ object ScreenOps : RpcHandlerGroup {
             val handler = player.containerMenu
             val id = UUID.randomUUID().toString()
             val title = factory?.displayName ?: state.block.name
-            val session = ScreenSession(id, player, handler, title, world.dimension().location().toString(), pos)
+            val session = ScreenSession(id, player, handler, title, world.dimension().identifier().toString(), pos)
             sessions[id] = session
             // sessions a client never closed (it crashed or forgot) would keep their fake players forever: the
             // oldest are closed past MAX_SESSIONS
@@ -163,7 +163,7 @@ object ScreenOps : RpcHandlerGroup {
             val session = session(p)
             val slot = p.requireLong("slot").toInt()
             requireUsable(session)
-            session.handler.clicked(slot, 0, ClickType.QUICK_MOVE, session.player)
+            session.handler.clicked(slot, 0, ContainerInput.QUICK_MOVE, session.player)
             session.handler.sendAllDataToRemote()
             screenSnapshot(session)
         }
@@ -331,7 +331,7 @@ object ScreenOps : RpcHandlerGroup {
 
     private fun positionPlayerForScreen(player: ServerPlayer, pos: BlockPos, side: Direction?) {
         val face = side ?: Direction.NORTH
-        player.moveTo(
+        player.snapTo(
             pos.x + 0.5 + face.stepX * 0.75,
             pos.y + 0.5 + face.stepY * 0.75,
             pos.z + 0.5 + face.stepZ * 0.75,
@@ -354,12 +354,12 @@ object ScreenOps : RpcHandlerGroup {
         else -> 0f
     }
 
-    private fun parseActionType(value: String): ClickType =
-        runCatching { ClickType.valueOf(value.uppercase()) }
+    private fun parseActionType(value: String): ContainerInput =
+        runCatching { ContainerInput.valueOf(value.uppercase()) }
             .getOrElse {
                 throw RpcException(
                     RpcErrors.INVALID_PARAMS,
-                    "invalid actionType: $value (allowed: ${ClickType.entries.joinToString { it.name.lowercase() }})"
+                    "invalid actionType: $value (allowed: ${ContainerInput.entries.joinToString { it.name.lowercase() }})"
                 )
             }
 

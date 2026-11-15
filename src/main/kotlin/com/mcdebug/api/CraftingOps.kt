@@ -15,7 +15,7 @@ import net.minecraft.world.item.crafting.Recipe
 import net.minecraft.world.item.crafting.RecipeHolder
 import net.minecraft.world.item.crafting.CraftingInput
 import net.minecraft.server.MinecraftServer
-import net.minecraft.resources.ResourceLocation
+import net.minecraft.resources.Identifier
 import net.minecraft.core.NonNullList
 import net.minecraft.world.level.Level
 import java.util.concurrent.CompletableFuture
@@ -89,7 +89,7 @@ object CraftingOps : RpcHandlerGroup {
             //create() trims to the occupied bounding box and ignores empty cells, exactly like a real 3x3 grid
             val input = CraftingInput.of(3, 3, stacks)
 
-            val entry: RecipeHolder<Recipe<CraftingInput>>? = pickRecipe(server, p, input, world)
+            val entry: RecipeHolder<CraftingRecipe>? = pickRecipe(server, p, input, world)
             if (entry == null) {
                 return@onServer JsonObject().apply {
                     addProperty("matched", false)
@@ -98,7 +98,7 @@ object CraftingOps : RpcHandlerGroup {
             }
             val recipe = entry.value
 
-            val resultStack: ItemStack = recipe.assemble(input, world.registryAccess())
+            val resultStack: ItemStack = recipe.assemble(input)
             val remainder: NonNullList<ItemStack> = try {
                 recipe.getRemainingItems(input)
             } catch (e: Exception) {
@@ -110,7 +110,7 @@ object CraftingOps : RpcHandlerGroup {
 
             JsonObject().apply {
                 addProperty("matched", true)
-                addProperty("recipeId", entry.id.toString())
+                addProperty("recipeId", entry.id.identifier().toString())
                 addProperty("recipeType", RegistriesIdLookup.typeIdOf(recipe))
                 add("result", ServerContext.itemStackToJson(resultStack))
                 add("remainder", remainderListToJson(remainder))
@@ -136,16 +136,15 @@ object CraftingOps : RpcHandlerGroup {
             for (entry in server.recipeManager.getRecipes()) {
                 val recipe = entry.value
                 if (recipe !is CraftingRecipe) continue
-                if (recipe.isSpecial() || recipe.isIncomplete) continue
-                if (!recipe.canCraftInDimensions(3, 3)) continue
-                val matched = try {
+                if (recipe.isSpecial()) continue
+                    val matched = try {
                     recipe.matches(input, world)
                 } catch (e: Exception) { false }
                 if (matched) {
                     matches.add(JsonObject().apply {
-                        addProperty("recipeId", entry.id.toString())
+                        addProperty("recipeId", entry.id.identifier().toString())
                         addProperty("recipeType", RegistriesIdLookup.typeIdOf(recipe))
-                        addProperty("output", describeItem(recipe.getResultItem(world.registryAccess())))
+                        addProperty("output", describeItem(recipe.assemble(input)))
                     })
                 }
             }
@@ -159,15 +158,15 @@ object CraftingOps : RpcHandlerGroup {
         p: JsonObject,
         input: CraftingInput,
         world: Level,
-    ): RecipeHolder<Recipe<CraftingInput>>? {
+    ): RecipeHolder<CraftingRecipe>? {
         val explicit = p.getStringOrNull("recipeId")
         if (explicit != null) {
-            val id = ResourceLocation.tryParse(explicit)
+            val id = Identifier.tryParse(explicit)
                 ?: throw RpcException(RpcErrors.INVALID_PARAMS, "invalid recipeId: $explicit")
-            val found = server.recipeManager.byKey(id).orElse(null)
+            val found = server.recipeManager.byKey(net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.RECIPE, id)).orElse(null)
                 ?: throw RpcException(RpcErrors.INVALID_PARAMS, "no recipe with id: $explicit")
             @Suppress("UNCHECKED_CAST")
-            val r = found.value as? Recipe<CraftingInput>
+            val r = found.value as? CraftingRecipe
                 ?: throw RpcException(
                     RpcErrors.INVALID_PARAMS,
                     "recipe $explicit is not a crafting-grid recipe (type=${RegistriesIdLookup.typeIdOf(found.value)})"
@@ -177,14 +176,13 @@ object CraftingOps : RpcHandlerGroup {
         for (entry in server.recipeManager.getRecipes()) {
             val recipe = entry.value
             if (recipe !is CraftingRecipe) continue
-            if (recipe.isSpecial() || recipe.isIncomplete) continue
-            if (!recipe.canCraftInDimensions(3, 3)) continue
+            if (recipe.isSpecial()) continue
             val matched = try {
                 recipe.matches(input, world)
             } catch (e: Exception) { false }
             if (matched) {
                 @Suppress("UNCHECKED_CAST")
-                return entry as RecipeHolder<Recipe<CraftingInput>>
+                return entry as RecipeHolder<CraftingRecipe>
             }
         }
         return null

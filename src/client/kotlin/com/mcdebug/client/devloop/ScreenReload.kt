@@ -67,7 +67,7 @@ internal object ScreenReload {
 
     /** Client thread. */
     fun reload(client: Minecraft, dirs: List<Path>, also: List<String>): JsonObject {
-        val old = client.screen ?: throw noScreen()
+        val old = client.gui.screen() ?: throw noScreen()
         val root = old.javaClass.name
         val base = ScreenFactory::class.java.classLoader
         val loader = ScreenClassLoader(dirs, base) { name ->
@@ -94,13 +94,13 @@ internal object ScreenReload {
                 // Not setScreen: AbstractContainerScreen.removed() would close the menu
                 // the new screen is built around.
                 fresh.added()
-                fresh.init(client, client.window.guiScaledWidth, client.window.guiScaledHeight)
-                client.screen = fresh
+                fresh.init(client.window.guiScaledWidth, client.window.guiScaledHeight)
+                (client.gui as com.mcdebug.client.mixin.GuiScreenAccessor).`mcdebug$setScreen`(fresh)
             } else {
-                client.setScreen(fresh)
+                client.gui.setScreen(fresh)
             }
         } catch (t: Throwable) {
-            if (client.screen === fresh) client.screen = old
+            if (client.gui.screen() === fresh) (client.gui as com.mcdebug.client.mixin.GuiScreenAccessor).`mcdebug$setScreen`(old)
             throw failure(root, "init()", t)
         }
         ScreenGuard.clear()

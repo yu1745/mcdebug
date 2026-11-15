@@ -17,7 +17,7 @@ class ReflectCommands : CliktCommand(
     help = "arbitrary runtime reflection on the server plane. Start from --root (server|level|be|entity|player), " +
         "--ref N or --class (statics), then walk --path: dot segments, `name` = field, else no-arg method, else " +
         "getName/isName; `name()` = method; `[3]` index; `[\"key\"]` map key; no arguments or expressions. " +
-        "Mojang and intermediary names both work. Objects come back as {\"ref\":N}; refs are kept " +
+        "Minecraft 26.3 uses official Mojang names on both loaders. Objects come back as {\"ref\":N}; refs are kept " +
         "(LRU, max 1024) across commands until released or the server stops",
 ) {
     override fun run() = Unit
@@ -27,7 +27,7 @@ class ReflectCommands : CliktCommand(
 class ReflectTarget : OptionGroup("Target (one of --root/--ref/--class, then --path)") {
     val root by option("--root", help = "server | level | be | entity | player (server plane); minecraft | screen | player | level | server (--client)")
     val ref by option("--ref", help = "object ref from an earlier result").long()
-    val className by option("--class", help = "class for static members: an FQN like net.minecraft.world.level.block.Blocks; on Fabric a short/intermediary name also resolves (NeoForge has no mapping table, so it needs the FQN)")
+    val className by option("--class", help = "class for static members: an FQN like net.minecraft.world.level.block.Blocks; on Fabric a short official name also resolves (NeoForge has no mapping table, so it needs the FQN)")
     val path by option("--path", help = "e.g. 'overworld.dayTime' or 'items[0]'")
     val pos by option("--pos", help = "x,y,z for --root be")
     val dim by option("--dim", help = "dimension for --root level/be (default overworld)")

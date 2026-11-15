@@ -65,23 +65,33 @@ internal object PlayerActionSupport {
             val count = stackObject.getIntOr("count", 1)
             val stack = ServerContext.itemStackFromJson(server, item, count, stackObject.get("nbt"), stackObject.get("components"))
             player.setItemSlot(slot, stack)
-            primeStackForGameplay(player.level() as ServerLevel, player, stack, slot.getIndex(), false)
+            primeStackForGameplay(player.level(), player, stack, slot)
         }
         return old
     }
     
+    internal fun resultName(result: net.minecraft.world.InteractionResult): String = when (result) {
+        is net.minecraft.world.InteractionResult.Success -> when (result.swingSource()) {
+            net.minecraft.world.InteractionResult.SwingSource.NONE -> if (result.wasItemInteraction()) "consume" else "consume_partial"
+            net.minecraft.world.InteractionResult.SwingSource.SERVER_ONLY -> "success_server"
+            else -> if (result.wasItemInteraction()) "success" else "success_no_item_used"
+        }
+        is net.minecraft.world.InteractionResult.Fail -> "fail"
+        is net.minecraft.world.InteractionResult.TryEmptyHandInteraction -> "try_with_empty_hand"
+        else -> "pass"
+    }
+
     internal fun primeStackForGameplay(
         world: ServerLevel,
         player: ServerPlayer,
         stack: ItemStack,
-        slot: Int,
-        selected: Boolean,
+        slot: EquipmentSlot,
     ) {
         if (!stack.isEmpty) {
             // A real player ticks held and worn stacks before interacting. This generic
             // one-shot tick initializes lazy item state without hard-coding any mod
             // API into mcdebug.
-            stack.inventoryTick(world, player, slot, selected)
+            stack.inventoryTick(world, player, slot)
         }
     }
     
@@ -226,6 +236,6 @@ internal object PlayerActionSupport {
             clickedPos.y + 0.5 + face.opposite.stepY * 1.5,
             clickedPos.z + 0.5 + face.opposite.stepZ * 1.5,
         )
-        fakePlayer.moveTo(stand.x, stand.y, stand.z, yaw, pitch)
+        fakePlayer.snapTo(stand.x, stand.y, stand.z, yaw, pitch)
     }
 }

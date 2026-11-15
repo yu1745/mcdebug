@@ -20,7 +20,7 @@ import com.mcdebug.rpc.RpcErrors
 import com.mcdebug.rpc.RpcException
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen
-import net.minecraft.world.inventory.ClickType
+import net.minecraft.world.inventory.ContainerInput
 import java.util.concurrent.CompletableFuture
 
 /**
@@ -79,7 +79,7 @@ object GuiClickOps : ClientRpcGroup {
                 ?: throw RpcException(RpcErrors.CLIENT_NOT_READY, "not in a world")
             val gameMode = client.gameMode
                 ?: throw RpcException(RpcErrors.CLIENT_NOT_READY, "no game mode (still connecting?)")
-            val menu = (client.screen as? AbstractContainerScreen<*>)?.getMenu() ?: player.containerMenu
+            val menu = (client.gui.screen() as? AbstractContainerScreen<*>)?.getMenu() ?: player.containerMenu
             val slot = menu.slots.getOrNull(index)
                 ?: throw RpcException(
                     RpcErrors.SLOT_OUT_OF_RANGE,
@@ -90,12 +90,12 @@ object GuiClickOps : ClientRpcGroup {
                     },
                 )
             val clickType = when {
-                clickTypeName != null -> parseClickType(clickTypeName)
-                shift -> ClickType.QUICK_MOVE
-                else -> ClickType.PICKUP
+                clickTypeName != null -> parseContainerInput(clickTypeName)
+                shift -> ContainerInput.QUICK_MOVE
+                else -> ContainerInput.PICKUP
             }
             val before = itemJson(slot.getItem())
-            val accessor = client.screen as? AbstractContainerScreenAccessor
+            val accessor = client.gui.screen() as? AbstractContainerScreenAccessor
             // 槽位中心（绝对 GUI 单位）：既是 warp 目标，也回报给 agent——有了它 agent 才能把
             // 这次点击对应到 gui.screenshot 的 PNG 像素（PNG 坐标 = (gui - gui.left/top) * pixelsPerGui）。
             val guiX = (accessor?.leftPos ?: 0) + slot.x + 8.0
@@ -103,7 +103,7 @@ object GuiClickOps : ClientRpcGroup {
             val moved = moveCursor && GuiCursor.warp(client, guiX, guiY)
             // The vanilla body of AbstractContainerScreen#slotClicked (which is
             // protected): the client only sends the intent, the server owns the result.
-            gameMode.handleInventoryMouseClick(menu.containerId, slot.index, button, clickType, player)
+            gameMode.handleContainerInput(menu.containerId, slot.index, button, clickType, player)
             ClickResult(
                 mode = "slot",
                 slotIndex = index,
@@ -128,7 +128,7 @@ object GuiClickOps : ClientRpcGroup {
     ): CompletableFuture<JsonElement> {
         val button = params.int("button", 0)
         val clicked = ClientTasks.onClient(client) {
-            val screen = client.screen ?: throw noScreen()
+            val screen = client.gui.screen() ?: throw noScreen()
             val target = resolve()
             // Snapshot before dispatch: the click may relabel/move the widget.
             val before = target.widget?.let { (i, w) -> GuiScreenOps.widgetJson(client, i, w) }
@@ -136,8 +136,8 @@ object GuiClickOps : ClientRpcGroup {
             // Ordinary Screen event dispatch — no GLFW input synthesis, no focus needed.
             // Widgets and container slots both resolve positionally from (x, y), so the
             // synthetic click lands exactly where the coordinates say.
-            val pressed = screen.mouseClicked(target.x, target.y, button)
-            val released = screen.mouseReleased(target.x, target.y, button)
+            val pressed = screen.mouseClicked(InputEvents.mouse(target.x, target.y, button, 0), false)
+            val released = screen.mouseReleased(InputEvents.mouse(target.x, target.y, button, 0))
             ClickResult(
                 mode = target.mode,
                 slotIndex = null,
@@ -172,7 +172,7 @@ object GuiClickOps : ClientRpcGroup {
 
     /** Reports the post-click state. */
     private fun clickReport(client: Minecraft, result: ClickResult): JsonObject {
-        val screen = client.screen
+        val screen = client.gui.screen()
         val player = client.player
         val menu = (screen as? AbstractContainerScreen<*>)?.getMenu() ?: player?.containerMenu
         return JsonObject().apply {
@@ -205,12 +205,12 @@ object GuiClickOps : ClientRpcGroup {
         }
     }
 
-    private fun parseClickType(name: String): ClickType {
+    private fun parseContainerInput(name: String): ContainerInput {
         val normalized = name.trim().uppercase().replace('-', '_')
-        return ClickType.entries.firstOrNull { it.name == normalized }
+        return ContainerInput.entries.firstOrNull { it.name == normalized }
             ?: throw RpcException(
                 RpcErrors.INVALID_PARAMS,
-                "unknown clickType '$name' (${ClickType.entries.joinToString("/") { it.name }})",
+                "unknown clickType '$name' (${ContainerInput.entries.joinToString("/") { it.name }})",
             )
     }
 }

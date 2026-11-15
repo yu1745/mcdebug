@@ -123,7 +123,7 @@ internal object EntityPlayerActions {
     
                 // Position player near the entity, looking at it
                 val eyePos = entity.getEyePosition()
-                fakePlayer.moveTo(
+                fakePlayer.snapTo(
                     eyePos.x, eyePos.y, eyePos.z,
                     PlayerActionSupport.yawFor(playerFacing), 0f
                 )
@@ -147,7 +147,7 @@ internal object EntityPlayerActions {
                     // Real path: Player.interact — the method a real right-click on
                     // an entity goes through: entity.interact(hand), then for living
                     // entities ItemStack.useOnEntity, creative count restore, GameEvent.
-                    val result = fakePlayer.interactOn(entity, InteractionHand.MAIN_HAND)
+                    val result = fakePlayer.interactOn(entity, InteractionHand.MAIN_HAND, hitResult.location.subtract(entity.position()))
                     val itemChanged = !ItemStack.matches(
                         itemBeforeSnapshot, fakePlayer.getItemInHand(InteractionHand.MAIN_HAND)
                     )
@@ -172,7 +172,7 @@ internal object EntityPlayerActions {
     
             JsonObject().apply {
                 addProperty("success", success)
-                addProperty("action", consumed.name.lowercase())
+                addProperty("action", PlayerActionSupport.resultName(consumed))
                 addProperty("entityType", BuiltInRegistries.ENTITY_TYPE.getKey(entity.type).toString())
                 addProperty("entityUuid", entity.getStringUUID())
                 addProperty("sneaking", sneaking)
@@ -252,21 +252,21 @@ internal object EntityPlayerActions {
     
                 try {
                     fakePlayer.setItemInHand(InteractionHand.MAIN_HAND, itemBefore.copy())
-                    PlayerActionSupport.primeStackForGameplay(world, fakePlayer, fakePlayer.getItemInHand(InteractionHand.MAIN_HAND), 0, true)
+                    PlayerActionSupport.primeStackForGameplay(world, fakePlayer, fakePlayer.getItemInHand(InteractionHand.MAIN_HAND), net.minecraft.world.entity.EquipmentSlot.MAINHAND)
                     heldModifiers = PlayerActionSupport.mainHandModifierMultimap(fakePlayer.getItemInHand(InteractionHand.MAIN_HAND))
                     fakePlayer.getAttributes().addTransientAttributeModifiers(heldModifiers)
                     PlayerActionSupport.primeAttackCooldown(fakePlayer)
     
                     val playerFacing = p.getDirectionOrNull("playerFacing") ?: Direction.SOUTH
                     val eyePos = entity.getEyePosition()
-                    val playerOffset = Vec3.atLowerCornerOf(playerFacing.opposite.normal).scale(1.5)
+                    val playerOffset = playerFacing.opposite.unitVec3.scale(1.5)
                     val playerPos = entity.position().add(playerOffset)
-                    fakePlayer.moveTo(
+                    fakePlayer.snapTo(
                         playerPos.x, entity.y, playerPos.z,
                         PlayerActionSupport.yawFor(playerFacing), 0f
                     )
                     fakePlayer.setOnGround(true)
-                    fakePlayer.fallDistance = 0f
+                    fakePlayer.fallDistance = 0.0
                     fakePlayer.setDeltaMovement(0.0, 0.0, 0.0)
                     fakePlayer.isSprinting = false
     

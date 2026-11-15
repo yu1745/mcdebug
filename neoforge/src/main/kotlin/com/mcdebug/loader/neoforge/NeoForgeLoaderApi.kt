@@ -13,7 +13,6 @@ import net.minecraft.world.level.Level
 import net.minecraft.world.phys.EntityHitResult
 import net.neoforged.fml.ModList
 import net.neoforged.fml.loading.FMLPaths
-import net.neoforged.neoforge.common.CommonHooks
 import net.neoforged.neoforge.common.NeoForge
 import net.neoforged.neoforge.event.server.ServerStartedEvent
 import net.neoforged.neoforge.event.server.ServerStoppingEvent
@@ -24,7 +23,7 @@ import java.nio.file.Path
  * NeoForge implementation of the loader seam (see [LoaderApi]). Installed by
  * [McDebugNeoForge] (server side, and on a client by the client entrypoint).
  *
- * MC 1.21.1 runs on **official Mojang names** in dev and production alike, so `reflect.*` needs
+ * MC 26.3 runs on **official Mojang names** in dev and production alike, so `reflect.*` needs
  * no mapping table at all ([MojangRuntimeNames]).
  */
 class NeoForgeLoaderApi : LoaderApi {
@@ -37,7 +36,7 @@ class NeoForgeLoaderApi : LoaderApi {
 
     override val fluidUnit: String = "mb"
 
-    /** NeoForge Energy (Forge Energy) — what `IEnergyStorage` counts. */
+    /** NeoForge Energy (Forge Energy) — what `EnergyHandler` counts. */
     override val energyUnit: String = "FE"
 
     override val names: RuntimeNames = MojangRuntimeNames
@@ -69,31 +68,14 @@ class NeoForgeLoaderApi : LoaderApi {
         null
     }
 
-    /**
-     * Both calls below are the ones the server packet handler makes, so listeners see exactly what
-     * a real right-click delivers (the Fabric side has a single `UseEntityCallback` that carries a
-     * nullable hit result):
-     *  - with a hit vector  → `PlayerInteractEvent.EntityInteractSpecific` (`onInteractEntityAt`);
-     *  - without one        → `PlayerInteractEvent.EntityInteract` (`onInteractEntity`) — the flavour
-     *    a plain interact produces. Fabricating a *specific* event at the entity's feet with a null
-     *    hit result would leave `EntityInteract` listeners blind.
-     */
+    /** 26.3 fires EntityInteract inside Player.interactOn; the shared path must not fire it twice. */
     override fun fireUseEntity(
         player: Player,
         level: Level,
         hand: InteractionHand,
         entity: Entity,
         hitResult: EntityHitResult?,
-    ): InteractionResult {
-        val event = if (hitResult != null) {
-            // The Vec3 overload takes the position *relative to the entity* (localPos); the
-            // HitResult overload does the subtraction, exactly like the packet handler.
-            CommonHooks.onInteractEntityAt(player, entity, hitResult, hand)
-        } else {
-            CommonHooks.onInteractEntity(player, entity, hand)
-        }
-        return event ?: InteractionResult.PASS
-    }
+    ): InteractionResult = InteractionResult.PASS
 
     companion object {
         const val MOD_ID: String = "mcdebug"

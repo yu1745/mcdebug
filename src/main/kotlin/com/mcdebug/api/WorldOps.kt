@@ -54,7 +54,7 @@ object WorldOps : RpcHandlerGroup {
             val includeNbt = p.getBoolOrFalse("includeNbt")
             JsonObject().apply {
                 add("pos", ServerContext.posAsJson(pos))
-                addProperty("dim", world.dimension().location().toString())
+                addProperty("dim", world.dimension().identifier().toString())
                 add("state", ServerContext.blockStateToJson(state))
                 addProperty("hasBlockEntity", hasBe)
                 if (includeNbt && hasBe) {
@@ -134,7 +134,7 @@ object WorldOps : RpcHandlerGroup {
                 val be = world.getBlockEntity(pos)
                 val entry = JsonObject().apply {
                     add("pos", ServerContext.posAsJson(pos))
-                    addProperty("dim", world.dimension().location().toString())
+                    addProperty("dim", world.dimension().identifier().toString())
                     add("state", ServerContext.blockStateToJson(state))
                     addProperty("hasBlockEntity", be != null)
                     if (includeNbt && be != null) add("nbt", NbtJson.toJson(be.saveWithoutMetadata(world.registryAccess())))
@@ -196,7 +196,7 @@ object WorldOps : RpcHandlerGroup {
                 addProperty("forced", true)
                 addProperty("changed", changed)
                 addProperty("loaded", loaded)
-                addProperty("dim", world.dimension().location().toString())
+                addProperty("dim", world.dimension().identifier().toString())
             }
         }
 
@@ -213,7 +213,7 @@ object WorldOps : RpcHandlerGroup {
                 add("chunk", JsonArray().apply { add(chunkPos.x); add(chunkPos.z) })
                 addProperty("forced", false)
                 addProperty("changed", changed)
-                addProperty("dim", world.dimension().location().toString())
+                addProperty("dim", world.dimension().identifier().toString())
             }
         }
 
@@ -267,7 +267,7 @@ object WorldOps : RpcHandlerGroup {
         return JsonObject().apply {
             addProperty("count", total)
             addProperty("changed", changed)
-            addProperty("dim", world.dimension().location().toString())
+            addProperty("dim", world.dimension().identifier().toString())
         }
     }
 }

@@ -474,7 +474,7 @@ class ReflectCore(
         is Byte -> JsonPrimitive(v.toInt())
         is Number -> JsonPrimitive(v.toString())
         is Char -> JsonPrimitive(v.toString())
-        is CharSequence, is java.util.UUID, is Enum<*>, is net.minecraft.resources.ResourceLocation -> JsonPrimitive(v.toString())
+        is CharSequence, is java.util.UUID, is Enum<*>, is net.minecraft.resources.Identifier -> JsonPrimitive(v.toString())
         else -> null
     }
 

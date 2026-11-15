@@ -148,12 +148,12 @@ object GuiDevOps : ClientRpcGroup {
 
     private fun reinit(client: Minecraft, params: JsonObject?): CompletableFuture<JsonElement> =
         ClientTasks.onClient(client) {
-            val screen = client.screen ?: throw noScreen()
+            val screen = client.gui.screen() ?: throw noScreen()
             val hadFault = ScreenGuard.currentFault(client) != null
             ScreenGuard.clear()
             val window = client.window
             // Screen.resize -> repositionElements -> rebuildWidgets -> init(): new code, same Screen/menu.
-            screen.resize(client, window.getGuiScaledWidth(), window.getGuiScaledHeight())
+            screen.resize(window.getGuiScaledWidth(), window.getGuiScaledHeight())
             JsonObject().apply {
                 addProperty("ok", true)
                 addProperty("screen", screen.javaClass.name)
@@ -205,11 +205,11 @@ object GuiDevOps : ClientRpcGroup {
         val reinit = p.bool("reinit", true)
         return ClientTasks.onClient(client) {
             Hotswap.swap(dirs, since).apply {
-                val screen = client.screen
+                val screen = client.gui.screen()
                 if (reinit && screen != null && get("redefined").asJsonArray.size() > 0) {
                     ScreenGuard.clear()
                     val window = client.window
-                    screen.resize(client, window.getGuiScaledWidth(), window.getGuiScaledHeight())
+                    screen.resize(window.getGuiScaledWidth(), window.getGuiScaledHeight())
                     addProperty("reinit", screen.javaClass.name)
                 }
             }

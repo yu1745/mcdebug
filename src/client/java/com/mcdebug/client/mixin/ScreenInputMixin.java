@@ -9,22 +9,22 @@ import org.spongepowered.asm.mixin.injection.Inject;
 import org.spongepowered.asm.mixin.injection.callback.CallbackInfoReturnable;
 
 /** Overrides only a synthetic event's synchronous call stack, never the desktop keyboard. */
-@Mixin(Screen.class)
+@Mixin(Minecraft.class)
 public abstract class ScreenInputMixin {
     @Inject(method = "hasControlDown()Z", at = @At("HEAD"), cancellable = true)
-    private static void mcdebug$controlDown(CallbackInfoReturnable<Boolean> cir) {
-        Boolean value = GuiInputModifiers.controlDown(Minecraft.ON_OSX);
+    private void mcdebug$controlDown(CallbackInfoReturnable<Boolean> cir) {
+        Boolean value = GuiInputModifiers.controlDown(false);
         if (value != null) cir.setReturnValue(value);
     }
 
     @Inject(method = "hasShiftDown()Z", at = @At("HEAD"), cancellable = true)
-    private static void mcdebug$shiftDown(CallbackInfoReturnable<Boolean> cir) {
+    private void mcdebug$shiftDown(CallbackInfoReturnable<Boolean> cir) {
         Boolean value = GuiInputModifiers.shiftDown();
         if (value != null) cir.setReturnValue(value);
     }
 
     @Inject(method = "hasAltDown()Z", at = @At("HEAD"), cancellable = true)
-    private static void mcdebug$altDown(CallbackInfoReturnable<Boolean> cir) {
+    private void mcdebug$altDown(CallbackInfoReturnable<Boolean> cir) {
         Boolean value = GuiInputModifiers.altDown();
         if (value != null) cir.setReturnValue(value);
     }

@@ -40,23 +40,23 @@ object NbtJson {
         is EndTag -> JsonNull.INSTANCE
         is CompoundTag -> {
             val obj = JsonObject()
-            nbt.allKeys.forEach { key -> obj.add(key, toJson(nbt[key]!!)) }
+            nbt.keySet().forEach { key -> obj.add(key, toJson(nbt[key]!!)) }
             obj
         }
         is ListTag -> {
             val arr = JsonArray()
             for (i in 0 until nbt.size) {
-                arr.add(toJson(nbt[i]!!))
+                arr.add(toJson(nbt[i]))
             }
             arr
         }
-        is ByteTag -> JsonPrimitive(nbt.getAsByte().toInt())
-        is ShortTag -> JsonPrimitive(nbt.getAsShort().toInt())
-        is IntTag -> JsonPrimitive(nbt.getAsInt())
-        is LongTag -> JsonPrimitive(nbt.getAsLong())
-        is FloatTag -> JsonPrimitive(nbt.getAsFloat().toDouble())
-        is DoubleTag -> JsonPrimitive(nbt.getAsDouble())
-        is StringTag -> JsonPrimitive(nbt.getAsString())
+        is ByteTag -> JsonPrimitive(nbt.byteValue().toInt())
+        is ShortTag -> JsonPrimitive(nbt.shortValue().toInt())
+        is IntTag -> JsonPrimitive(nbt.intValue())
+        is LongTag -> JsonPrimitive(nbt.longValue())
+        is FloatTag -> JsonPrimitive(nbt.floatValue().toDouble())
+        is DoubleTag -> JsonPrimitive(nbt.doubleValue())
+        is StringTag -> JsonPrimitive(nbt.value())
         is ByteArrayTag -> {
             val arr = JsonArray()
             nbt.asByteArray.forEach { arr.add(JsonPrimitive(it.toInt())) }
@@ -72,7 +72,6 @@ object NbtJson {
             nbt.asLongArray.forEach { arr.add(JsonPrimitive(it)) }
             arr
         }
-        else -> throw RpcException(RpcErrors.NBT_PARSE_ERROR, "unsupported NBT type: ${nbt.type}")
     }
 
     /**
@@ -231,7 +230,7 @@ object NbtJson {
                     current is ListTag && tok is PathToken.Index -> {
                         val idx = tok.index
                         while (current.size <= idx) current.add(CompoundTag())
-                        current[idx]!!
+                        current[idx]
                     }
                     else -> throw RpcException(RpcErrors.INVALID_PARAMS, "cannot traverse path at '$tok'")
                 }
@@ -241,11 +240,11 @@ object NbtJson {
     }
 
     /** Convert Minecraft identifier to canonical string ("minecraft:stone") */
-    fun idToString(id: net.minecraft.resources.ResourceLocation): String = id.toString()
+    fun idToString(id: net.minecraft.resources.Identifier): String = id.toString()
 
     /** Resolve "minecraft:stone" to a registered identifier, or null. */
-    fun identifier(s: String): net.minecraft.resources.ResourceLocation? =
-        try { net.minecraft.resources.ResourceLocation.tryParse(s) } catch (_: Exception) { null }
+    fun identifier(s: String): net.minecraft.resources.Identifier? =
+        try { net.minecraft.resources.Identifier.tryParse(s) } catch (_: Exception) { null }
 
     fun blockId(s: String): net.minecraft.world.level.block.Block? {
         val id = identifier(s) ?: return null

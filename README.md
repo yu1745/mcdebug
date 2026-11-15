@@ -6,10 +6,10 @@ server, the **client plane** (`gui.*`) drives a real game client — screenshots
 coordinates and real Screen clicks, so an agent can close the loop on GUI work. The Kotlin
 CLI (`mcdebug-cli.jar` / `mdb`) is the zero-install entry point.
 
-Builds exist for **Fabric 1.21.1** and **NeoForge 21.1.x** (MC 1.21.1) from one source tree; the
+This `26.3` branch targets **Minecraft 26.3**, on **Fabric** and **NeoForge 26.3** from one source tree; the
 same CLI and the same RPC method set drive both. Differences that a client can observe (fluid
 units, `fluid.*` tank indexing, `reflect.*` class names) are listed in
-`docs/plan-neoforge-port.md` §11.4 and reported where possible (`server.status.modLoader`,
+[docs/port-26.3.md](docs/port-26.3.md) and reported where possible (`server.status.modLoader`,
 `server.status.fluidUnit`; energy amounts in `server.status.energyUnit`, i.e. `E` on Fabric and `FE` on NeoForge).
 
 ```
@@ -29,6 +29,10 @@ methods, verification, container manual). This README covers consumer-facing usa
 
 ## Setup
 
+Build the mod with **JDK 25** (Gradle 9.6.0). The standalone CLI still runs on Java 17+.
+This port starts at `1.21.1` commit `72a70c2`; version-specific implementation and validation
+notes are in [docs/port-26.3.md](docs/port-26.3.md). Minecraft now uses official names on both loaders.
+
 ```bash
 ./gradlew build              # Fabric mod + contract + self-contained jar check
 ./gradlew :cli:copyCliJar    # CLI fat jar -> ./mcdebug-cli.jar (repo root, not in git); embeds both loader jars
@@ -36,7 +40,7 @@ methods, verification, container manual). This README covers consumer-facing usa
 java -jar mcdebug-cli.jar --help
 ```
 
-NeoForge 21.1.x is built by an independent nested build over the **same sources**
+NeoForge 26.3 is built by an independent nested build over the **same sources**
 (`./gradlew :neoforge:build|:neoforge:runServer|:neoforge:runClient`); smoke:
 `scripts/neoforge-smoke.sh`. See `docs/plan-neoforge-port.md` for the architecture, verified results and loader differences.
 
@@ -491,7 +495,7 @@ api.gui.openScreen("com.example.dev.Fixtures#machineScreen")
 `expected`, `actual`, `diff` are `Path`s. SDK assertion throws `AssertionError` on mismatch and protects
 the baseline; it does not try to read a remote screenshot filesystem path. No new test DSL/plugin.
 
-### Lightweight runtime (Fabric 1.21.1)
+### Lightweight runtime (Minecraft 26.3)
 
 Keep the real MC client and its mod/resource/network lifecycle; do not fork MC. Put this in the
 client's `<gameDir>/config/mcdebug.json`, then restart:

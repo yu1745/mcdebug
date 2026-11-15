@@ -9,7 +9,7 @@ import com.mcdebug.loader.fluidComponentsToJson
 import net.fabricmc.fabric.api.transfer.v1.context.ContainerItemContext
 import net.fabricmc.fabric.api.transfer.v1.fluid.FluidStorage as FabricFluidStorageApi
 import net.fabricmc.fabric.api.transfer.v1.fluid.FluidVariant
-import net.fabricmc.fabric.api.transfer.v1.item.InventoryStorage
+import net.fabricmc.fabric.api.transfer.v1.item.ContainerStorage
 import net.fabricmc.fabric.api.transfer.v1.item.ItemStorage as FabricItemStorageApi
 import net.fabricmc.fabric.api.transfer.v1.item.ItemVariant
 import net.fabricmc.fabric.api.transfer.v1.storage.SlottedStorage
@@ -42,7 +42,7 @@ class FabricStorageApi : StorageApi {
         FabricItemStorageApi.SIDED.find(level, pos, side)?.let(::FabricItemStorage)
 
     override fun itemStorageOf(container: Container, side: Direction?): ItemStorage =
-        FabricItemStorage(InventoryStorage.of(container, side) as Storage<ItemVariant>)
+        FabricItemStorage(ContainerStorage.of(container, side) as Storage<ItemVariant>)
 
     /** Fabric Transfer API has an item-in-item lookup, but `storage.*` never exposed it (parity). */
     override fun itemStorageOfItem(stack: ItemStack): ItemStorage? = null
@@ -146,7 +146,10 @@ class FabricStorageApi : StorageApi {
             val variant = view.resource
             val stack = if (variant.isBlank) ItemStack.EMPTY
             else variant.toStack(view.amount.coerceAtMost(Int.MAX_VALUE.toLong()).toInt())
-            return StorageView(index = index, stack = stack, amount = view.amount, capacity = view.capacity)
+            // 26.3 ContainerStorage reports the container's 99-item ceiling for an empty slot.
+            // Keep the RPC's effective stack capacity, as on the NeoForge seam.
+            val capacity = minOf(view.capacity, if (stack.isEmpty) 64L else stack.maxStackSize.toLong())
+            return StorageView(index = index, stack = stack, amount = view.amount, capacity = capacity)
         }
 
         override fun insert(stack: ItemStack, maxAmount: Long, simulate: Boolean): Long =
@@ -230,7 +233,7 @@ class FabricStorageApi : StorageApi {
             StorageView(
                 index = index,
                 fluidId = if (variant.isBlank) null else BuiltInRegistries.FLUID.getKey(variant.fluid).toString(),
-                fluidNbt = if (!variant.isBlank && variant.hasComponents()) fluidComponentsToJson(variant.components) else null,
+                fluidNbt = if (!variant.isBlank && variant.hasComponents()) fluidComponentsToJson(variant.componentsPatch) else null,
                 amount = amount,
                 capacity = capacity,
             )
@@ -368,7 +371,7 @@ class FabricStorageApi : StorageApi {
             if (mutable) {
                 val inv = SimpleContainer(1)
                 inv.setItem(0, stack.copy())
-                ContainerItemContext.ofSingleSlot(InventoryStorage.of(inv, null).getSlot(0))
+                ContainerItemContext.ofSingleSlot(ContainerStorage.of(inv, null).getSlot(0))
             } else {
                 ContainerItemContext.withConstant(stack.copy())
             }

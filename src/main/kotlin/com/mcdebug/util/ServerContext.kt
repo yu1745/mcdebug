@@ -21,7 +21,7 @@ import net.minecraft.resources.ResourceKey
 import net.minecraft.server.MinecraftServer
 import net.minecraft.server.level.ServerLevel
 import net.minecraft.world.level.block.state.properties.Property
-import net.minecraft.resources.ResourceLocation
+import net.minecraft.resources.Identifier
 import net.minecraft.world.level.levelgen.structure.BoundingBox
 import net.minecraft.core.BlockPos
 import net.minecraft.world.level.Level
@@ -40,26 +40,26 @@ object ServerContext {
 
     /** MinecraftServer.getWorld takes ResourceKey<Level>, not <ServerLevel>. */
     fun dimKey(id: String): ResourceKey<Level> {
-        val identifier = ResourceLocation.tryParse(id)
+        val identifier = Identifier.tryParse(id)
             ?: throw RpcException(RpcErrors.INVALID_POSITION, "invalid dimension id: $id")
         @Suppress("UNCHECKED_CAST")
         return ResourceKey.create(net.minecraft.core.registries.Registries.LEVEL_STEM, identifier) as ResourceKey<Level>
     }
 
     fun blockById(server: MinecraftServer, id: String): Block {
-        val identifier = ResourceLocation.tryParse(id)
+        val identifier = Identifier.tryParse(id)
             ?: throw RpcException(RpcErrors.BLOCK_NOT_FOUND, "invalid block id: $id")
         val key = net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.BLOCK, identifier)
-        val block = server.registryAccess().registryOrThrow(net.minecraft.core.registries.Registries.BLOCK).get(key)
+        val block = server.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.BLOCK).getValue(key)
             ?: throw RpcException(RpcErrors.BLOCK_NOT_FOUND, "block not registered: $id")
         return block
     }
 
     fun itemById(server: MinecraftServer, id: String): net.minecraft.world.item.Item {
-        val identifier = ResourceLocation.tryParse(id)
+        val identifier = Identifier.tryParse(id)
             ?: throw RpcException(RpcErrors.INVALID_PARAMS, "invalid item id: $id")
         val key = net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.ITEM, identifier)
-        val item = server.registryAccess().registryOrThrow(net.minecraft.core.registries.Registries.ITEM).get(key)
+        val item = server.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.ITEM).getValue(key)
             ?: throw RpcException(RpcErrors.INVALID_PARAMS, "item not registered: $id")
         return item
     }
@@ -71,7 +71,7 @@ object ServerContext {
 
     fun blockEntity(world: ServerLevel, pos: BlockPos): BlockEntity {
         return world.getBlockEntity(pos)
-            ?: throw RpcException(RpcErrors.BLOCK_ENTITY_MISSING, "no block entity at $pos in ${world.dimension().location()}")
+            ?: throw RpcException(RpcErrors.BLOCK_ENTITY_MISSING, "no block entity at $pos in ${world.dimension().identifier()}")
     }
 
     fun inventory(world: ServerLevel, pos: BlockPos): Container {
@@ -139,8 +139,8 @@ object ServerContext {
         val obj = com.google.gson.JsonObject()
         obj.addProperty("name", BuiltInRegistries.BLOCK.getKey(state.block).toString())
         val props = com.google.gson.JsonObject()
-        for ((prop, value) in state.values) {
-            props.addProperty(prop.name, propertyValueName(prop, value))
+        for (value in state.values) {
+            props.addProperty(value.property().name, value.valueName())
         }
         obj.add("props", props)
         return obj
@@ -187,20 +187,17 @@ object ServerContext {
         val ops = componentOps(provider)
         val out = com.google.gson.JsonObject()
         val errors = com.google.gson.JsonObject()
-        for ((type, value) in patch.entrySet()) {
+        val split = patch.split()
+        for (type in split.removed()) {
             if (type == DataComponents.CUSTOM_DATA) continue
             val id = BuiltInRegistries.DATA_COMPONENT_TYPE.getKey(type)?.toString() ?: type.toString()
-            if (!value.isPresent) {
-                out.add("!$id", com.google.gson.JsonObject())
-                continue
-            }
-            val codec = type.codec()
-            if (codec == null) {
-                errors.addProperty(id, "transient component (no codec)")
-                continue
-            }
-            @Suppress("UNCHECKED_CAST")
-            (codec as Codec<Any>).encodeStart(ops, value.get())
+            out.add("!$id", com.google.gson.JsonObject())
+        }
+        for (component in split.added()) {
+            val type = component.type()
+            if (type == DataComponents.CUSTOM_DATA) continue
+            val id = BuiltInRegistries.DATA_COMPONENT_TYPE.getKey(type)?.toString() ?: type.toString()
+            component.encodeValue(ops)
                 .ifSuccess { out.add(id, it) }
                 .ifError { errors.addProperty(id, it.message()) }
         }

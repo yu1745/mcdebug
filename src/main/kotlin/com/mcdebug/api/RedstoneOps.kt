@@ -56,7 +56,7 @@ object RedstoneOps : RpcHandlerGroup {
             val world = ServerContext.world(server, p.getStringOrNull("dim"))
             JsonObject().apply {
                 add("pos", ServerContext.posAsJson(pos))
-                addProperty("dim", world.dimension().location().toString())
+                addProperty("dim", world.dimension().identifier().toString())
                 addProperty("powered", world.hasNeighborSignal(pos))
                 // getSignal(pos, null) NPEs on redstone wire: use the strongest signal any neighbour sends in
             addProperty("received", world.getBestNeighborSignal(pos))
@@ -84,7 +84,7 @@ object RedstoneOps : RpcHandlerGroup {
             pulses.add(LeverPulse(world, pos, server.tickCount + ticks))
             JsonObject().apply {
                 add("pos", ServerContext.posAsJson(pos))
-                addProperty("dim", world.dimension().location().toString())
+                addProperty("dim", world.dimension().identifier().toString())
                 addProperty("powered", result.get("powered").asBoolean)
                 addProperty("offTick", server.tickCount + ticks)
             }
@@ -99,7 +99,7 @@ object RedstoneOps : RpcHandlerGroup {
             world.updateNeighborsAt(pos, state.block)
             JsonObject().apply {
                 add("pos", ServerContext.posAsJson(pos))
-                addProperty("dim", world.dimension().location().toString())
+                addProperty("dim", world.dimension().identifier().toString())
                 add("state", ServerContext.blockStateToJson(state))
                 addProperty("notified", true)
             }
@@ -135,7 +135,7 @@ object RedstoneOps : RpcHandlerGroup {
         if (before == powered) world.updateNeighborsAt(pos, afterState.block)
         return JsonObject().apply {
             add("pos", ServerContext.posAsJson(pos))
-            addProperty("dim", world.dimension().location().toString())
+            addProperty("dim", world.dimension().identifier().toString())
             addProperty("changed", before != powered)
             addProperty("powered", afterState.getValue(LeverBlock.POWERED))
             add("state", ServerContext.blockStateToJson(afterState))
@@ -145,7 +145,7 @@ object RedstoneOps : RpcHandlerGroup {
     private fun powerSnapshot(world: ServerLevel, pos: BlockPos, side: Direction?): JsonObject =
         JsonObject().apply {
             add("pos", ServerContext.posAsJson(pos))
-            addProperty("dim", world.dimension().location().toString())
+            addProperty("dim", world.dimension().identifier().toString())
             addProperty("powered", world.hasNeighborSignal(pos))
             // getSignal(pos, null) NPEs on redstone wire: use the strongest signal any neighbour sends in
             addProperty("received", world.getBestNeighborSignal(pos))

@@ -1,7 +1,7 @@
 {
   "required": true,
   "package": "com.mcdebug.client.mixin",
-  "compatibilityLevel": "JAVA_21",
+  "compatibilityLevel": "JAVA_25",
   "client": [
     "AbstractContainerScreenAccessor",
     "AbstractWidgetRenderMixin",
@@ -12,7 +12,10 @@
     "NativeImageAccessor",
     "ClientTextTooltipAccessor",
     "GuiGraphicsMixin",
-    "RenderSystemMixin"
+    "RenderSystemMixin",
+    "GuiScreenAccessor",
+    "AbstractWidgetAccessor",
+    "GuiTextRenderStateMixin"
   ],
   "injectors": {
     "defaultRequire": 1

@@ -42,7 +42,7 @@ object ServerOps : RpcHandlerGroup {
             val dims = JsonArray()
             server.getAllLevels().forEach { w ->
                 dims.add(JsonObject().apply {
-                    addProperty("dim", w.dimension().location().toString())
+                    addProperty("dim", w.dimension().identifier().toString())
                     addProperty("entities", w.getAllEntities().count())
                     addProperty("loadedChunks", w.chunkSource.getLoadedChunksCount())
                 })
@@ -61,9 +61,9 @@ object ServerOps : RpcHandlerGroup {
     private fun status(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
         RpcContext.onServer(server) {
             val dims = JsonArray()
-            server.getAllLevels().forEach { dims.add(it.dimension().location().toString()) }
+            server.getAllLevels().forEach { dims.add(it.dimension().identifier().toString()) }
             val overworld = server.getLevel(Level.OVERWORLD)
-            val dayTime = overworld?.getDayTime() ?: 0L
+            val dayTime = overworld?.getDefaultClockTime() ?: 0L
             JsonObject().apply {
                 addProperty("mcVersion", server.getServerVersion())
                 addProperty("modVersion", McDebug.MOD_VERSION)
@@ -79,7 +79,7 @@ object ServerOps : RpcHandlerGroup {
                         add(JsonObject().apply {
                             addProperty("name", pl.gameProfile.name)
                             addProperty("uuid", pl.stringUUID)
-                            addProperty("dim", pl.level().dimension().location().toString())
+                            addProperty("dim", pl.level().dimension().identifier().toString())
                             add("pos", com.google.gson.JsonArray().apply { add(pl.x); add(pl.y); add(pl.z) })
                         })
                     }
@@ -92,7 +92,7 @@ object ServerOps : RpcHandlerGroup {
     private fun listDimensions(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
         RpcContext.onServer(server) {
             val dims = JsonArray()
-            server.getAllLevels().forEach { dims.add(it.dimension().location().toString()) }
+            server.getAllLevels().forEach { dims.add(it.dimension().identifier().toString()) }
             JsonObject().apply { add("dims", dims) }
         }
 

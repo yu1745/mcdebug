@@ -39,6 +39,7 @@ class ClientRpcDispatcher {
 
     fun methods(): Set<String> = synchronized(handlers) { LinkedHashSet(handlers.keys) }
 
+    @Suppress("USELESS_ELVIS") // NeoForge may publish RPC before the Java singleton is assigned.
     fun dispatch(method: String, params: JsonObject?): CompletableFuture<JsonElement> {
         val handler = synchronized(handlers) { handlers[method] }
             ?: throw RpcException(RpcErrors.METHOD_NOT_FOUND, "method not found: $method")

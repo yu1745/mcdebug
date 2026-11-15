@@ -26,7 +26,7 @@ object ClientReflectOps : ClientRpcGroup {
 
     private fun root(name: String, p: JsonObject, client: Minecraft): Any? = when (name) {
         "minecraft" -> client
-        "screen" -> client.screen ?: throw RpcException(RpcErrors.CLIENT_NOT_READY, "no Screen is open")
+        "screen" -> client.gui.screen() ?: throw RpcException(RpcErrors.CLIENT_NOT_READY, "no Screen is open")
         "player" -> client.player ?: throw RpcException(RpcErrors.CLIENT_NOT_READY, "not in a world (no player)")
         "level" -> client.level ?: throw RpcException(RpcErrors.CLIENT_NOT_READY, "not in a world (no level)")
         "server" -> client.singleplayerServer

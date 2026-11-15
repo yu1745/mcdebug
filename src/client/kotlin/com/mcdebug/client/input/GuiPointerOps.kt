@@ -70,7 +70,7 @@ internal object GuiTargets {
         val text = p.string("text")
         // Scroll-list entries only have current x/y in a frame that drew them: draw one first.
         if (p.get("widget")?.isJsonNull == false || (text != null && p.get("slot")?.isJsonNull != false)) {
-            val fresh = ClientTasks.onClient(client) { client.screen?.let(WidgetFrames::hasScrollList) == true }
+            val fresh = ClientTasks.onClient(client) { client.gui.screen()?.let(WidgetFrames::hasScrollList) == true }
             return fresh.thenCompose { needed ->
                 if (needed) drawFrame(client).thenApply { textPrepare(client, p, text) }.thenCompose { it }
                 else textPrepare(client, p, text)
@@ -82,7 +82,7 @@ internal object GuiTargets {
     private fun textPrepare(client: Minecraft, p: JsonObject, text: String?): CompletableFuture<JsonObject> {
         if (text == null || listOf("slot", "widget").any { p.get(it)?.isJsonNull == false }) return CompletableFuture.completedFuture(p)
         val widgetMatches = ClientTasks.onClient(client) {
-            val screen = client.screen ?: throw noScreen()
+            val screen = client.gui.screen() ?: throw noScreen()
             val clipped = WidgetFrames.clipped(screen)
             GuiWidgets.collect(screen).any { it !in clipped && it.message.string.contains(text, ignoreCase = true) }
         }
@@ -95,13 +95,13 @@ internal object GuiTargets {
     /** Any thread: render one fresh frame with the draw log and return that log. */
     fun drawFrame(client: Minecraft): CompletableFuture<JsonObject?> = ClientTasks.onClient(client) {
         // gui mode only exists for container screens; the pixels are not needed either way.
-        if (client.screen is AbstractContainerScreen<*>) "gui" else "window"
+        if (client.gui.screen() is AbstractContainerScreen<*>) "gui" else "window"
     }.thenCompose { mode ->
         Capture.screenshot(client, CaptureOptions(mode = mode, format = "none", drawLog = true, delayTicks = 0))
     }.thenApply { it.asJsonObject.getAsJsonObject("drawLog") }
 
     private fun withDrawnTarget(client: Minecraft, p: JsonObject, text: String, log: JsonObject?): JsonObject {
-        val screen = client.screen ?: throw noScreen()
+        val screen = client.gui.screen() ?: throw noScreen()
         val drawn = log?.getAsJsonArray("entries")?.map { it.asJsonObject }?.filter { it.get("op")?.asString == "text" }.orEmpty()
         val matches = drawn.filter { it.get("text").asString.contains(text, ignoreCase = true) }
         val index = p.int("index", 0)
@@ -137,7 +137,7 @@ internal object GuiTargets {
     }
 
     fun resolve(client: Minecraft, p: JsonObject): GuiTarget {
-        val screen = client.screen ?: throw noScreen()
+        val screen = client.gui.screen() ?: throw noScreen()
         p.obj(DRAWN)?.let { d ->
             return GuiTarget(d.get("x").asDouble, d.get("y").asDouble, "drawnText", null, "drawnText=\"${d.get("text").asString}\"")
         }
@@ -256,7 +256,7 @@ object GuiPointerOps : ClientRpcGroup {
 
     private fun hoverHeld(client: Minecraft, p: JsonObject): CompletableFuture<JsonElement> {
         val moved = GuiTargets.prepare(client, p).thenCompose { q -> ClientTasks.onClient(client) {
-            val screen = client.screen ?: throw noScreen()
+            val screen = client.gui.screen() ?: throw noScreen()
             val target = GuiTargets.resolve(client, q)
             val cursorMoved = GuiCursor.warp(client, target.x, target.y)
             // What MouseHandler does on a real move; widgets/sliders may track it.
@@ -310,7 +310,7 @@ object GuiPointerOps : ClientRpcGroup {
         val settle = if (p.bool("settle", true)) GuiSettle.Options(p.boundedInt("waitTicks", 20, 0..1200), p.boundedInt("quietTicks", 2, 0..100)) else null
         val moveCursor = p.bool("moveCursor", true)
         val scrolled = GuiTargets.prepare(client, p).thenCompose { q -> ClientTasks.onClient(client) {
-            val screen = client.screen ?: throw noScreen()
+            val screen = client.gui.screen() ?: throw noScreen()
             val target = GuiTargets.resolve(client, q)
             val cursorMoved = moveCursor && GuiCursor.warp(client, target.x, target.y)
             val handled = screen.mouseScrolled(target.x, target.y, dx, dy)
@@ -329,7 +329,7 @@ object GuiPointerOps : ClientRpcGroup {
         return ClientTasks.thenOnClient(client, settled) { s ->
             scrolled.join().apply {
                 s?.let { add("settle", it) }
-                addProperty("screen", client.screen?.let(::screenType) ?: "none")
+                addProperty("screen", client.gui.screen()?.let(::screenType) ?: "none")
             }
         }.asElement()
     }
@@ -341,7 +341,7 @@ object GuiPointerOps : ClientRpcGroup {
             ?: throw RpcException(RpcErrors.INVALID_PARAMS, "screen is required: inventory | pkg.Class | pkg.Class#staticFactory")
         return ClientTasks.onClient(client) {
             val player = client.player
-            val previous = client.screen
+            val previous = client.gui.screen()
             val screen = try {
                 ScreenFactory.create(spec, client, player, previous)
             } catch (e: RpcException) {
@@ -350,13 +350,13 @@ object GuiPointerOps : ClientRpcGroup {
                 throw failure(spec, "constructing", t)
             }
             try {
-                client.setScreen(screen)
+                client.gui.setScreen(screen)
             } catch (t: Throwable) {
                 // A half-initialised Screen must not stay open; the world/title screen takes over.
-                if (client.screen === screen) runCatching { client.setScreen(null) }
+                if (client.gui.screen() === screen) runCatching { client.gui.setScreen(null) }
                 throw failure(spec, "init()", t)
             }
-            val open = client.screen
+            val open = client.gui.screen()
             JsonObject().apply {
                 addProperty("ok", true)
                 addProperty("requested", screen.javaClass.name)

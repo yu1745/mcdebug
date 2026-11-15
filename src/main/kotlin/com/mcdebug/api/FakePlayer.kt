@@ -206,17 +206,17 @@ internal object FakePlayerPool {
 
     private val ItemCooldownsMapField: java.lang.reflect.Field? by lazy {
         net.minecraft.world.item.ItemCooldowns::class.java.declaredFields
-            .firstOrNull { java.util.Map::class.java.isAssignableFrom(it.type) }
+            .firstOrNull { Map::class.java.isAssignableFrom(it.type) }
             ?.apply { isAccessible = true }
     }
 
     /** Keep the spawned fake player from dying, falling or drifting. */
     fun ensureProtected(player: ServerPlayer) {
-        player.setInvulnerable(true)
+        player.setPermanentlyInvulnerable(true)
         player.abilities.invulnerable = true
         player.setNoGravity(true)
         player.setDeltaMovement(0.0, 0.0, 0.0)
-        player.fallDistance = 0f
+        player.fallDistance = 0.0
         player.setOnGround(true)
     }
 
@@ -225,7 +225,7 @@ internal object FakePlayerPool {
         allSpawned.remove(player)
         cache.entries.removeIf { (_, p) -> p === player }
         val w = player.level()
-        if (!player.isRemoved && w is ServerLevel) {
+        if (!player.isRemoved) {
             w.removePlayerImmediately(player, Entity.RemovalReason.DISCARDED)
         }
         releasePlayerData(player)
@@ -237,14 +237,15 @@ internal object FakePlayerPool {
      * UUID each, so without this every screen session leaks a full advancement tracker (thousands of sessions run the
      * server out of heap). The caches are private maps of PlayerList: found by type, not by (mapping-dependent) name.
      */
+    @Suppress("UNCHECKED_CAST")
     private fun releasePlayerData(player: ServerPlayer) {
-        runCatching { player.advancements.stopListening() }
+        runCatching { player.advancements.clearTriggers() }
         runCatching { com.mcdebug.loader.Loader.api.releaseConnection(player.connection) }
-        val list = player.server.playerList
+        val list = player.level().server.playerList
         var c: Class<*>? = list.javaClass
         while (c != null && c != Any::class.java) {
             for (f in c.declaredFields) {
-                if (!java.util.Map::class.java.isAssignableFrom(f.type) || java.lang.reflect.Modifier.isStatic(f.modifiers)) continue
+                if (!Map::class.java.isAssignableFrom(f.type) || java.lang.reflect.Modifier.isStatic(f.modifiers)) continue
                 runCatching {
                     f.isAccessible = true
                     val m = f.get(list) as? MutableMap<*, *> ?: return@runCatching
@@ -278,7 +279,7 @@ internal object FakePlayerPool {
             runCatching {
                 if (!p.isRemoved) {
                     val w = p.level()
-                    if (w is ServerLevel) w.removePlayerImmediately(p, Entity.RemovalReason.DISCARDED)
+                    w.removePlayerImmediately(p, Entity.RemovalReason.DISCARDED)
                 }
             }
         }
@@ -291,9 +292,9 @@ internal object FakePlayerPool {
     private fun pin(player: ServerPlayer) {
         player.setNoGravity(true)
         player.setDeltaMovement(0.0, 0.0, 0.0)
-        player.fallDistance = 0f
+        player.fallDistance = 0.0
         player.setOnGround(true)
-        player.setInvulnerable(true)
+        player.setPermanentlyInvulnerable(true)
         player.abilities.invulnerable = true
     }
 

@@ -121,7 +121,7 @@ object GuiSettle {
             mix(if (stack.isEmpty) 0 else ItemStack.hashItemAndComponents(stack).toLong())
             mix(stack.count.toLong())
         }
-        val screen = client.screen
+        val screen = client.gui.screen()
         mix(System.identityHashCode(screen).toLong())
         val player = client.player
         val menu = (screen as? AbstractContainerScreen<*>)?.getMenu() ?: player?.containerMenu

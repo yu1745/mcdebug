@@ -1,9 +1,12 @@
 ---
 name: mcdebug
-description: Drive a live Minecraft (Fabric 1.21.1 or NeoForge 21.1.x) game through the mcdebug CLI (`mdb` / `java -jar mcdebug-cli.jar`) - set blocks, NBT, inventories, storages, entities on the server plane; screenshot, click, hover and hot-reload GUI Screens on the client plane; assert with wait.until. Use when testing or debugging a mod's blocks, machines or GUIs in a running game, or when operating a server through its mcdebug RPC socket.
+description: Drive a live Minecraft (Minecraft 26.3 on Fabric or NeoForge) game through the mcdebug CLI (`mdb` / `java -jar mcdebug-cli.jar`) - set blocks, NBT, inventories, storages, entities on the server plane; screenshot, click, hover and hot-reload GUI Screens on the client plane; assert with wait.until. Use when testing or debugging a mod's blocks, machines or GUIs in a running game, or when operating a server through its mcdebug RPC socket.
 ---
 
 # mcdebug CLI
+
+This build targets Minecraft 26.3 (JDK 25 for the game; CLI Java 17+). It keeps the CLI’s
+existing GLFW numeric key codes and 0=left/1=right/2=middle mouse buttons, translating them to SDL.
 
 mcdebug is a mod (one jar, server + client) that serves JSON-RPC over a Unix socket; the CLI talks
 to it. Every subcommand has a detailed `--help` with schemas and pitfalls: **read it before
@@ -123,7 +126,7 @@ mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeo
   (a full tank answers `supportsInsertion:false` although it can be drained) while Fabric's are
   capability flags — do not compare the two across loaders, and do not treat `false` as "this
   storage can never take it".
-  `reflect.*` resolves FQNs on NeoForge (its short-name table is Fabric-only). Both `reflect get`
+  `reflect.*` uses official names on both loaders in 26.3; short names are Fabric-only. Both `reflect get`
   and `reflect set` take `--path`; `set` writes the **last** segment (`--path overworld.dayTime`
   writes `dayTime` on `overworld`), and `--field` is the direct form. Big collections come back
   summarised: a ref answer carries `size` and, when the summary was cut, `truncated:true` +
@@ -236,7 +239,7 @@ mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeo
 - `reflect` reaches anything else. Start from `--root server|level|be|entity|player` (`--pos`,
   `--uuid`, `--name`, `--dim`), then `--path a.b[0].c`: a segment is a field, else a no-arg
   method, else `getX`/`isX`; there are no arguments or expressions (use `reflect call`). Mojang
-  and intermediary names both work; `reflect resolve --root ... --path ... --members` lists what
+  names work; `reflect resolve --root ... --path ... --members` lists what
   is there. Objects come back as `{"$ref":N}`, usable by later commands (bounded, gone when the
   server stops); prefer one `--path` over hopping ref to ref. `reflect set` writes a non-final
   field (numbers take the field's type) and prints before/after; an ambiguous overload in

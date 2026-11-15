@@ -14,7 +14,7 @@ import com.mcdebug.client.render.RenderControl
 import com.google.gson.JsonArray
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
-import com.mojang.blaze3d.platform.GlUtil
+import com.mojang.blaze3d.systems.RenderSystem
 import com.mcdebug.ServerPlane
 import com.mcdebug.contract.Methods
 import com.mcdebug.rpc.RpcEnv
@@ -74,20 +74,20 @@ object GuiOps : ClientRpcGroup {
 
     private fun status(client: Minecraft, params: JsonObject?): CompletableFuture<JsonElement> =
         ClientTasks.onClient(client) {
-            val screen = client.screen
+            val screen = client.gui.screen()
             val player = client.player
             val level = client.level
             val window = client.window
-            val target = client.mainRenderTarget
+            val target = client.gameRenderer.mainRenderTarget()
             val gameDir = gameDir()
             JsonObject().apply {
                 addProperty("ready", true)
                 addProperty("gameLoadFinished", client.isGameLoadFinished)
-                addProperty("overlay", client.getOverlay()?.javaClass?.name ?: "")
+                addProperty("overlay", client.gui.overlay()?.javaClass?.name ?: "")
                 add("graphics", JsonObject().apply {
-                    addProperty("vendor", GlUtil.getVendor())
-                    addProperty("renderer", GlUtil.getRenderer())
-                    addProperty("version", GlUtil.getOpenGLVersion())
+                    addProperty("vendor", RenderSystem.getDevice().deviceInfo.vendorName())
+                    addProperty("renderer", RenderSystem.getDevice().deviceInfo.name())
+                    addProperty("version", RenderSystem.getDevice().deviceInfo.driverInfo())
                 })
                 add("process", RpcEnv.processInfo())
                 addProperty("clientTick", ClientTasks.currentTick())
@@ -103,12 +103,12 @@ object GuiOps : ClientRpcGroup {
                 addProperty("screen", screen?.javaClass?.name ?: "")
                 addProperty("screenType", screenType(screen))
                 addProperty("screenTitle", screen?.let { it.getTitle().string } ?: "")
-                addProperty("world", level?.dimension()?.location()?.toString() ?: "")
+                addProperty("world", level?.dimension()?.identifier()?.toString() ?: "")
                 addProperty(
                     "server",
                     if (client.isLocalServer) "integrated" else (client.getCurrentServer()?.ip ?: ""),
                 )
-                addProperty("player", player?.getGameProfile()?.getName() ?: "")
+                addProperty("player", player?.getGameProfile()?.name() ?: "")
                 if (player != null) {
                     add("pos", JsonArray().apply {
                         add(player.getX())
@@ -116,7 +116,7 @@ object GuiOps : ClientRpcGroup {
                         add(player.getZ())
                     })
                     addProperty("gamemode", client.gameMode?.let { it.getPlayerMode().getName() } ?: "")
-                    addProperty("selectedSlot", player.getInventory().selected)
+                    addProperty("selectedSlot", player.getInventory().getSelectedSlot())
                 }
                 addProperty("gameDir", gameDir?.toAbsolutePath()?.toString() ?: "")
                 addProperty("logPath", gameDir?.let { it.resolve("logs").resolve("latest.log").toString() } ?: "")
@@ -136,7 +136,7 @@ object GuiOps : ClientRpcGroup {
                     addProperty("guiScale", window.getGuiScale())
                     addProperty("guiScaledWidth", window.getGuiScaledWidth())
                     addProperty("guiScaledHeight", window.getGuiScaledHeight())
-                    addProperty("fullscreen", window.isFullscreen)
+                    addProperty("fullscreen", (org.lwjgl.sdl.SDLVideo.SDL_GetWindowFlags(window.handle()) and org.lwjgl.sdl.SDLVideo.SDL_WINDOW_FULLSCREEN != 0L))
                 })
                 add("framebuffer", JsonObject().apply {
                     addProperty("width", target.width)
@@ -165,7 +165,7 @@ object GuiOps : ClientRpcGroup {
             if (client.level != null) {
                 throw RpcException(
                     RpcErrors.INVALID_PARAMS,
-                    "already in a world (${client.level?.dimension()?.location()}); leave it before connecting",
+                    "already in a world (${client.level?.dimension()?.identifier()}); leave it before connecting",
                 )
             }
             if (!ServerAddress.isValidAddress(host)) {
@@ -175,7 +175,7 @@ object GuiOps : ClientRpcGroup {
             // `startConnecting` renders the vanilla "Connecting to the server..." screen
             // in place of the current one, and only reports progress through that screen.
             ConnectScreen.startConnecting(
-                client.screen ?: TitleScreen(),
+                client.gui.screen() ?: TitleScreen(),
                 client,
                 address,
                 ServerData(name, host, ServerData.Type.OTHER),
@@ -196,8 +196,8 @@ object GuiOps : ClientRpcGroup {
             ClientTasks.thenOnClient(client, waiting) { joined ->
                 started.join().apply {
                     addProperty("joined", joined)
-                    addProperty("screen", client.screen?.javaClass?.name ?: "")
-                    addProperty("player", client.player?.getGameProfile()?.getName() ?: "")
+                    addProperty("screen", client.gui.screen()?.javaClass?.name ?: "")
+                    addProperty("player", client.player?.getGameProfile()?.name() ?: "")
                 }
             }.asElement()
         }
@@ -233,7 +233,7 @@ object GuiOps : ClientRpcGroup {
                 ?: throw RpcException(RpcErrors.CLIENT_NOT_READY, "not in a world")
             val gameMode = client.gameMode
                 ?: throw RpcException(RpcErrors.CLIENT_NOT_READY, "no game mode (still connecting?)")
-            val here = client.level?.dimension()?.location()?.toString()
+            val here = client.level?.dimension()?.identifier()?.toString()
             if (dimension != null && here != null && dimension != here) {
                 throw RpcException(
                     RpcErrors.INVALID_PARAMS,
@@ -246,7 +246,7 @@ object GuiOps : ClientRpcGroup {
             // default to off.
             player.setShiftKeyDown(sneak)
             val restore = if (clearHand) selectEmptyHotbarSlot(client, player) else null
-            val screenBefore = client.screen
+            val screenBefore = client.gui.screen()
             val menuBefore = player.containerMenu
             val result = try {
                 gameMode.useItemOn(player, hand, BlockHitResult(Vec3.atCenterOf(pos), face, pos, false))
@@ -262,14 +262,14 @@ object GuiOps : ClientRpcGroup {
         }
         return ClientTasks.thenOnClient(client, attempt) { done ->
             ClientTasks.until(waitTicks) {
-                client.screen !== done.screenBefore ||
+                client.gui.screen() !== done.screenBefore ||
                     client.player?.containerMenu !== done.menuBefore
             }
         }.thenCompose { changed ->
             ClientTasks.thenOnClient(client, changed) { changedNow ->
                 // Both futures are complete here, so `join()` cannot block.
                 val done = attempt.join()
-                val screen = client.screen
+                val screen = client.gui.screen()
                 val menu = client.player?.containerMenu
                 JsonObject().apply {
                     addProperty("ok", changedNow)
@@ -328,7 +328,7 @@ object GuiOps : ClientRpcGroup {
     private fun close(client: Minecraft, params: JsonObject?): CompletableFuture<JsonElement> {
         val waitTicks = (params ?: JsonObject()).int("waitTicks", 20)
         val closed = ClientTasks.onClient(client) {
-            val screen = client.screen
+            val screen = client.gui.screen()
             val player = client.player
             if (screen != null) {
                 // AbstractContainerScreen#onClose -> LocalPlayer#closeContainer
@@ -340,13 +340,13 @@ object GuiOps : ClientRpcGroup {
             screen?.javaClass?.name ?: ""
         }
         return ClientTasks.thenOnClient(client, closed) {
-            ClientTasks.until(waitTicks) { client.screen == null }
+            ClientTasks.until(waitTicks) { client.gui.screen() == null }
         }.thenCompose { waited ->
             ClientTasks.thenOnClient(client, waited) { gone ->
                 JsonObject().apply {
                     addProperty("ok", gone)
                     addProperty("closed", closed.join())
-                    addProperty("screen", client.screen?.javaClass?.name ?: "")
+                    addProperty("screen", client.gui.screen()?.javaClass?.name ?: "")
                     addProperty("containerId", client.player?.containerMenu?.containerId ?: -1)
                 }
             }
@@ -364,7 +364,7 @@ object GuiOps : ClientRpcGroup {
         val operation = Any()
         val started = ClientTasks.onClient(client) {
             if (disconnectOperation != null) throw RpcException(RpcErrors.CLIENT_NOT_READY, "disconnect already in progress")
-            if (!client.isGameLoadFinished || client.getOverlay() != null || client.screen is ConnectScreen) {
+            if (!client.isGameLoadFinished || client.gui.overlay() != null || client.gui.screen() is ConnectScreen) {
                 throw RpcException(RpcErrors.CLIENT_NOT_READY, "client is still loading/connecting; cancel that screen first")
             }
             disconnectOperation = operation
@@ -374,7 +374,7 @@ object GuiOps : ClientRpcGroup {
                 // Do not join it or pump runTick from this RPC. Vanilla network
                 // teardown can still run its ordinary engine cleanup callbacks.
                 target.server.execute { target.server.halt(false) }
-                client.setScreen(GenericMessageScreen(Component.translatable("menu.savingLevel")))
+                client.gui.setScreen(GenericMessageScreen(Component.translatable("menu.savingLevel")))
             }
             target
         }
@@ -393,16 +393,16 @@ object GuiOps : ClientRpcGroup {
                 (client.getSingleplayerServer() != null && client.getSingleplayerServer() !== target.server)) {
                 throw RpcException(RpcErrors.CLIENT_NOT_READY, "world changed while disconnecting; refusing to disconnect a replacement")
             }
-            client.level?.disconnect()
-            client.disconnect()
-            client.setScreen(TitleScreen())
+            client.level?.disconnect(net.minecraft.network.chat.Component.literal("mcdebug disconnect"))
+            client.disconnectWithSavingScreen()
+            client.gui.setScreen(TitleScreen())
             JsonObject().apply {
                 addProperty("ok", client.level == null && client.player == null && !ServerPlane.running)
                 addProperty("disconnected", client.level == null && client.player == null)
                 addProperty("singleplayer", target.server != null)
                 addProperty("serverStopped", target.server == null || target.server.isShutdown)
                 addProperty("inWorld", client.level != null || client.player != null)
-                addProperty("screen", client.screen?.javaClass?.name ?: "")
+                addProperty("screen", client.gui.screen()?.javaClass?.name ?: "")
                 add("process", RpcEnv.processInfo())
             }
         }.asElement().whenComplete { _, _ ->
@@ -449,21 +449,21 @@ object GuiOps : ClientRpcGroup {
      */
     private fun selectEmptyHotbarSlot(client: Minecraft, player: LocalPlayer): Int? {
         val inventory = player.getInventory()
-        val occupied = inventory.getItem(inventory.selected)
+        val occupied = inventory.getItem(inventory.getSelectedSlot())
         if (occupied.isEmpty) return null
         val empty = (0 until 9).firstOrNull { inventory.getItem(it).isEmpty }
             ?: throw RpcException(
                 RpcErrors.INVALID_PARAMS,
                 "clearHand: all 9 hotbar slots are occupied",
             )
-        val previous = inventory.selected
-        inventory.selected = empty
+        val previous = inventory.getSelectedSlot()
+        inventory.setSelectedSlot(empty)
         client.connection?.send(ServerboundSetCarriedItemPacket(empty))
         return previous
     }
 
     private fun restoreHotbarSlot(client: Minecraft, player: LocalPlayer, previous: Int) {
-        player.getInventory().selected = previous
+        player.getInventory().setSelectedSlot(previous)
         client.connection?.send(ServerboundSetCarriedItemPacket(previous))
     }
 }

@@ -67,7 +67,8 @@ interface LoaderApi {
 
     /**
      * Fire the loader's "player right-clicks an entity" event and return its result, so
-     * `world.interactEntity` runs the same listeners a real packet would trigger.
+     * `world.interactEntity` runs the same listeners a real packet would trigger. A loader that
+     * already emits this hook inside Player.interactOn returns PASS here to avoid duplicate events.
      */
     /**
      * Absolute path of the jar (or classes directory) this mod was loaded from, or null when the

@@ -14,18 +14,15 @@ import com.google.gson.JsonObject
 import com.mcdebug.McDebug
 import com.mcdebug.client.mixin.AbstractContainerScreenAccessor
 import com.mcdebug.client.mixin.NativeImageAccessor
-import com.mojang.blaze3d.platform.GlStateManager
 import com.mcdebug.rpc.RpcEnv
 import com.mcdebug.rpc.RpcErrors
 import com.mcdebug.rpc.RpcException
 import com.mojang.blaze3d.pipeline.RenderTarget
 import com.mojang.blaze3d.platform.NativeImage
 import com.mojang.blaze3d.systems.RenderSystem
-import net.minecraft.Util
+import net.minecraft.util.Util
 import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen
-import org.lwjgl.opengl.GL11
-import org.lwjgl.opengl.GL30
 import org.lwjgl.system.MemoryUtil
 import java.lang.ref.WeakReference
 import java.nio.ByteBuffer
@@ -92,7 +89,7 @@ object Capture {
 
     /** All fields are frozen at the afterFrame boundary, never read from an IO worker. */
     private class Frame(client: Minecraft, val id: Long) {
-        val target: RenderTarget = client.mainRenderTarget
+        val target: RenderTarget = client.gameRenderer.mainRenderTarget()
         val width = target.width
         val height = target.height
         private val window = client.window
@@ -102,7 +99,7 @@ object Capture {
         val framebufferHeight = window.getHeight()
         val guiWidth = window.getGuiScaledWidth()
         val guiHeight = window.getGuiScaledHeight()
-        val guiScale = window.getGuiScale()
+        val guiScale = window.getGuiScale().toDouble()
         // GameRenderer's ortho bounds use width/guiScale converted to float, NOT
         // Window's ceil(width/guiScale) used for Screen layout and vanilla mouse input.
         private val geometry = CaptureGeometry.renderScale(width, height, framebufferWidth, framebufferHeight, guiScale)
@@ -111,9 +108,9 @@ object Capture {
         val scaleX = geometry.x
         val scaleY = geometry.y
         val tick = ClientTasks.currentTick()
-        val overlay = client.getOverlay()?.javaClass?.name
-        val screen = client.screen?.javaClass?.name ?: "none"
-        val container = (client.screen as? AbstractContainerScreen<*>)?.let {
+        val overlay = client.gui.overlay()?.javaClass?.name
+        val screen = client.gui.screen()?.javaClass?.name ?: "none"
+        val container = (client.gui.screen() as? AbstractContainerScreen<*>)?.let {
             val a = it as AbstractContainerScreenAccessor
             Rect(a.leftPos, a.topPos, a.imageWidth, a.imageHeight)
         }
@@ -213,7 +210,7 @@ object Capture {
      */
     fun nextFrameCursor(): String? = if (pendingCount == 0) null else synchronized(lock) { pending.firstOrNull()?.options?.cursor }
 
-    /** Client thread: should the next frame (with that cursor policy) record its GuiGraphics calls? */
+    /** Client thread: should the next frame (with that cursor policy) record its GuiGraphicsExtractor calls? */
     fun wantsDrawLog(cursor: String?): Boolean =
         cursor != null && synchronized(lock) { pending.any { it.options.drawLog && it.options.cursor == cursor } }
 
@@ -246,7 +243,7 @@ object Capture {
                 release(request)
                 continue
             }
-            val shot = try {
+            val captured = try {
                 capture(frame, request.options, if (request.options.drawLog) drawLog else null,
                     if (request.options.annotate) boxes else emptyList())
             } catch (t: Throwable) {
@@ -254,31 +251,38 @@ object Capture {
                 request.future.completeExceptionally(if (t is RpcException) t else captureError(t))
                 continue
             }
-            val transferred = synchronized(lock) {
-                if (closed || request.future.isDone || expired(request.deadline)) false else {
-                    request.shot = shot
-                    request.phase = Phase.QUEUED
-                    true
-                }
+            captured.whenComplete { shot, error ->
+                if (error != null) {
+                    release(request)
+                    request.future.completeExceptionally(captureError(error))
+                } else enqueue(request, shot)
             }
-            if (!transferred) {
-                try { shot.image.close() } finally { release(request) }
-                isLive(request) // Complete a deadline reached during readback.
-                continue
+        }
+    }
+
+    private fun enqueue(request: Request, shot: Shot) {
+        val transferred = synchronized(lock) {
+            if (closed || request.future.isDone || expired(request.deadline)) false else {
+                request.shot = shot
+                request.phase = Phase.QUEUED
+                true
             }
-            try {
-                Util.ioPool().execute { encode(request) }
-            } catch (t: Throwable) {
-                // Rejection leaves ownership here; a worker that already claimed
-                // the image (if an executor throws unusually late) remains its owner.
-                val unclaimed = synchronized(lock) {
-                    if (request.phase == Phase.QUEUED) request.shot.also { request.shot = null } else null
-                }
-                if (unclaimed != null) {
-                    try { unclaimed.image.close() } finally { release(request) }
-                }
-                request.future.completeExceptionally(captureError(t))
+        }
+        if (!transferred) {
+            try { shot.image.close() } finally { release(request) }
+            isLive(request)
+            return
+        }
+        try {
+            Util.ioPool().execute { encode(request) }
+        } catch (t: Throwable) {
+            val unclaimed = synchronized(lock) {
+                if (request.phase == Phase.QUEUED) request.shot.also { request.shot = null } else null
             }
+            if (unclaimed != null) {
+                try { unclaimed.image.close() } finally { release(request) }
+            }
+            request.future.completeExceptionally(captureError(t))
         }
     }
 
@@ -332,7 +336,7 @@ object Capture {
         timeouts.forEach { it.completeExceptionally(timedOut()) }
     }
 
-    private fun capture(frame: Frame, options: CaptureOptions, drawLog: JsonObject?, boxes: List<Annotator.Box>): Shot {
+    private fun capture(frame: Frame, options: CaptureOptions, drawLog: JsonObject?, boxes: List<Annotator.Box>): CompletableFuture<Shot> {
         val mode = options.mode
         if (frame.width <= 0 || frame.height <= 0 || frame.framebufferWidth <= 0 || frame.framebufferHeight <= 0 ||
             !frame.scaleX.isFinite() || !frame.scaleY.isFinite() || frame.scaleX <= 0 || frame.scaleY <= 0) {
@@ -377,75 +381,47 @@ object Capture {
             addProperty("frameId", frame.id)
             addProperty("clientTick", frame.tick)
         }
-        val image = try {
-            readCrop(frame, crop)
-        } catch (t: Throwable) {
-            // Driver without a usable read framebuffer path: full texture download + crop.
-            McDebug.LOGGER.debug("mcdebug crop readback failed, using full texture download: {}", t.toString())
-            downloadAndCrop(frame, crop)
+        return readCrop(frame, crop).thenApply { image ->
+            Shot(image, transform, frame.id, frame.tick, drawLog, boxes)
         }
-        return Shot(image, transform, frame.id, frame.tick, drawLog, boxes)
     }
 
-    /**
-     * Reads only the crop rectangle from the main framebuffer (glReadPixels), so a
-     * `--mode gui` capture of a 2560x1440 window no longer downloads 14 MiB and
-     * copies it. Alpha is forced opaque exactly like Screenshot.takeScreenshot.
-     */
-    @Suppress("CAST_NEVER_SUCCEEDS") // NativeImageAccessor is mixed into NativeImage at runtime
-    private fun readCrop(frame: Frame, crop: Rect): NativeImage {
-        RenderSystem.assertOnRenderThread()
-        val image = NativeImage(NativeImage.Format.RGBA, crop.width, crop.height, false)
-        try {
-            val pointer = (image as NativeImageAccessor).`mcdebug$getPixels`()
-            val previous = GL11.glGetInteger(GL30.GL_READ_FRAMEBUFFER_BINDING)
+    /** Vanilla's backend-independent GPU readback (OpenGL or Vulkan), followed by an owned crop. */
+    private fun readCrop(frame: Frame, crop: Rect): CompletableFuture<NativeImage> {
+        val future = CompletableFuture<NativeImage>()
+        net.minecraft.client.Screenshot.takeScreenshot(frame.target) { full ->
+            var owned: NativeImage? = full
+            var cropped: NativeImage? = null
             try {
-                GlStateManager._glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, frame.target.frameBufferId)
-                NativeImage.Format.RGBA.setPackPixelStoreState()
-                // GL's origin is bottom-left; flipY below restores PNG row order.
-                GL11.nglReadPixels(crop.x, frame.height - crop.y - crop.height, crop.width, crop.height,
-                    GL11.GL_RGBA, GL11.GL_UNSIGNED_BYTE, pointer)
+                if (crop.x == 0 && crop.y == 0 && crop.width == frame.width && crop.height == frame.height) {
+                    if (future.complete(full)) owned = null
+                } else {
+                    val image = NativeImage(crop.width, crop.height, false)
+                    cropped = image
+                    full.copyRect(image, crop.x, crop.y, 0, 0, crop.width, crop.height, false, false)
+                    if (future.complete(image)) cropped = null
+                }
+            } catch (t: Throwable) {
+                future.completeExceptionally(t)
             } finally {
-                GlStateManager._glBindFramebuffer(GL30.GL_READ_FRAMEBUFFER, previous)
+                try { cropped?.close() } finally { owned?.close() }
             }
-            image.flipY()
-            val pixels = MemoryUtil.memIntBuffer(pointer, crop.width * crop.height)
-            for (i in 0 until pixels.capacity()) pixels.put(i, pixels.get(i) or OPAQUE)
-            return image
-        } catch (t: Throwable) {
-            image.close()
-            throw t
         }
+        return future
     }
 
-    /** The previous path, kept as a fallback: Screenshot.takeScreenshot without its leak-on-throw. */
-    private fun downloadAndCrop(frame: Frame, crop: Rect): NativeImage {
-        val full = NativeImage(frame.width, frame.height, false)
-        var ownsFull = true
-        var cropped: NativeImage? = null
-        try {
-            RenderSystem.bindTexture(frame.target.getColorTextureId())
-            full.downloadTexture(0, true)
-            full.flipY()
-            if (crop.x == 0 && crop.y == 0 && crop.width == frame.width && crop.height == frame.height) {
-                ownsFull = false
-                return full
-            }
-            val image = NativeImage(crop.width, crop.height, false)
-            cropped = image
-            full.copyRect(image, crop.x, crop.y, 0, 0, crop.width, crop.height, false, false)
-            cropped = null
-            return image
-        } finally {
-            // At most one temporary full source exists beyond the eight bounded
-            // output/reservation slots, and it never reaches the IO queue.
-            try { cropped?.close() } finally { if (ownsFull) full.close() }
+    @Suppress("CAST_NEVER_SUCCEEDS")
+    private fun png(image: NativeImage): ByteArray {
+        val output = java.io.ByteArrayOutputStream()
+        java.nio.channels.Channels.newChannel(output).use { channel ->
+            check((image as NativeImageAccessor).`mcdebug$writeToChannel`(channel)) { "PNG encoding failed" }
         }
+        return output.toByteArray()
     }
 
     /** Slots and widgets of the current Screen, in GUI units. Client thread only. */
     private fun annotationBoxes(client: Minecraft): List<Annotator.Box> {
-        val screen = client.screen ?: return emptyList()
+        val screen = client.gui.screen() ?: return emptyList()
         val boxes = ArrayList<Annotator.Box>()
         (screen as? AbstractContainerScreen<*>)?.let { container ->
             val accessor = container as AbstractContainerScreenAccessor
@@ -489,7 +465,7 @@ object Capture {
                     shot.drawLog?.let { add("drawLog", it) }
                 }
                 if (options.format == "none") return@use json
-                val bytes = image.asByteArray() // exactly one PNG encode; no disk readback
+                val bytes = png(image) // exactly one PNG encode; no disk readback
                 if (!isLive(request)) return
                 val output = shotPath(options.name)
                 path = output
@@ -508,7 +484,7 @@ object Capture {
                     val legend = Annotator.draw(NativeImageCanvas(image), shot.boxes,
                         shot.transform.get("pixelsPerGuiX").asDouble, shot.transform.get("pixelsPerGuiY").asDouble,
                         crop[0].asDouble, crop[1].asDouble)
-                    val annotatedBytes = image.asByteArray()
+                    val annotatedBytes = png(image)
                     val annotated = output.resolveSibling(output.fileName.toString().removeSuffix(".png") + ".annotated.png")
                     writeAtomically(annotated, annotatedBytes) { isLive(request) } ?: return
                     json.addProperty("annotatedPath", annotated.toAbsolutePath().toString())
@@ -608,8 +584,8 @@ object Capture {
     private class NativeImageCanvas(private val image: NativeImage) : PixelCanvas {
         override val width get() = image.width
         override val height get() = image.height
-        override fun get(x: Int, y: Int): Int = swap(image.getPixelRGBA(x, y))
-        override fun set(x: Int, y: Int, argb: Int) = image.setPixelRGBA(x, y, swap(argb))
+        override fun get(x: Int, y: Int): Int = swap(net.minecraft.util.ARGB.toABGR(image.getPixel(x, y)))
+        override fun set(x: Int, y: Int, argb: Int) = image.setPixelABGR(x, y, swap(argb))
         private fun swap(c: Int) = (c and 0xFF00FF00.toInt()) or (c shr 16 and 0xFF) or (c and 0xFF shl 16)
     }
     private fun ints(vararg values: Int) = JsonArray().apply { values.forEach { add(it) } }
@@ -678,7 +654,7 @@ data class CaptureOptions(
     val format: String = "png",
     /** Also write `*.annotated.png` with numbered slot/widget boxes plus a legend. */
     val annotate: Boolean = false,
-    /** Include the GuiGraphics draw log of the captured frame. */
+    /** Include the GuiGraphicsExtractor draw log of the captured frame. */
     val drawLog: Boolean = false,
     val delayTicks: Int = 1,
     /**

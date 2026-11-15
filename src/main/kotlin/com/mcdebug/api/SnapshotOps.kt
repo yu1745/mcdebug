@@ -77,7 +77,7 @@ object SnapshotOps : RpcHandlerGroup {
     ): JsonObject {
         ensureChunksLoaded(world, box)
         return JsonObject().apply {
-            addProperty("dim", world.dimension().location().toString())
+            addProperty("dim", world.dimension().identifier().toString())
             addProperty("tick", server.tickCount)
             addProperty("time", world.gameTime)
             add("box", boxToJson(box))
@@ -105,7 +105,7 @@ object SnapshotOps : RpcHandlerGroup {
     private fun captureBlocks(world: ServerLevel, box: BoundingBox, include: Set<SnapshotKind>): JsonArray =
         JsonArray().apply {
             BlockPos.betweenClosed(box.minX(), box.minY(), box.minZ(), box.maxX(), box.maxY(), box.maxZ()).forEach { mutablePos ->
-                val pos = BlockPos(mutablePos)
+                val pos = mutablePos.immutable()
                 val state = world.getBlockState(pos)
                 val be = world.getBlockEntity(pos)
                 add(JsonObject().apply {
@@ -169,7 +169,7 @@ object SnapshotOps : RpcHandlerGroup {
                         addProperty("health", entity.health)
                         addProperty("maxHealth", entity.maxHealth)
                     }
-                    add("nbt", NbtJson.toJson(entity.saveWithoutId(net.minecraft.nbt.CompoundTag())))
+                    add("nbt", NbtJson.toJson(com.mcdebug.util.NbtIo.save(entity)))
                 })
             }
         }

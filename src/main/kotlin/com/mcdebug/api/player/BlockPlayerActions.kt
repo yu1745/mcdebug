@@ -260,10 +260,10 @@ internal object BlockPlayerActions {
     
                 try {
                     fakePlayer.setItemInHand(InteractionHand.MAIN_HAND, itemBefore.copy())
-                    PlayerActionSupport.primeStackForGameplay(world, fakePlayer, fakePlayer.getItemInHand(InteractionHand.MAIN_HAND), 0, true)
+                    PlayerActionSupport.primeStackForGameplay(world, fakePlayer, fakePlayer.getItemInHand(InteractionHand.MAIN_HAND), net.minecraft.world.entity.EquipmentSlot.MAINHAND)
     
                     val lookDir = face.opposite
-                    fakePlayer.moveTo(
+                    fakePlayer.snapTo(
                         pos.x + 0.5 + face.stepX * 1.0,
                         pos.y + 0.5 + face.stepY * 1.0,
                         pos.z + 0.5 + face.stepZ * 1.0,
@@ -323,10 +323,10 @@ internal object BlockPlayerActions {
     
                 try {
                     fakePlayer.setItemInHand(InteractionHand.MAIN_HAND, itemBefore.copy())
-                    PlayerActionSupport.primeStackForGameplay(world, fakePlayer, fakePlayer.getItemInHand(InteractionHand.MAIN_HAND), 0, true)
+                    PlayerActionSupport.primeStackForGameplay(world, fakePlayer, fakePlayer.getItemInHand(InteractionHand.MAIN_HAND), net.minecraft.world.entity.EquipmentSlot.MAINHAND)
     
                     val lookDir = face.opposite
-                    fakePlayer.moveTo(
+                    fakePlayer.snapTo(
                         pos.x + 0.5 + face.stepX * 1.0,
                         pos.y + 0.5 + face.stepY * 1.0,
                         pos.z + 0.5 + face.stepZ * 1.0,
@@ -341,7 +341,7 @@ internal object BlockPlayerActions {
                         // AttackBlockCallback fires automatically (fabric mixin at HEAD of
                         // processBlockBreakingAction); a consuming handler cancels everything.
                         im.handleBlockBreakAction(
-                            pos, ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, face, world.maxBuildHeight, 0
+                            pos, ServerboundPlayerActionPacket.Action.START_DESTROY_BLOCK, face, (world.maxY + 1), 0
                         )
                         if (!world.getBlockState(pos).isAir) {
                             // Survival: mine until the vanilla stop-check (>= 70% progress) passes.
@@ -351,7 +351,7 @@ internal object BlockPlayerActions {
                             } else 0
                             repeat(holdTicks) { im.tick() }
                             im.handleBlockBreakAction(
-                                pos, ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, face, world.maxBuildHeight, 0
+                                pos, ServerboundPlayerActionPacket.Action.STOP_DESTROY_BLOCK, face, (world.maxY + 1), 0
                             )
                         }
                     }
@@ -540,7 +540,7 @@ internal object BlockPlayerActions {
             JsonObject().apply {
                 add("pos", ServerContext.posAsJson(pos))
                 addProperty("success", success)
-                addProperty("action", consumed.name.lowercase())
+                addProperty("action", PlayerActionSupport.resultName(consumed))
                 addProperty("face", face.getName())
                 addProperty("sneaking", sneaking)
                 addProperty("playerFacing", playerFacing.getName())

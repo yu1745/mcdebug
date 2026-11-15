@@ -70,7 +70,7 @@ class FabricLoaderApi : LoaderApi {
         entity: Entity,
         hitResult: EntityHitResult?,
     ): InteractionResult =
-        UseEntityCallback.EVENT.invoker().interact(player, level, hand, entity, hitResult)
+        UseEntityCallback.EVENT.invoker().interact(player, level, hand, entity, hitResult ?: EntityHitResult(entity))
 
     companion object {
         const val MOD_ID: String = "mcdebug"

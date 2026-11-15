@@ -33,7 +33,7 @@ object FixtureOps : RpcHandlerGroup {
             val origin = BlockPos(box.minX(), box.minY(), box.minZ())
             JsonObject().apply {
                 addProperty("version", 1)
-                addProperty("dim", world.dimension().location().toString())
+                addProperty("dim", world.dimension().identifier().toString())
                 add("origin", ServerContext.posAsJson(origin))
                 add("size", JsonArray().apply {
                     add(box.maxX() - box.minX() + 1)
@@ -83,7 +83,7 @@ object FixtureOps : RpcHandlerGroup {
                 nbt.putInt("x", pos.x)
                 nbt.putInt("y", pos.y)
                 nbt.putInt("z", pos.z)
-                be.loadWithComponents(nbt, world.registryAccess())
+                be.loadWithComponents(com.mcdebug.util.NbtIo.input(world.registryAccess(), nbt))
                 be.setChanged()
                 world.sendBlockUpdated(pos, world.getBlockState(pos), world.getBlockState(pos), flags)
                 blockEntities++
@@ -91,7 +91,7 @@ object FixtureOps : RpcHandlerGroup {
             JsonObject().apply {
                 addProperty("placed", placed)
                 addProperty("blockEntities", blockEntities)
-                addProperty("dim", world.dimension().location().toString())
+                addProperty("dim", world.dimension().identifier().toString())
                 add("origin", ServerContext.posAsJson(origin))
             }
         }

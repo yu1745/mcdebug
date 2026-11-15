@@ -9,7 +9,7 @@
 #     但实现是 NeoForge capabilities：箱子能同时列出 vanilla:inventory 与 fabric:item
 #
 #   用法: scripts/neoforge-smoke.sh
-#   依赖: java 21、网络（首次跑 Gradle/MDG 会下 NeoForge 与 assets，缓存在 ~/.gradle）
+#   依赖: java 25、网络（首次跑 Gradle/MDG 会下 NeoForge 与 assets，缓存在 ~/.gradle）
 #   保留现场: MCDEBUG_SMOKE_KEEP=1 scripts/neoforge-smoke.sh
 
 set -uo pipefail
@@ -59,7 +59,7 @@ done
 sleep 2
 
 fail=0
-cli() { java -jar "$CLI_JAR" --socket "$SOCK" "$@" 2>&1 | grep -v '^warning: server'; }
+cli() { java --enable-native-access=ALL-UNNAMED -jar "$CLI_JAR" --socket "$SOCK" "$@" 2>&1 | grep -v '^warning: server'; }
 check() {
   local desc="$1" want="$2"; shift 2
   local out; out="$(cli "$@")" || true
@@ -135,7 +135,7 @@ if python3 -c "import sys; sys.exit(0 if float(sys.argv[1]) < 30 else 1)" "$_dur
 else
   echo "FAIL wait.until sprint not fast: ${_dur}s"; fail=1
 fi
-check "wait.until sprint engine off" '"success":false'                  raw server.runCommand '{"command":"/tick sprint stop"}'
+check "wait.until sprint engine off" 'No tick sprint in progress'                  raw server.runCommand '{"command":"/tick sprint stop"}'
 
 # ---- 参数校验：缺参/类型错必须 -32602 并点名参数 ----
 check "missing pos -> -32602"      'error [-32602] missing param: pos'   raw inv.setSlot '{"slot":0,"item":"minecraft:stone"}'
@@ -146,7 +146,7 @@ check "numeric slot accepted"      '"count":5'                           raw inv
 # ---- reflect：NeoForge 的 dev 与生产都跑 Mojang 官方名，运行时名 == Mojang 名（没有映射表），
 # 所以响应里没有 mojangClass 字段，短名也不再解析（Fabric 的短名来自它打包的映射表）：用 FQN。
 check "reflect runtime = mojang"   '"runtimeClass":"net.minecraft.world.level.block.entity.BlockEntity"' raw reflect.resolve '{"class":"net.minecraft.world.level.block.entity.BlockEntity"}'
-check "reflect loader class"       '"runtimeClass":"net.neoforged.neoforge.items.wrapper.InvWrapper"'   raw reflect.resolve '{"class":"net.neoforged.neoforge.items.wrapper.InvWrapper"}'
+check "reflect loader class"       '"runtimeClass":"net.neoforged.neoforge.transfer.item.VanillaContainerWrapper"'   raw reflect.resolve '{"class":"net.neoforged.neoforge.transfer.item.VanillaContainerWrapper"}'
 check "reflect static field"       '"resolvedTo":"STONE"'                raw reflect.get '{"class":"net.minecraft.world.level.block.Blocks","field":"STONE"}'
 
 # ---- tick 只能被动观察；be.tick 是唯一例外且有上限 ----

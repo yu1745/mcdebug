@@ -27,7 +27,7 @@ object GuiScreenOps : ClientRpcGroup {
     override fun methods(): Map<String, ClientRpcHandler> = linkedMapOf("screen" to ::screen)
 
     private fun screen(client: Minecraft, params: JsonObject?): CompletableFuture<JsonElement> =
-        ClientTasks.onClient(client) { client.screen?.let(WidgetFrames::hasScrollList) == true }.thenCompose { lists ->
+        ClientTasks.onClient(client) { client.gui.screen()?.let(WidgetFrames::hasScrollList) == true }.thenCompose { lists ->
             // Scroll-list entry positions are refreshed only while drawn (see WidgetFrames).
             if (lists) ClientTasks.thenOnClient(client, GuiTargets.drawFrame(client)) { snapshot(client) }
             else ClientTasks.onClient(client) { snapshot(client) }
@@ -35,7 +35,7 @@ object GuiScreenOps : ClientRpcGroup {
 
     /** Client thread only; shared with `gui.act`. */
     fun snapshot(client: Minecraft): JsonObject {
-        val current = client.screen
+        val current = client.gui.screen()
             ?: return JsonObject().apply {
                 addProperty("open", false)
                 addProperty("inWorld", client.player != null)
@@ -114,7 +114,7 @@ object GuiScreenOps : ClientRpcGroup {
             if (widget.isHovered()) addProperty("hovered", true)
             if (widget.isFocused || widget === focused) addProperty("focused", true)
             if (widget is EditBox) addProperty("value", widget.getValue())
-            widget.getTooltip()?.let { tooltip ->
+            (widget as com.mcdebug.client.mixin.AbstractWidgetAccessor).`mcdebug$getTooltipHolder`().get()?.let { tooltip ->
                 add("tooltip", stringArray(tooltip.toCharSequence(client).map(DrawRecorder::plain)))
             }
         }

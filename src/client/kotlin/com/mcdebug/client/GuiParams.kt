@@ -13,7 +13,7 @@ import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen
 import net.minecraft.core.BlockPos
 import net.minecraft.world.item.ItemStack
-import org.lwjgl.glfw.GLFW
+import org.lwjgl.sdl.SDLMouse
 
 /*
  * Lenient JSON parameter helpers shared by the `gui.*` handlers (the strict
@@ -101,16 +101,16 @@ internal fun stringArray(values: Iterable<String>): JsonArray = JsonArray().appl
  */
 internal object GuiCursor {
     fun warp(client: Minecraft, x: Double, y: Double): Boolean {
-        if (client.screen == null) return false
+        if (client.gui.screen() == null) return false
         if (RenderControl.moveCursor(x, y)) return true
         val window = client.window
         val width = window.getGuiScaledWidth()
         val height = window.getGuiScaledHeight()
-        if (width <= 0 || height <= 0 || window.getWindow() == 0L) return false
+        if (width <= 0 || height <= 0 || window.handle() == 0L) return false
         val cursor = CaptureGeometry.screenToWindow(x, y, window.getScreenWidth(), window.getScreenHeight(), width, height)
         if (!cursor.first.isFinite() || !cursor.second.isFinite()) return false
         return try {
-            GLFW.glfwSetCursorPos(window.getWindow(), cursor.first, cursor.second)
+            SDLMouse.SDL_WarpMouseInWindow(window.handle(), cursor.first.toFloat(), cursor.second.toFloat())
             true
         } catch (_: Throwable) {
             false

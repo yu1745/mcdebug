@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# Fabric 端冒烟：把 build/libs 的 remapped jar 放进一次性 1.21.1 专用服，
+# Fabric 端冒烟：把 build/libs 的 remapped jar 放进一次性 26.3 专用服，
 # 用 mcdebug-cli.jar 走 unix socket 做几组 RPC 断言（含 1.21 数据组件改制后
 # 的 item nbt / be nbt 往返），最后做契约一致性检查（Methods.kt 的每个方法
 # 都必须已注册，不允许 -32601）。
 #   用法: scripts/fabric-smoke.sh
-#   依赖: java 21、网络（launcher/fabric-api 缓存在 ~/.cache/mcdebug-fabric-smoke）
+#   依赖: java 25、网络（launcher/fabric-api 缓存在 ~/.cache/mcdebug-fabric-smoke）
 set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT=$(pwd)          # cleanup 里要绝对路径调 scripts/stop-server.py（set -u：别再漏定义）
@@ -14,9 +14,9 @@ MOD_JAR="build/libs/mcdebug-${MOD_VERSION}.jar"   # build/libs keeps older versi
 [[ -f "$MOD_JAR" ]] || { echo "fabric-smoke: $MOD_JAR missing, build first (./gradlew build)" >&2; exit 2; }
 
 CACHE_DIR=${MCDEBUG_SMOKE_CACHE_DIR:-${XDG_CACHE_HOME:-$HOME/.cache}/mcdebug-fabric-smoke}
-MC_VERSION=1.21.1
-LOADER_VERSION=0.19.5
-API_VERSION=0.116.17+1.21.1
+MC_VERSION=$(sed -n 's/^minecraft_version=//p' gradle.properties)
+LOADER_VERSION=$(sed -n 's/^loader_version=//p' gradle.properties)
+API_VERSION=$(sed -n 's/^fabric_api_version=//p' gradle.properties)
 CLI_JAR=${CLI_JAR:-mcdebug-cli.jar}
 [[ -f "$CLI_JAR" ]] || { echo "fabric-smoke: mcdebug-cli.jar not found" >&2; exit 2; }
 
@@ -70,7 +70,7 @@ done
 sleep 2
 
 fail=0
-cli() { java -jar "$CLI_JAR" --socket "$SOCK" "$@" 2>&1 | grep -v '^warning: server'; }
+cli() { java --enable-native-access=ALL-UNNAMED -jar "$CLI_JAR" --socket "$SOCK" "$@" 2>&1 | grep -v '^warning: server'; }
 check() {
   local desc="$1" want="$2"; shift 2
   local out; out="$(cli "$@")" || true
@@ -145,7 +145,7 @@ else
   echo "FAIL wait.until sprint not fast: ${_dur}s"; fail=1
 fi
 # wait 命中后必须已自动收油门：手动 stop 应报告“没有在跑的 sprint”
-check "wait.until sprint engine off" '"success":false'                  raw server.runCommand '{"command":"/tick sprint stop"}'
+check "wait.until sprint engine off" 'No tick sprint in progress'                  raw server.runCommand '{"command":"/tick sprint stop"}'
 # world.setBlock 走原版 /setblock 的形状更新：悬空拉杆会被 updateFromNeighbourShapes 拿掉（ok:false），
 # 所以先垫一块支撑方块，并用显式 props 跳过形状推导（face=floor 需要下方是固体）
 check "lever support"              '"ok":true'                          raw world.setBlock '{"pos":[4,199,0],"block":"minecraft:stone"}'
@@ -159,10 +159,10 @@ check "bad pos -> -32001"          'error [-32001] param pos'           raw worl
 check "bad int -> -32602"          'error [-32602] param slot'          raw inv.getSlot '{"pos":[2,200,0],"slot":"x"}'
 check "numeric slot accepted"      '"count":5'                          raw inv.getSlot '{"pos":[2,200,0],"slot":0}'
 
-# ---- reflect：专用服是 intermediary 运行时，映射表必须对上 1.21.1 ----
-check "reflect simple name"        '"runtimeClass":"net.minecraft.class_2586"' raw reflect.resolve '{"class":"BlockEntity"}'
-check "reflect mojangClass"        '"mojangClass":"net.minecraft.world.level.block.entity.BlockEntity"' raw reflect.resolve '{"class":"net.minecraft.world.level.block.entity.BlockEntity"}'
-check "reflect static field"       '"resolvedTo":"field_'               raw reflect.get '{"class":"net.minecraft.world.level.block.Blocks","field":"STONE"}'
+# ---- reflect：26.3 使用官方名字；短类名由构建时生成的索引解析 ----
+check "reflect simple name"        '"runtimeClass":"net.minecraft.world.level.block.entity.BlockEntity"' raw reflect.resolve '{"class":"BlockEntity"}'
+check "reflect qualified name"     '"runtimeClass":"net.minecraft.world.level.block.entity.BlockEntity"' raw reflect.resolve '{"class":"net.minecraft.world.level.block.entity.BlockEntity"}'
+check "reflect static field"       '"resolvedTo":"STONE"'               raw reflect.get '{"class":"net.minecraft.world.level.block.Blocks","field":"STONE"}'
 
 # ---- storage / transfer（[6,200,0] 的箱子已在上面 storage 段放好）----
 check "storage insert"             '"inserted":3'                          raw storage.insert '{"target":{"kind":"block","pos":[6,200,0]},"handle":"fabric:item","resource":{"kind":"item","item":"minecraft:iron_ingot"},"amount":3}'

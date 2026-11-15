@@ -16,19 +16,18 @@ test {
 	useJUnitPlatform()
 	testLogging {
 		events "FAILED", "PASSED", "SKIPPED"
-		exceptionFormat "full"
+		exceptionFormat = "full"
 	}
 }
 
-// toolchain 21（JitPack 与本地都有）+ 字节码目标 17（root loom 的 MC 1.20.1
-// 要求 ≤17 运行时兼容）。不能用 jvmToolchain(17)：JitPack 只提供 JDK 21。
+// Build with the game's JDK 25; standalone CLI/contract bytecode remains Java 17 compatible.
 java {
 	sourceCompatibility = JavaVersion.VERSION_17
 	targetCompatibility = JavaVersion.VERSION_17
 }
 
 kotlin {
-	jvmToolchain(21)
+	jvmToolchain(25)
 	compilerOptions {
 		jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
 	}

@@ -81,14 +81,14 @@ object ScanOps : RpcHandlerGroup {
             val typeId = p.getStringOrNull("type")
             lateinit var entityTypeFilter: (Entity) -> Boolean
             if (typeId != null) {
-                val identifier = net.minecraft.resources.ResourceLocation.tryParse(typeId)
+                val identifier = net.minecraft.resources.Identifier.tryParse(typeId)
                     ?: throw RpcException(RpcErrors.INVALID_PARAMS, "invalid entity type: $typeId")
                 val key = net.minecraft.resources.ResourceKey.create(
                     net.minecraft.core.registries.Registries.ENTITY_TYPE, identifier
                 )
                 val resolved: net.minecraft.world.entity.EntityType<*> =
-                    server.registryAccess().registryOrThrow(net.minecraft.core.registries.Registries.ENTITY_TYPE)
-                        .get(key)
+                    server.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.ENTITY_TYPE)
+                        .getValue(key)
                         ?: throw RpcException(RpcErrors.INVALID_PARAMS, "entity type not registered: $typeId")
                 entityTypeFilter = { e: Entity -> e.type == resolved }
             } else {
@@ -110,7 +110,7 @@ object ScanOps : RpcHandlerGroup {
                         addProperty("maxHealth", entity.maxHealth)
                     }
                     if (includeNbt) {
-                        val nbt = entity.saveWithoutId(net.minecraft.nbt.CompoundTag())
+                        val nbt = com.mcdebug.util.NbtIo.save(entity)
                         add("nbt", NbtJson.toJson(nbt))
                     }
                 }

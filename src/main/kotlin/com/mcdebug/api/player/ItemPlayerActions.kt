@@ -93,7 +93,7 @@ internal object ItemPlayerActions {
     
             JsonObject().apply {
                 addProperty("success", result.consumesAction())
-                addProperty("action", result.name.lowercase())
+                addProperty("action", PlayerActionSupport.resultName(result))
                 addProperty("sneaking", sneaking)
                 addProperty("gamemode", gamemode.name.lowercase())
                 add("itemBefore", ServerContext.itemStackToJson(itemBefore))
@@ -198,9 +198,9 @@ internal object ItemPlayerActions {
                     // Main hand = hotbar selectedSlot; pin it to 0 so the held
                     // weapon is always written to a known slot (and ammo in slot 8
                     // can never collide with it).
-                    fakePlayer.inventory.selected = 0
+                    fakePlayer.inventory.setSelectedSlot(0)
                     fakePlayer.setItemInHand(InteractionHand.MAIN_HAND, itemBefore.copy())
-                    PlayerActionSupport.primeStackForGameplay(world, fakePlayer, fakePlayer.getItemInHand(InteractionHand.MAIN_HAND), 0, true)
+                    PlayerActionSupport.primeStackForGameplay(world, fakePlayer, fakePlayer.getItemInHand(InteractionHand.MAIN_HAND), net.minecraft.world.entity.EquipmentSlot.MAINHAND)
     
                     // Ammo goes in the offhand (vanilla getProjectileType searches
                     // main hand, then offhand, then inventory) and also a copy in
@@ -220,7 +220,7 @@ internal object ItemPlayerActions {
                     if (target != null) {
                         val eye = target.getEyePosition()
                         if (playerPos != null) {
-                            fakePlayer.moveTo(
+                            fakePlayer.snapTo(
                                 playerPos.x + 0.5, playerPos.y.toDouble(), playerPos.z + 0.5,
                                 fakePlayer.yRot, fakePlayer.xRot
                             )
@@ -228,7 +228,7 @@ internal object ItemPlayerActions {
                             // Default: 5 blocks in front of the target, at its eye level.
                             val toPlayer = fakePlayer.position().subtract(eye).normalize()
                             val stand = eye.add(toPlayer.scale(5.0))
-                            fakePlayer.moveTo(stand.x, stand.y, stand.z, fakePlayer.yRot, fakePlayer.xRot)
+                            fakePlayer.snapTo(stand.x, stand.y, stand.z, fakePlayer.yRot, fakePlayer.xRot)
                         }
                         fakePlayer.lookAt(net.minecraft.commands.arguments.EntityAnchorArgument.Anchor.EYES, eye)
                     } else {
@@ -246,16 +246,16 @@ internal object ItemPlayerActions {
                             else -> 0f
                         }
                         if (playerPos != null) {
-                            fakePlayer.moveTo(
+                            fakePlayer.snapTo(
                                 playerPos.x + 0.5, playerPos.y.toDouble(), playerPos.z + 0.5, yaw, pitch
                             )
                         } else {
-                            val spawn = world.getSharedSpawnPos()
-                            fakePlayer.moveTo(spawn.x + 0.5, spawn.y + 1.0, spawn.z + 0.5, yaw, pitch)
+                            val spawn = world.respawnData.pos()
+                            fakePlayer.snapTo(spawn.x + 0.5, spawn.y + 1.0, spawn.z + 0.5, yaw, pitch)
                         }
                     }
                     fakePlayer.setOnGround(true)
-                    fakePlayer.fallDistance = 0f
+                    fakePlayer.fallDistance = 0.0
                     fakePlayer.setDeltaMovement(0.0, 0.0, 0.0)
                     fakePlayer.isSprinting = false
     
@@ -270,7 +270,7 @@ internal object ItemPlayerActions {
                         )
                         held = fakePlayer.getItemInHand(InteractionHand.MAIN_HAND)
                         cycleJson.addProperty("cycle", cycle)
-                        cycleJson.addProperty("useResult", useResult.name.lowercase())
+                        cycleJson.addProperty("useResult", PlayerActionSupport.resultName(useResult))
                         cycleJson.addProperty("usingItem", fakePlayer.isUsingItem())
                         cycleJson.addProperty("mainHand", fakePlayer.getItemInHand(InteractionHand.MAIN_HAND).item.toString())
                         cycleJson.addProperty("offHand", fakePlayer.getItemInHand(InteractionHand.OFF_HAND).item.toString())

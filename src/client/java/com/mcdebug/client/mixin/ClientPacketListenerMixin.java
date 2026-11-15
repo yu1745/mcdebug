@@ -12,7 +12,7 @@ import org.spongepowered.asm.mixin.injection.callback.CallbackInfo;
 @Mixin(ClientPacketListener.class)
 public abstract class ClientPacketListenerMixin {
     @Inject(method = "handleCommandSuggestions", cancellable = true, at = @At(value = "INVOKE", shift = At.Shift.AFTER,
-        target = "Lnet/minecraft/network/protocol/PacketUtils;ensureRunningOnSameThread(Lnet/minecraft/network/protocol/Packet;Lnet/minecraft/network/PacketListener;Lnet/minecraft/util/thread/BlockableEventLoop;)V"))
+        target = "Lnet/minecraft/network/protocol/PacketUtils;ensureRunningOnSameThread(Lnet/minecraft/network/protocol/Packet;Lnet/minecraft/network/PacketListener;Lnet/minecraft/network/PacketProcessor;)V"))
     private void mcdebug$settleBarrier(ClientboundCommandSuggestionsPacket packet, CallbackInfo ci) {
         if (GuiSettle.onSuggestions(packet.id())) ci.cancel();
     }

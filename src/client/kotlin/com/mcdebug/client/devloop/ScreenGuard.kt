@@ -87,7 +87,7 @@ object ScreenGuard {
 
     /** Client thread only: a closed/replaced Screen no longer counts as faulted. */
     fun currentFault(client: Minecraft): JsonObject? {
-        if (faulted != null && client.screen !== faulted) clear()
+        if (faulted != null && client.gui.screen() !== faulted) clear()
         return fault?.deepCopy()
     }
 

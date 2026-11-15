@@ -16,7 +16,7 @@ import net.minecraft.world.level.material.Fluid
 import net.minecraft.world.level.material.Fluids
 import net.minecraft.core.registries.BuiltInRegistries
 import net.minecraft.server.MinecraftServer
-import net.minecraft.resources.ResourceLocation
+import net.minecraft.resources.Identifier
 import net.minecraft.core.BlockPos
 import net.minecraft.core.Direction
 import java.util.concurrent.CompletableFuture
@@ -197,10 +197,10 @@ object FluidOps : RpcHandlerGroup {
     }
 
     private fun resolveFluid(server: MinecraftServer, id: String): Fluid {
-        val identifier = ResourceLocation.tryParse(id)
+        val identifier = Identifier.tryParse(id)
             ?: throw RpcException(RpcErrors.INVALID_PARAMS, "invalid fluid id: $id")
         val key = net.minecraft.resources.ResourceKey.create(net.minecraft.core.registries.Registries.FLUID, identifier)
-        val fluid = server.registryAccess().registryOrThrow(net.minecraft.core.registries.Registries.FLUID).get(key)
+        val fluid = server.registryAccess().lookupOrThrow(net.minecraft.core.registries.Registries.FLUID).getValue(key)
             ?: throw RpcException(RpcErrors.INVALID_PARAMS, "fluid not registered: $id")
         if (fluid == net.minecraft.world.level.material.Fluids.EMPTY) {
             throw RpcException(RpcErrors.INVALID_PARAMS, "fluid is EMPTY (no real fluid for: $id)")

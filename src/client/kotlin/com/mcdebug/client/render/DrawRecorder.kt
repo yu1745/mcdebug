@@ -5,7 +5,7 @@ import com.mcdebug.client.stringArray
 import com.google.gson.JsonArray
 import com.google.gson.JsonObject
 import net.minecraft.core.registries.BuiltInRegistries
-import net.minecraft.resources.ResourceLocation
+import net.minecraft.resources.Identifier
 import net.minecraft.util.FormattedCharSequence
 import net.minecraft.world.item.ItemStack
 import org.joml.Matrix4f
@@ -14,7 +14,7 @@ import kotlin.math.max
 import kotlin.math.min
 
 /**
- * Records the GuiGraphics calls of ONE rendered frame: textured quads (with texture,
+ * Records the GuiGraphicsExtractor calls of ONE rendered frame: textured quads (with texture,
  * texel UV and sprite name), fills, strings, items and tooltips, each with its
  * on-screen rectangle in Screen (GUI) units after the pose transform — the same
  * units `gui click --gui` and `gui screen` use.
@@ -33,7 +33,7 @@ object DrawRecorder {
     @JvmField var active = false
     private val entries = ArrayList<JsonObject>()
     private var truncated = false
-    // Context set by outer GuiGraphics calls and attached to the innerBlit they reach.
+    // Context set by outer GuiGraphicsExtractor calls and attached to the innerBlit they reach.
     private var sprite: String? = null
     private var texel: IntArray? = null
     private var depth = 0
@@ -90,9 +90,9 @@ object DrawRecorder {
     }
 
     @JvmStatic
-    fun blit(pose: Matrix4f, texture: ResourceLocation, x1: Int, x2: Int, y1: Int, y2: Int, z: Int,
+    fun blit(pose: Matrix4f, texture: String, x1: Int, x2: Int, y1: Int, y2: Int, z: Int,
              u0: Float, u1: Float, v0: Float, v1: Float, color: FloatArray?) = add("blit") {
-        addProperty("texture", texture.toString())
+        addProperty("texture", texture)
         add("rect", rect(pose, x1.toFloat(), y1.toFloat(), x2.toFloat(), y2.toFloat(), z.toFloat()))
         add("uv", floats(u0, v0, u1, v1))
         texel?.let {
@@ -145,6 +145,11 @@ object DrawRecorder {
         }
         return out.toString()
     }
+
+    @JvmStatic
+    fun pose(matrix: org.joml.Matrix3x2fc): Matrix4f = Matrix4f()
+        .m00(matrix.m00()).m01(matrix.m01()).m10(matrix.m10()).m11(matrix.m11())
+        .m30(matrix.m20()).m31(matrix.m21())
 
     /** Axis-aligned bounds `[x, y, w, h]` of the transformed quad (pure; unit-tested). */
     fun rect(pose: Matrix4f, x1: Float, y1: Float, x2: Float, y2: Float, z: Float): JsonArray {

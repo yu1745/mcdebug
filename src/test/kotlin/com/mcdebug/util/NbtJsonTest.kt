@@ -38,22 +38,22 @@ class NbtJsonTest {
     fun `bare integer narrows to IntTag`() {
         val n = parse("5")
         val i = assertInstanceOf(IntTag::class.java, n)
-        assertEquals(5, i.getAsInt())
+        assertEquals(5, i.intValue())
     }
 
     @Test
     fun `bare object without nbt hint is a plain compound`() {
         val n = parse("""{"a":1,"b":"x"}""")
         val c = assertInstanceOf(CompoundTag::class.java, n)
-        assertEquals(1, c.getInt("a"))
-        assertEquals("x", c.getString("b"))
+        assertEquals(1, c.getIntOr("a", 0))
+        assertEquals("x", c.getStringOr("b", ""))
     }
 
     @Test
     fun `bare boolean becomes ByteTag`() {
         val n = parse("true")
         val b = assertInstanceOf(ByteTag::class.java, n)
-        assertEquals(1, b.getAsByte().toInt())
+        assertEquals(1, b.byteValue().toInt())
     }
 
     // ---- #nbt sentinel: scalar types ----
@@ -62,49 +62,49 @@ class NbtJsonTest {
     fun `nbt long sentinel`() {
         val n = parseTyped("long", "123456789012")
         val l = assertInstanceOf(LongTag::class.java, n)
-        assertEquals(123456789012L, l.getAsLong())
+        assertEquals(123456789012L, l.longValue())
     }
 
     @Test
     fun `nbt byte sentinel`() {
         val n = parseTyped("byte", "7")
         val b = assertInstanceOf(ByteTag::class.java, n)
-        assertEquals(7, b.getAsByte().toInt())
+        assertEquals(7, b.byteValue().toInt())
     }
 
     @Test
     fun `nbt short sentinel`() {
         val n = parseTyped("short", "32000")
         val s = assertInstanceOf(ShortTag::class.java, n)
-        assertEquals(32000, s.getAsShort().toInt())
+        assertEquals(32000, s.shortValue().toInt())
     }
 
     @Test
     fun `nbt int sentinel`() {
         val n = parseTyped("int", "42")
         val i = assertInstanceOf(IntTag::class.java, n)
-        assertEquals(42, i.getAsInt())
+        assertEquals(42, i.intValue())
     }
 
     @Test
     fun `nbt float sentinel`() {
         val n = parseTyped("float", "1.5")
         val f = assertInstanceOf(FloatTag::class.java, n)
-        assertEquals(1.5f, f.getAsFloat(), 0.0001f)
+        assertEquals(1.5f, f.floatValue(), 0.0001f)
     }
 
     @Test
     fun `nbt double sentinel`() {
         val n = parseTyped("double", "3.14159")
         val d = assertInstanceOf(DoubleTag::class.java, n)
-        assertEquals(3.14159, d.getAsDouble(), 0.0000001)
+        assertEquals(3.14159, d.doubleValue(), 0.0000001)
     }
 
     @Test
     fun `nbt string sentinel coerces number to string`() {
         val n = parseTyped("string", "123")
         val s = assertInstanceOf(StringTag::class.java, n)
-        assertEquals("123", s.getAsString())
+        assertEquals("123", s.value())
     }
 
     // ---- #nbt sentinel: array types ----
@@ -138,7 +138,7 @@ class NbtJsonTest {
         val n = parse("""{"pos":{"#nbt":"long","value":12345}}""")
         val c = assertInstanceOf(CompoundTag::class.java, n)
         val pos = assertInstanceOf(LongTag::class.java, c.get("pos"))
-        assertEquals(12345L, pos.getAsLong())
+        assertEquals(12345L, pos.longValue())
     }
 
     @Test
@@ -147,8 +147,8 @@ class NbtJsonTest {
         val n = parse("""{"nbt":"long","value":5}""")
         val c = assertInstanceOf(CompoundTag::class.java, n)
         // "nbt" and "value" are both ordinary keys.
-        assertEquals("long", c.getString("nbt"))
-        assertEquals(5, c.getInt("value"))
+        assertEquals("long", c.getStringOr("nbt", ""))
+        assertEquals(5, c.getIntOr("value", 0))
     }
 
     // ---- #nbt sentinel: rejection ----
@@ -209,9 +209,9 @@ class NbtJsonTest {
         val j = NbtJson.toJson(c)
         // back to NBT
         val back = NbtJson.fromJson(j) as CompoundTag
-        assertEquals(1, back.getByte("flag").toInt())
-        assertEquals("x", back.getString("name"))
-        assertEquals(42L, back.getLong("pos"))
+        assertEquals(1, back.getByteOr("flag", 0).toInt())
+        assertEquals("x", back.getStringOr("name", ""))
+        assertEquals(42L, back.getLongOr("pos", 0L))
     }
 
     @Test
@@ -246,7 +246,7 @@ class NbtJsonTest {
         val c = CompoundTag()
         c.putLong("Energy", 100L)
         val v = NbtJson.getByPath(c, "Energy")
-        assertEquals(100L, (v as LongTag).getAsLong())
+        assertEquals(100L, (v as LongTag).longValue())
     }
 
     @Test
@@ -259,7 +259,7 @@ class NbtJsonTest {
     fun `setByPath sets nested value`() {
         val c = CompoundTag()
         NbtJson.setByPath(c, "Energy", LongTag.valueOf(250L))
-        assertEquals(250L, c.getLong("Energy"))
+        assertEquals(250L, c.getLongOr("Energy", 0L))
     }
 
     @Test
@@ -275,13 +275,13 @@ class NbtJsonTest {
         // JSON 源里用 \u 转义（等价于 CLI --nbt '{"name":"\u4e2d\u6587"}' 的写法）。
         val n = parse("""{"name":"\u4e2d\u6587","msg":"caf\u00e9 \u00fc"}""")
         val c = assertInstanceOf(CompoundTag::class.java, n)
-        assertEquals("中文", c.getString("name"))
-        assertEquals("café ü", c.getString("msg"))
+        assertEquals("中文", c.getStringOr("name", ""))
+        assertEquals("café ü", c.getStringOr("msg", ""))
         // NBT→JSON 方向不得再引入任何 mojibake。
         val j = NbtJson.toJson(c)
         val back = NbtJson.fromJson(j) as CompoundTag
-        assertEquals("中文", back.getString("name"))
-        assertEquals("café ü", back.getString("msg"))
+        assertEquals("中文", back.getStringOr("name", ""))
+        assertEquals("café ü", back.getStringOr("msg", ""))
     }
 
     @Test
@@ -294,7 +294,7 @@ class NbtJsonTest {
         val back = net.minecraft.nbt.NbtIo.read(
             java.io.DataInputStream(java.io.ByteArrayInputStream(baos.toByteArray()))
         )
-        assertEquals("a😀b", (back as CompoundTag).getString("emoji"))
+        assertEquals("a😀b", back.getStringOr("emoji", ""))
     }
 
     @Test
@@ -303,6 +303,6 @@ class NbtJsonTest {
         c.putString("s", "日本語テキスト ✔")
         val j = NbtJson.toJson(c)
         val back = NbtJson.fromJson(j) as CompoundTag
-        assertEquals("日本語テキスト ✔", back.getString("s"))
+        assertEquals("日本語テキスト ✔", back.getStringOr("s", ""))
     }
 }

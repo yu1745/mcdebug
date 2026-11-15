@@ -9,12 +9,12 @@ import net.minecraft.client.Minecraft
 import net.minecraft.client.gui.screens.Screen
 import net.minecraft.client.gui.screens.inventory.AbstractContainerScreen
 import net.minecraft.client.renderer.GameRenderer
-import org.lwjgl.glfw.GLFW
+import java.util.concurrent.locks.LockSupport
 
 /**
  * Keep the normal game loop, network, client/server ticks and window event pump.
  * Only the GameRenderer call is gated; a screenshot is read back after that call
- * returns (and GuiGraphics has flushed), before the window blit.
+ * returns (and GuiGraphicsExtractor has flushed), before the window blit.
  *
  * Loading/reload and non-container screens deliberately keep normal rendering:
  * vanilla and mods may complete screen transitions from render callbacks.
@@ -39,50 +39,57 @@ object RenderControl {
     }
 
     private fun safeToThrottle(client: Minecraft): Boolean =
-        client.isGameLoadFinished && client.getOverlay() == null && client.level != null && client.player != null &&
-            (client.screen == null || client.screen is AbstractContainerScreen<*>)
+        client.isGameLoadFinished && client.gui.overlay() == null && client.level != null && client.player != null &&
+            (client.gui.screen() == null || client.gui.screen() is AbstractContainerScreen<*>)
+
+    private var prepared = false
+    private var screenBefore: Screen? = null
+    private var overlayBefore: Any? = null
+    private var frameCursor: String? = null
+    private var drawLog: JsonObject? = null
 
     @JvmStatic
-    fun renderFrame(renderer: GameRenderer, delta: DeltaTracker, renderWorld: Boolean) {
+    fun extractFrame(renderer: GameRenderer, delta: DeltaTracker, advanceGameTime: Boolean) {
         val client = Minecraft.getInstance()
-        val changed = client.screen !== lastScreen
-        virtualCursor.observe(client.screen)
-        lastScreen = client.screen
+        val changed = client.gui.screen() !== lastScreen
+        virtualCursor.observe(client.gui.screen())
+        lastScreen = client.gui.screen()
         val mode = schedule.nextFrame(System.nanoTime(), safeToThrottle(client), Capture.hasPendingRequests(), changed)
+        prepared = mode != null
         if (mode == null) {
             skipped++
             effectiveMode = "idle"
             return
         }
         effectiveMode = mode.id
-        val screenBefore = client.screen
-        val overlayBefore = client.getOverlay()
-        if (mode == RenderMode.GUI_ONLY) {
-            // Unlike renderLevel, GUI-only never clears the colour attachment.
-            // Start with a neutral target, not the previous GUI/world underneath
-            // translucent widgets. clear() unbinds, so explicitly bind it again.
-            client.mainRenderTarget.clear(Minecraft.ON_OSX)
-            client.mainRenderTarget.bindWrite(true)
-        }
-        // Arm the draw log / hidden cursor only for a frame a pending capture asked for.
-        val frameCursor = Capture.nextFrameCursor()
+        screenBefore = client.gui.screen()
+        overlayBefore = client.gui.overlay()
+        frameCursor = Capture.nextFrameCursor()
         val recordDraws = Capture.wantsDrawLog(frameCursor)
         if (recordDraws) DrawRecorder.begin()
         hideCursor = frameCursor == "hide"
-        var drawLog: com.google.gson.JsonObject? = null
+        drawLog = null
         WidgetFrames.beginFrame()
         try {
-            renderer.render(delta, renderWorld && mode != RenderMode.GUI_ONLY)
+            renderer.extract(delta, advanceGameTime && mode != RenderMode.GUI_ONLY)
         } finally {
             hideCursor = false
             if (recordDraws) drawLog = DrawRecorder.end()
         }
-        if (client.screen === screenBefore) WidgetFrames.endFrame(screenBefore)
+        if (client.gui.screen() === screenBefore) WidgetFrames.endFrame(screenBefore)
+    }
+
+    @JvmStatic
+    fun renderFrame(renderer: GameRenderer) {
+        if (!prepared) return
+        val client = Minecraft.getInstance()
+        renderer.render()
         frames++
-        // LoadingOverlay and mod render callbacks may switch/init screens. Do not
-        // pair the old frame's pixels with a new Screen's bounds; keep requests
-        // pending so idleFps=0 still forces the following natural frame.
-        if (client.screen === screenBefore && client.getOverlay() === overlayBefore) Capture.afterFrame(client, drawLog, frameCursor ?: "keep")
+        // Extraction observes widgets; readback must follow GPU rendering of that same state.
+        if (client.gui.screen() === screenBefore && client.gui.overlay() === overlayBefore) {
+            Capture.afterFrame(client, drawLog, frameCursor ?: "keep")
+        }
+        prepared = false
     }
 
     /** Limit the outer loop, not the natural tick rate. Never throttle loading. */
@@ -95,7 +102,8 @@ object RenderControl {
     // Set by frameLimit right before runTick calls limitDisplayFPS; read by RPC threads in wake().
     @Volatile private var throttling = false
     @Volatile private var wakeRequested = false
-    private var lastDrawTime = 0.0
+    private var lastDrawTime = 0L
+    @Volatile private var loopThread: Thread? = null
     private var wakes = 0L
 
     /**
@@ -107,11 +115,12 @@ object RenderControl {
     @JvmStatic
     fun limitDisplayFps(fps: Int): Boolean {
         if (!throttling || fps <= 0) return false
-        val deadline = lastDrawTime + 1.0 / fps
-        var now = GLFW.glfwGetTime()
+        val deadline = lastDrawTime + 1_000_000_000L / fps
+        loopThread = Thread.currentThread()
+        var now = System.nanoTime()
         while (now < deadline && !wakeRequested) {
-            GLFW.glfwWaitEventsTimeout(deadline - now)
-            now = GLFW.glfwGetTime()
+            LockSupport.parkNanos(deadline - now)
+            now = System.nanoTime()
         }
         if (wakeRequested) wakes++
         wakeRequested = false
@@ -119,16 +128,11 @@ object RenderControl {
         return true
     }
 
-    /**
-     * Any thread: a client task was queued; cut the current frame-limit wait short.
-     * Only while our limiter owns the wait: that implies a live GLFW window. Posting
-     * an event before glfwInit leaves a pending GLFW error that vanilla's init check
-     * turns into a crash (an RPC probe can arrive that early).
-     */
+    /** Any thread: wake only the client loop's own frame limiter, leaving SDL's event queue intact. */
     fun wake() {
         if (!throttling) return
         wakeRequested = true
-        try { GLFW.glfwPostEmptyEvent() } catch (_: Throwable) { /* window torn down concurrently */ }
+        loopThread?.let(LockSupport::unpark)
     }
 
     /**
@@ -137,7 +141,7 @@ object RenderControl {
      */
     fun moveCursor(x: Double, y: Double): Boolean {
         if (schedule.settings.mode == RenderMode.CONTINUOUS) return false
-        val screen = Minecraft.getInstance().screen ?: return false
+        val screen = Minecraft.getInstance().gui.screen() ?: return false
         virtualCursor.move(screen, x, y)
         return true
     }
