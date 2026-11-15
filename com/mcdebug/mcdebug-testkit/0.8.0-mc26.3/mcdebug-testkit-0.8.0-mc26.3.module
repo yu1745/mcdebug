@@ -1,0 +1,130 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "com.mcdebug",
+    "module": "mcdebug-testkit",
+    "version": "0.8.0-mc26.3",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.6.0"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "com.mcdebug",
+          "module": "mcdebug-sdk",
+          "version": {
+            "requires": "0.8.0-mc26.3"
+          }
+        },
+        {
+          "group": "org.junit.jupiter",
+          "module": "junit-jupiter-api",
+          "version": {
+            "requires": "5.10.2"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.3.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "mcdebug-testkit-0.8.0-mc26.3.jar",
+          "url": "mcdebug-testkit-0.8.0-mc26.3.jar",
+          "size": 43543,
+          "sha512": "50e4532474cc8cc17c72e2b6674621691ace92245f3a3185d5f6e903c65251660ff3500d778c1f5e161ec9bf57cfcd46c0d6f9a2c49119b96077ac4d31824a54",
+          "sha256": "93cd11de6e2ef69ed408723206fc1d6be7a3ca459d81c5b79be8731fc31c649e",
+          "sha1": "d1ca1a478289eaa264d82a4f996ecec51b2ce539",
+          "md5": "83b9b3aac5a44a40db7e4ad44bd43d9d"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "com.mcdebug",
+          "module": "mcdebug-sdk",
+          "version": {
+            "requires": "0.8.0-mc26.3"
+          }
+        },
+        {
+          "group": "org.junit.jupiter",
+          "module": "junit-jupiter-api",
+          "version": {
+            "requires": "5.10.2"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.3.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "mcdebug-testkit-0.8.0-mc26.3.jar",
+          "url": "mcdebug-testkit-0.8.0-mc26.3.jar",
+          "size": 43543,
+          "sha512": "50e4532474cc8cc17c72e2b6674621691ace92245f3a3185d5f6e903c65251660ff3500d778c1f5e161ec9bf57cfcd46c0d6f9a2c49119b96077ac4d31824a54",
+          "sha256": "93cd11de6e2ef69ed408723206fc1d6be7a3ca459d81c5b79be8731fc31c649e",
+          "sha1": "d1ca1a478289eaa264d82a4f996ecec51b2ce539",
+          "md5": "83b9b3aac5a44a40db7e4ad44bd43d9d"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "mcdebug-testkit-0.8.0-mc26.3-sources.jar",
+          "url": "mcdebug-testkit-0.8.0-mc26.3-sources.jar",
+          "size": 12559,
+          "sha512": "057d5222b750419910566984ef27222e5cc98e55840df3ebd3f23af72a5d38970dc7f77725540b20b50cab40a9a6651c20b83b9990dfacca56c06d1b24eb0a99",
+          "sha256": "c45d6b262d63424e8fc791b47d688eb08afae0df6d3ab9ff19ecbfd88b0ce41a",
+          "sha1": "2766bd186215367818f6c67cddfbf3647c30c0b3",
+          "md5": "04ec4d20449795a7f695884a6760ad43"
+        }
+      ]
+    }
+  ]
+}

@@ -1,0 +1,130 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "com.mcdebug",
+    "module": "mcdebug-sdk",
+    "version": "0.8.0-mc26.3",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.6.0"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "com.mcdebug",
+          "module": "mcdebug-contract",
+          "version": {
+            "requires": "0.8.0-mc26.3"
+          }
+        },
+        {
+          "group": "com.google.code.gson",
+          "module": "gson",
+          "version": {
+            "requires": "2.11.0"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.3.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "mcdebug-sdk-0.8.0-mc26.3.jar",
+          "url": "mcdebug-sdk-0.8.0-mc26.3.jar",
+          "size": 186803,
+          "sha512": "29a85a1bf571ba74e24b647a2ce6e593deb35a60b3ad632b5ad2da91a46a877592f322f1eb75e97e93ef367e6143cfc53fd76bc5f54cce6c39224227f7a8a26f",
+          "sha256": "2c4063cf79ca97f7056adebc7146f0b7201c797748876f2350486f739bea5327",
+          "sha1": "7fe87931ec314c40af44e4af6ed287626e3c9be6",
+          "md5": "da0474209b46a94af5e2603658e43614"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "com.mcdebug",
+          "module": "mcdebug-contract",
+          "version": {
+            "requires": "0.8.0-mc26.3"
+          }
+        },
+        {
+          "group": "com.google.code.gson",
+          "module": "gson",
+          "version": {
+            "requires": "2.11.0"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.3.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "mcdebug-sdk-0.8.0-mc26.3.jar",
+          "url": "mcdebug-sdk-0.8.0-mc26.3.jar",
+          "size": 186803,
+          "sha512": "29a85a1bf571ba74e24b647a2ce6e593deb35a60b3ad632b5ad2da91a46a877592f322f1eb75e97e93ef367e6143cfc53fd76bc5f54cce6c39224227f7a8a26f",
+          "sha256": "2c4063cf79ca97f7056adebc7146f0b7201c797748876f2350486f739bea5327",
+          "sha1": "7fe87931ec314c40af44e4af6ed287626e3c9be6",
+          "md5": "da0474209b46a94af5e2603658e43614"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "mcdebug-sdk-0.8.0-mc26.3-sources.jar",
+          "url": "mcdebug-sdk-0.8.0-mc26.3-sources.jar",
+          "size": 37636,
+          "sha512": "fdbed5289ce2f3296a945b62dc6c8d750fed1c66c214d55e0a4381cf6b77f810815ad184e454c7e3f20c50ff3c9280b946f9b656f6378e6d7717f18b00e7c42a",
+          "sha256": "8323afd147f53d7d3e4bd54900017ebdb844c8f627517d31cf4d0531cb5974ec",
+          "sha1": "aa3109ea199fc578d6e4e4dcf209007817b880d4",
+          "md5": "dc32b1be322d3be7f17dc05a84e343d9"
+        }
+      ]
+    }
+  ]
+}
