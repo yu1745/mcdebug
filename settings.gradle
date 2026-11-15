@@ -11,6 +11,8 @@ pluginManagement {
 
 rootProject.name = 'mcdebug'
 include 'contract'
+include 'sdk'
+include 'testkit'
 include 'cli'
 
 // NeoForge 移植是独立 Gradle 构建（ModDevGradle + 自带 wrapper），这里只做任务转发：

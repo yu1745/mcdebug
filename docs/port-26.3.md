@@ -1,7 +1,8 @@
 # Minecraft 26.3 port
 
 Based on native `1.21.1` commit `72a70c2`. Branch: `26.3`; worktree: `mcdebug-wt-263`.
-The 1.21 worktree is unchanged. No new test files or test cases were added.
+The 1.21 worktree is unchanged. The Minecraft port reused existing backend test cases;
+the separate [JUnit frontend](testkit.md) has its own host-side validation.
 
 ## Build
 

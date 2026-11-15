@@ -1,5 +1,8 @@
 package com.mcdebug.cli
 
+import com.mcdebug.sdk.RpcException
+import com.mcdebug.sdk.gson
+
 import com.google.gson.JsonParser
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertNull

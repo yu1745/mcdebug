@@ -2,7 +2,7 @@ plugins {
 	id 'org.jetbrains.kotlin.jvm' version "${kotlin_version}"
 }
 
-version = providers.gradleProperty("version").orNull ?: rootProject.property("mod_version")
+version = providers.gradleProperty("version").orNull ?: rootProject.property("maven_version")
 group = providers.gradleProperty("group").orNull ?: rootProject.property("maven_group")
 
 base {
@@ -24,6 +24,7 @@ test {
 java {
 	sourceCompatibility = JavaVersion.VERSION_17
 	targetCompatibility = JavaVersion.VERSION_17
+	withSourcesJar()
 }
 
 kotlin {
@@ -37,7 +38,11 @@ apply plugin: 'maven-publish'
 
 publishing {
 	publications {
-		create("mavenJava", MavenPublication) { from components.java }
+		create("mavenJava", MavenPublication) {
+			artifactId = 'mcdebug-contract'
+			from components.java
+		}
 	}
-	repositories { }
 }
+
+apply from: '../gradle/maven-publishing.gradle'

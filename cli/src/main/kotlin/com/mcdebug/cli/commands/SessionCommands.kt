@@ -1,5 +1,7 @@
 package com.mcdebug.cli
 
+import com.mcdebug.sdk.gson
+
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.UsageError
 import com.github.ajalt.clikt.parameters.arguments.argument
@@ -11,7 +13,7 @@ import com.github.ajalt.clikt.parameters.types.choice
 import com.github.ajalt.clikt.parameters.types.int
 import com.github.ajalt.clikt.parameters.types.long
 import com.google.gson.JsonObject
-import com.mcdebug.cli.session.StartRequest
+import com.mcdebug.sdk.session.StartRequest
 import java.nio.file.Path
 
 class SessionCommands : CliktCommand(

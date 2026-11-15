@@ -1,0 +1,33 @@
+plugins { id 'maven-publish' }
+
+// Build and publish the JVM modules without loading Loom/ModDevGradle.
+def shared = new Properties()
+file('../gradle.properties').withInputStream { shared.load(it) }
+allprojects {
+    shared.each { key, value -> if (!hasProperty(key)) extensions.extraProperties.set(key, value) }
+    repositories { mavenCentral() }
+}
+
+group = shared.getProperty('maven_group')
+version = providers.gradleProperty('version').getOrElse(shared.getProperty('maven_version'))
+
+publishing {
+    publications {
+        neoForgeAgent(MavenPublication) {
+            artifactId = 'mcdebug-neoforge'
+            // Self-contained game mod, resolved separately from the host test classpath.
+            // Build with the root :neoforge:build task before staging the repository.
+            artifact file("../neoforge/build/libs/mcdebug-neoforge-${shared.getProperty('mod_version')}.jar")
+        }
+    }
+}
+apply from: '../gradle/maven-publishing.gradle'
+
+tasks.register('stageMavenRepository') {
+    group = 'publishing'
+    description = 'Stage SDK, testkit, contract and the prebuilt NeoForge agent as a Maven repository.'
+    dependsOn 'publishNeoForgeAgentPublicationToGitHubMavenRepository'
+    dependsOn ':contract:publishMavenJavaPublicationToGitHubMavenRepository'
+    dependsOn ':sdk:publishMavenJavaPublicationToGitHubMavenRepository'
+    dependsOn ':testkit:publishMavenJavaPublicationToGitHubMavenRepository'
+}

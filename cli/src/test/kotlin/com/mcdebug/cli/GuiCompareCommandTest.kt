@@ -1,5 +1,9 @@
 package com.mcdebug.cli
 
+import com.mcdebug.sdk.PngCodec
+
+import com.mcdebug.sdk.gson
+
 import com.github.ajalt.clikt.core.PrintHelpMessage
 import com.github.ajalt.clikt.core.UsageError
 import com.github.ajalt.clikt.core.subcommands

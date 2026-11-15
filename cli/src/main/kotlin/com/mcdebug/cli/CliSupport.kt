@@ -1,5 +1,9 @@
 package com.mcdebug.cli
 
+import com.mcdebug.sdk.RpcException
+import com.mcdebug.sdk.RpcClient
+import com.mcdebug.sdk.gson
+
 import com.github.ajalt.clikt.core.CliktCommand
 import com.google.gson.JsonElement
 

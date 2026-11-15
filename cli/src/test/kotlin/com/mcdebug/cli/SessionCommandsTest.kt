@@ -1,10 +1,12 @@
 package com.mcdebug.cli
 
+import com.mcdebug.sdk.gson
+
 import com.github.ajalt.clikt.core.PrintHelpMessage
 import com.github.ajalt.clikt.core.UsageError
 import com.github.ajalt.clikt.core.subcommands
 import com.google.gson.JsonObject
-import com.mcdebug.cli.session.StartRequest
+import com.mcdebug.sdk.session.StartRequest
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir

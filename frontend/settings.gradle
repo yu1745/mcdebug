@@ -1,0 +1,12 @@
+pluginManagement {
+    repositories {
+        mavenCentral()
+        gradlePluginPortal()
+    }
+}
+
+rootProject.name = 'mcdebug-frontends'
+include 'contract', 'sdk', 'testkit'
+project(':contract').projectDir = file('../contract')
+project(':sdk').projectDir = file('../sdk')
+project(':testkit').projectDir = file('../testkit')

@@ -1,5 +1,10 @@
 package com.mcdebug.cli
 
+import com.mcdebug.sdk.Pos
+import com.mcdebug.sdk.Box
+import com.mcdebug.sdk.DebugApi
+import com.mcdebug.sdk.gson
+
 import com.github.ajalt.clikt.core.CliktCommand
 import com.google.gson.JsonElement
 import com.google.gson.JsonParser

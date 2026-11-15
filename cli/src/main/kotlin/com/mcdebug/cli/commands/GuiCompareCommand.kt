@@ -1,5 +1,12 @@
 package com.mcdebug.cli
 
+import com.mcdebug.sdk.ScreenshotComparison
+import com.mcdebug.sdk.ScreenshotRegion
+import com.mcdebug.sdk.ScreenshotReview
+
+import com.mcdebug.sdk.DebugApi
+import com.mcdebug.sdk.gson
+
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag

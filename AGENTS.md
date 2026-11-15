@@ -11,6 +11,7 @@
 - NeoForge 存储使用事务型 `ResourceHandler` / `EnergyHandler` / `ItemAccess`；禁止恢复旧 `IItemHandler` / `IFluidHandler`。物品和流体搬运必须在同一事务内提交或回滚。
 - 保留两平面、loader 接缝、自包含 jar、被动 tick、隔离测试、进程清理等基线约束。26.3 的差异与验证记录见 `docs/port-26.3.md`。
 - **用户要求：不添加基线中不存在的测试，除非 26.3 的实现与 1.21 不同且使用新 API。**优先运行和适配现有测试、冒烟脚本及 GUI 验证流程。
+- JVM 前端拆分为 `sdk/`（`com.mcdebug.sdk`：RPC、类型化 API、截图比较、session）和 `testkit/`（JUnit）；CLI 依赖 SDK。`frontend/` 独立构建与暂存这三个 JVM 模块及预构建的 NeoForge agent，消费者使用 GitHub `maven` 分支的标准 Maven 依赖，版本由 `maven_version` 统一锁定。新增测试前端的宿主测试与消费者实机用例不属于 Minecraft 移植新增的后端用例。使用与生命周期约定见 `docs/testkit.md`。
 
 本文件是 mcdebug 的唯一开发指南（仓库/协议/验证规则）。1.20.1 线（`main` 分支，yarn 映射，Kilt 容器测试环境）已归档，不再回移。
 
@@ -44,7 +45,7 @@ Fabric 1.21.1（Mojang 官方映射）+ Kotlin Mod，提供 JSON-RPC 服务，�
 
 ## 2. 目录结构
 
-Gradle 根项目 + `contract`/`cli` 子项目。Gradle 插件、Kotlin test DSL、反编译源码参考均已不在仓库中（见 §12）。
+Gradle 根项目 + `contract`/`sdk`/`testkit`/`cli` 子项目。Gradle 插件、Kotlin test DSL、反编译源码参考均已不在仓库中（见 §12）。
 
 ```
 mcdebug/
@@ -53,8 +54,11 @@ mcdebug/
 ├── settings.gradle
 ├── AGENTS.md
 ├── contract/                 # 共享契约（方法名清单 + DTO 样板，零依赖）
-├── cli/                       # Kotlin CLI（clikt）+ SDK + JUnit runner
-│   └── src/main/kotlin/com/mcdebug/{cli,runner}/
+├── sdk/                      # JVM SDK（RPC、类型化 API、session、截图比较）
+├── testkit/                  # JUnit 前端与原有 server-grid runner
+├── frontend/                 # SDK/testkit/contract 的独立 JVM 构建与 Maven 暂存入口
+├── cli/                      # Kotlin CLI（clikt）；依赖 SDK
+│   └── src/main/kotlin/com/mcdebug/cli/
 ├── neoforge/                  # NeoForge 21.1.x 移植：**独立 Gradle 构建**（ModDevGradle + Kotlin），
 │   │                          #   共享源码靠 Sync 拉进 build/generated/shared 再编译，见 §2b
 │   ├── build.gradle           # 服务端+客户端平面、runs、两个 verifyJarSelfContained 之一
@@ -197,7 +201,7 @@ java -jar mcdebug-cli.jar skill --name neoforge-fabric-port  # 从本次构建�
 2. 错误抛出 `RpcException(code, message, data?)`（从 `RpcErrors` 选错误码）
 3. 类型在 `RpcHandlerGroup.methods(): Map<String, RpcHandler>` 注册
 4. **同步 `contract/src/main/kotlin/com/mcdebug/contract/Methods.kt`**：在对应组 setOf 中加方法名（`RpcContractTest` 会双向校验，漏加或写错直接构建失败）；有需要时同时补充 DTO 到 `contract/.../<Group>Dtos.kt`（字段名 = JSON 字段名，服务端 Gson 与未来 Kotlin 客户端共用）
-5. 对应在 `cli/src/main/kotlin/com/mcdebug/cli/DebugApi.kt` 加方法，参数与返回对齐
+5. 对应在 `sdk/src/main/kotlin/com/mcdebug/sdk/DebugApi.kt` 加方法，参数与返回对齐
 6. CLI 命令在 `cli/src/main/kotlin/com/mcdebug/cli/commands/<Group>Commands.kt` 注册；没有专用 CLI 子命令时，至少更新 `raw`/REPL help 和 README 的 `mcdebug raw` 示例
 7. 重新 `./gradlew :cli:copyCliJar`（CLI fat jar）和 `./gradlew build`（契约测试 + 服务端）
 

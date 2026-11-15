@@ -1,5 +1,8 @@
 package com.mcdebug.cli
 
+import com.mcdebug.sdk.ScreenshotOptions
+import com.mcdebug.sdk.gson
+
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.UsageError
 import com.github.ajalt.clikt.parameters.groups.provideDelegate

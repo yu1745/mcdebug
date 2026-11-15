@@ -1,5 +1,11 @@
 package com.mcdebug.cli
 
+import com.mcdebug.sdk.ScreenshotComparison
+import com.mcdebug.sdk.ScreenshotDifferenceBounds
+import com.mcdebug.sdk.ScreenshotRegion
+import com.mcdebug.sdk.ScreenshotReview
+import com.mcdebug.sdk.PngCodec
+
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.io.TempDir

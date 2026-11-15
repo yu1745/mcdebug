@@ -1,9 +1,13 @@
 package com.mcdebug.cli
 
+import com.mcdebug.sdk.RpcRequestTimeoutException
+import com.mcdebug.sdk.RpcProcessIdentity
+import com.mcdebug.sdk.gson
+
 import com.github.ajalt.clikt.core.UsageError
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser
-import com.mcdebug.cli.session.SessionRecord
+import com.mcdebug.sdk.session.SessionRecord
 import org.junit.jupiter.api.Assertions.*
 import org.junit.jupiter.api.Test
 import org.junit.jupiter.api.Timeout

@@ -1,5 +1,11 @@
 package com.mcdebug.cli
 
+import com.mcdebug.sdk.RpcException
+import com.mcdebug.sdk.RpcClientOptions
+import com.mcdebug.sdk.DebugApi
+import com.mcdebug.sdk.gson
+import com.mcdebug.sdk.parseJson
+
 import com.github.ajalt.clikt.core.context
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.UsageError
@@ -12,8 +18,8 @@ import com.github.ajalt.clikt.parameters.options.multiple
 import com.github.ajalt.clikt.parameters.options.option
 import com.github.ajalt.clikt.parameters.options.versionOption
 import com.github.ajalt.clikt.parameters.types.int
-import com.mcdebug.cli.session.SessionManager
-import com.mcdebug.cli.session.defaultRegistryDir
+import com.mcdebug.sdk.session.SessionManager
+import com.mcdebug.sdk.session.defaultRegistryDir
 import java.nio.file.Path
 import kotlin.system.exitProcess
 

@@ -1,5 +1,7 @@
 package com.mcdebug.cli
 
+import com.mcdebug.sdk.RpcClient
+
 import com.google.gson.JsonObject
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Test

@@ -1,5 +1,11 @@
 package com.mcdebug.cli
 
+import com.mcdebug.sdk.RpcClient
+import com.mcdebug.sdk.RpcClientOptions
+import com.mcdebug.sdk.RpcProcessIdentity
+import com.mcdebug.sdk.RpcHandshake
+import com.mcdebug.sdk.RpcRequestTimeoutException
+
 import com.google.gson.JsonElement
 import com.google.gson.JsonObject
 import com.google.gson.JsonParser

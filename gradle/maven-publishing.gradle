@@ -1,0 +1,28 @@
+// Stage a standard Maven repository. Only the maven branch contains binary artifacts.
+publishing {
+    repositories {
+        maven {
+            name = 'GitHubMaven'
+            url = providers.gradleProperty('mavenRepoDir')
+                .map { new File(it).toURI() }
+                .getOrElse(rootProject.layout.buildDirectory.dir('github-maven').get().asFile.toURI())
+        }
+    }
+    publications.withType(MavenPublication).configureEach {
+        pom {
+            name = artifactId
+            description = 'Minecraft debugging and client integration tests over JSON-RPC'
+            url = 'https://github.com/yu1745/mcdebug'
+            licenses {
+                license {
+                    name = 'CC0 1.0 Universal'
+                    url = 'https://github.com/yu1745/mcdebug/blob/26.3/LICENSE'
+                }
+            }
+            scm {
+                connection = 'scm:git:https://github.com/yu1745/mcdebug.git'
+                url = 'https://github.com/yu1745/mcdebug'
+            }
+        }
+    }
+}

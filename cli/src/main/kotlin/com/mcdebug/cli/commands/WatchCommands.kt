@@ -1,5 +1,9 @@
 package com.mcdebug.cli
 
+import com.mcdebug.sdk.Pos
+import com.mcdebug.sdk.DebugApi
+import com.mcdebug.sdk.gson
+
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.options.default
