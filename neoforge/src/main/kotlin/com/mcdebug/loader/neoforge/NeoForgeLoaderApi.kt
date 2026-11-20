@@ -4,7 +4,18 @@ import com.mcdebug.loader.LoaderApi
 import com.mcdebug.loader.MojangRuntimeNames
 import com.mcdebug.loader.RuntimeNames
 import com.mcdebug.loader.StorageApi
+import io.netty.channel.Channel
+import io.netty.channel.embedded.EmbeddedChannel
+import net.minecraft.network.Connection
+import net.minecraft.network.DisconnectionDetails
+import net.minecraft.network.PacketSendListener
+import net.minecraft.network.chat.Component
+import net.minecraft.network.protocol.Packet
+import net.minecraft.resources.ResourceLocation
 import net.minecraft.server.MinecraftServer
+import net.minecraft.server.level.ServerPlayer
+import net.minecraft.server.network.CommonListenerCookie
+import net.minecraft.server.network.ServerGamePacketListenerImpl
 import net.minecraft.world.InteractionHand
 import net.minecraft.world.InteractionResult
 import net.minecraft.world.entity.Entity
@@ -58,6 +69,28 @@ class NeoForgeLoaderApi : LoaderApi {
         NeoForge.EVENT_BUS.addListener { event: ServerTickEvent.Post -> callback(event.server) }
     }
 
+    override fun fakePlayerPacketListener(
+        server: MinecraftServer,
+        connection: Connection,
+        player: ServerPlayer,
+        cookie: CommonListenerCookie,
+    ): ServerGamePacketListenerImpl {
+        val neoConnection = object : Connection(connection.receiving) {
+            override fun channel(): Channel = DUMMY_CHANNEL
+        }
+        return object : ServerGamePacketListenerImpl(server, neoConnection, player, cookie) {
+            override fun send(packet: Packet<*>) {}
+            override fun send(packet: Packet<*>, sendListener: PacketSendListener?) {}
+            override fun disconnect(reason: Component) {}
+            override fun disconnect(details: DisconnectionDetails) {}
+
+            // Mods (e.g. AppleSkin) and menu data sync probe extended payload support before
+            // send(). Like NeoForge's FakePlayer handler, return false without inspecting a
+            // real Netty channel.
+            override fun hasChannel(payloadId: ResourceLocation): Boolean = false
+        }
+    }
+
     /**
      * `IModFile.getFilePath()` — the real module file. A `protectionDomain.codeSource` is not a
      * file URL on NeoForge (mods live in a module layer, where it degenerates to `/`), which is
@@ -97,5 +130,6 @@ class NeoForgeLoaderApi : LoaderApi {
 
     companion object {
         const val MOD_ID: String = "mcdebug"
+        private val DUMMY_CHANNEL: Channel = EmbeddedChannel()
     }
 }
