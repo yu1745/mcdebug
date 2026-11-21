@@ -1,8 +1,11 @@
 package com.mcdebug.loader
 
-import net.minecraft.server.MinecraftServer
+import io.netty.channel.ChannelFutureListener
 import net.minecraft.network.Connection
+import net.minecraft.network.DisconnectionDetails
+import net.minecraft.network.chat.Component
 import net.minecraft.network.protocol.Packet
+import net.minecraft.server.MinecraftServer
 import net.minecraft.server.level.ServerPlayer
 import net.minecraft.server.network.CommonListenerCookie
 import net.minecraft.server.network.ServerGamePacketListenerImpl
@@ -101,6 +104,9 @@ interface LoaderApi {
         cookie: CommonListenerCookie,
     ): ServerGamePacketListenerImpl = object : ServerGamePacketListenerImpl(server, connection, player, cookie) {
         override fun send(packet: Packet<*>) {}
+        override fun send(packet: Packet<*>, sendListener: ChannelFutureListener?) {}
+        override fun disconnect(reason: Component) {}
+        override fun disconnect(details: DisconnectionDetails) {}
     }
 
     fun fireUseEntity(

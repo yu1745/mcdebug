@@ -4,10 +4,15 @@ import com.mcdebug.loader.LoaderApi
 import com.mcdebug.loader.MojangRuntimeNames
 import com.mcdebug.loader.RuntimeNames
 import com.mcdebug.loader.StorageApi
-import net.minecraft.server.MinecraftServer
+import io.netty.channel.Channel
+import io.netty.channel.ChannelFutureListener
+import io.netty.channel.embedded.EmbeddedChannel
 import net.minecraft.network.Connection
+import net.minecraft.network.DisconnectionDetails
+import net.minecraft.network.chat.Component
 import net.minecraft.network.protocol.Packet
 import net.minecraft.resources.Identifier
+import net.minecraft.server.MinecraftServer
 import net.minecraft.server.level.ServerPlayer
 import net.minecraft.server.network.CommonListenerCookie
 import net.minecraft.server.network.ServerGamePacketListenerImpl
@@ -68,12 +73,20 @@ class NeoForgeLoaderApi : LoaderApi {
         connection: Connection,
         player: ServerPlayer,
         cookie: CommonListenerCookie,
-    ): ServerGamePacketListenerImpl = object : ServerGamePacketListenerImpl(server, connection, player, cookie) {
-        override fun send(packet: Packet<*>) {}
+    ): ServerGamePacketListenerImpl {
+        val neoConnection = object : Connection(connection.receiving) {
+            override fun channel(): Channel = DUMMY_CHANNEL
+        }
+        return object : ServerGamePacketListenerImpl(server, neoConnection, player, cookie) {
+            override fun send(packet: Packet<*>) {}
+            override fun send(packet: Packet<*>, sendListener: ChannelFutureListener?) {}
+            override fun disconnect(reason: Component) {}
+            override fun disconnect(details: DisconnectionDetails) {}
 
-        // 26.3 menu data sync probes extended payload support before send(). Like NeoForge's
-        // FakePlayer handler, avoid inspecting a Netty channel that this connection never opens.
-        override fun hasChannel(payloadId: Identifier): Boolean = false
+            // Vanilla menu sync and mods can both probe extended payload support.
+            // 原版菜单同步和模组都可能探测扩展载荷支持。
+            override fun hasChannel(payloadId: Identifier): Boolean = false
+        }
     }
 
     /**
@@ -98,5 +111,6 @@ class NeoForgeLoaderApi : LoaderApi {
 
     companion object {
         const val MOD_ID: String = "mcdebug"
+        private val DUMMY_CHANNEL: Channel = EmbeddedChannel()
     }
 }

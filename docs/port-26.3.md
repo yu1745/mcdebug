@@ -39,7 +39,8 @@ NeoForge 使用 26.3.0.103 和 ModDevGradle 2.0.148；Kotlin 仍为 2.3.10。
   NeoForge 现在会在 `Player.interactOn` 内触发交互事件，因此显式前置钩子返回 `PASS`，
   避免重复触发。其假玩家数据包监听器也按 NeoForge 自带 `FakePlayer` 的做法，
   对载荷通道探测返回 `false`：菜单数据同步在发送前会检查扩展载荷支持，
-  而假连接没有可供检查的 Netty 通道。
+  直接读取连接通道属性的模组也可以查询无真实客户端的嵌入式 Netty 通道。
+  监听器忽略发送（含回调）与断开请求，26.3 的发送回调类型为 `ChannelFutureListener`。
 - Screen 和覆盖层状态由 `Minecraft.gui` 管理。输入使用 `KeyEvent`、`CharacterEvent`
   和 `MouseButtonEvent`。`InputEvents` 将既有 RPC 的 GLFW 键码、修饰键位掩码及
   按钮编号（0 左键 / 1 右键 / 2 中键）转换为 SDL 扫描码、键码和按钮。
