@@ -61,6 +61,7 @@ object GuiOps : ClientRpcGroup {
 
     override fun methods(): Map<String, ClientRpcHandler> = linkedMapOf(
         "status" to ::status,
+        "toasts" to ::toasts,
         "connect" to ::connect,
         "openBlock" to ::openBlock,
         "screenshot" to ::screenshot,
@@ -69,6 +70,15 @@ object GuiOps : ClientRpcGroup {
         "stop" to ::stop,
         "disconnect" to ::disconnect,
     ) + GuiScreenOps.methods() + GuiClickOps.methods() + GuiPointerOps.methods() + GuiInputOps.methods() + GuiDevOps.methods()
+
+    private fun toasts(client: Minecraft, params: JsonObject?): CompletableFuture<JsonElement> =
+        ClientTasks.onClient(client) {
+            val enabled = params?.get("enabled")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isBoolean }
+                ?.asBoolean ?: throw RpcException(RpcErrors.INVALID_PARAMS, "enabled must be a boolean")
+            ClientToasts.enabled = enabled
+            if (!enabled) client.toasts.clear()
+            JsonObject().apply { addProperty("enabled", enabled) }
+        }
 
     // ---------------------------------------------------------------- status
 
@@ -82,6 +92,7 @@ object GuiOps : ClientRpcGroup {
             val gameDir = gameDir()
             JsonObject().apply {
                 addProperty("ready", true)
+                addProperty("toastsEnabled", ClientToasts.enabled)
                 addProperty("gameLoadFinished", client.isGameLoadFinished)
                 addProperty("overlay", client.getOverlay()?.javaClass?.name ?: "")
                 add("graphics", JsonObject().apply {

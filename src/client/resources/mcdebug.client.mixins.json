@@ -12,7 +12,8 @@
     "NativeImageAccessor",
     "ClientTextTooltipAccessor",
     "GuiGraphicsMixin",
-    "RenderSystemMixin"
+    "RenderSystemMixin",
+    "ToastComponentMixin"
   ],
   "injectors": {
     "defaultRequire": 1

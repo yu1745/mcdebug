@@ -39,6 +39,7 @@ internal class SessionStartCmd(
     private val display by option("--display", help = "DISPLAY for the child client; omitted = inherited")
     private val width by option("--width", help = "window width (default 854; the project's loom.runs.client programArgs win, and the record repeats what was requested)").int().default(854)
     private val height by option("--height", help = "window height (default 480; see --width)").int().default(480)
+    private val showToasts by option("--show-toasts", help = "show toast notifications (hidden by default in managed clients)").flag()
     private val waitSeconds by option("--wait-seconds", help = "finite startup/readiness deadline in seconds").long().default(180L)
 
     override fun run() {
@@ -47,6 +48,7 @@ internal class SessionStartCmd(
         val result = start(rootCli(), StartRequest(
             name = name, project = Path.of(project), task = task, gameDir = gameDir?.let { Path.of(it) },
             world = world, render = render, display = display, width = width, height = height, waitSeconds = waitSeconds,
+            showToasts = showToasts,
         ))
         printJson(result)
         val state = result.get("state")?.asString

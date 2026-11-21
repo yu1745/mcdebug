@@ -241,6 +241,19 @@ relative to your current working directory, not `--project`):
 java -jar mcdebug-cli.jar session start ic2 --project ../ic2-fabric-1.21.1 --task :core:runClient --game-dir ../ic2-fabric-1.21.1/core/run --world "New World" --render demand
 ```
 
+Managed launches suppress toast notifications by default, including the movement tutorial,
+recipe unlocks, advancements, and mod notifications sent through the standard toast queue.
+Pass `--show-toasts` to `session start` to enable them at launch, or run
+`mcdebug --session NAME gui toasts on|off` to switch for the current client process.
+Turning them off clears visible and queued toasts. Turning them back on shows future toasts.
+`gui status` reports `toastsEnabled`.
+
+The mod detects managed launches through the existing `MCDEBUG_SESSION_TOKEN` environment
+variable. Ordinary launches and attachment to them retain vanilla defaults. Older CLIs already
+pass this token, so they also suppress toasts with the new mod and can switch via
+`raw gui.toasts '{"enabled":true}'`. The new CLI still launches older mods, which keep showing
+toasts and return method-not-found (exit 3) for `gui toasts`.
+
 | command / option | behavior |
 |---|---|
 | `session start NAME` | project defaults to CWD, task `runClient`, gameDir `project/run`, render `demand`, window 854×480, wait 180s |

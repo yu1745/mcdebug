@@ -21,6 +21,7 @@ data class StartRequest(
     val width: Int = 854,
     val height: Int = 480,
     val waitSeconds: Long = 180,
+    val showToasts: Boolean = false,
 )
 
 data class SessionProcess(val pid: Long, val startTime: String) {
@@ -57,6 +58,7 @@ data class SessionRecord(
     val clientSocket: String? = null,
     val serverSocket: String? = null,
     val lastError: String? = null,
+    val showToasts: Boolean = false,
 ) {
     /** Explicit JSON keeps the same schema usable by the Graal native CLI without reflection metadata. */
     fun toJson(): JsonObject = JsonObject().apply {
@@ -84,6 +86,7 @@ data class SessionRecord(
         addProperty("clientSocket", clientSocket)
         addProperty("serverSocket", serverSocket)
         addProperty("lastError", lastError)
+        addProperty("showToasts", showToasts)
     }
 
     companion object {
@@ -117,6 +120,7 @@ data class SessionRecord(
                 clientSocket = optional("clientSocket")?.asString,
                 serverSocket = optional("serverSocket")?.asString,
                 lastError = optional("lastError")?.asString,
+                showToasts = optional("showToasts")?.asBoolean ?: false,
             )
             check(record.schemaVersion == 1 && record.recordId.isNotBlank()) { "invalid record schema" }
             validateName(record.name)

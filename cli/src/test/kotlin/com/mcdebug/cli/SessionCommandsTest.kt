@@ -35,6 +35,7 @@ class SessionCommandsTest {
         assertEquals(854, r.width)
         assertEquals(480, r.height)
         assertEquals(180L, r.waitSeconds)
+        assertEquals(false, r.showToasts)
     }
 
     @Test
@@ -43,10 +44,10 @@ class SessionCommandsTest {
         startCli { request = it; ready("world_ready") }.parse(listOf(
             "session", "start", "dev", "--project", "project with space", "--task", ":core:runClient",
             "--game-dir", "game with space", "--world", "New World", "--render", "gui-only", "--display", ":99",
-            "--width", "1280", "--height", "720", "--wait-seconds", "240",
+            "--width", "1280", "--height", "720", "--wait-seconds", "240", "--show-toasts",
         ))
         assertEquals(StartRequest("dev", Path.of("project with space"), ":core:runClient", Path.of("game with space"),
-            "New World", "gui-only", ":99", 1280, 720, 240L), request)
+            "New World", "gui-only", ":99", 1280, 720, 240L, showToasts = true), request)
     }
 
     @Test

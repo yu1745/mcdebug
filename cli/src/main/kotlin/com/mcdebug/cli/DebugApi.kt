@@ -1,6 +1,7 @@
 package com.mcdebug.cli
 
 import com.google.gson.JsonElement
+import com.google.gson.JsonObject
 import java.nio.file.Files
 import java.nio.file.Path
 import java.util.Base64
@@ -317,6 +318,10 @@ class ServerApi(private val rpc: RpcClient) {
  */
 class GuiApi(private val rpc: RpcClient) {
     fun status(): JsonElement = rpc.call("gui.status")
+
+    fun toasts(enabled: Boolean): JsonElement = rpc.call("gui.toasts", JsonObject().apply {
+        addProperty("enabled", enabled)
+    })
 
     fun connect(host: String, name: String? = null, waitTicks: Int? = null): JsonElement =
         rpc.call("gui.connect", params { p("host", host); p("name", name); p("waitTicks", waitTicks) })
