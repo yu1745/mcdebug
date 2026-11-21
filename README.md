@@ -116,6 +116,20 @@ with its own and warns on stderr when they differ.
 
 Use `mcdebug raw <namespace.method> <json>` for anything without a dedicated command.
 
+`server.runCommand` returns command feedback in the RPC response. The server suppresses
+its operator chat notification by default. Use `--show-chat` to restore the vanilla
+notification when the server's game rules allow it. Direct RPC callers can set
+`"showChat":true` in the request parameters.
+
+```bash
+mcdebug raw server.runCommand '{"command":"/time set day"}'
+mcdebug raw --show-chat server.runCommand '{"command":"/time set day"}'
+```
+
+Older CLI versions get quiet feedback when they connect to an updated mod. Older mods
+ignore `showChat` and keep their original chat behavior with any CLI version. Commands
+that explicitly send chat messages, such as `/say`, still send those messages.
+
 `world.attackEntity` equips its fake player through the stack's native attribute iteration, including data components
 and dynamic item attributes. It removes the originally installed modifiers afterwards even if the attack breaks or changes the stack.
 

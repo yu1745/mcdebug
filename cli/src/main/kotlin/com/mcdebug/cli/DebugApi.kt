@@ -298,8 +298,14 @@ class ServerApi(private val rpc: RpcClient) {
     fun health(): JsonElement = rpc.call("server.health")
 
     fun listDimensions(): JsonElement = rpc.call("server.listDimensions")
-    fun runCommand(command: String, dim: String? = null): JsonElement =
-        rpc.call("server.runCommand", params { p("command", command); p("dim", dim) })
+    fun runCommand(command: String, dim: String? = null): JsonElement = runCommand(command, dim, false)
+
+    fun runCommand(command: String, dim: String? = null, showChat: Boolean): JsonElement =
+        rpc.call("server.runCommand", params {
+            p("command", command)
+            p("dim", dim)
+            if (showChat) p("showChat", true)
+        })
 }
 
 /**

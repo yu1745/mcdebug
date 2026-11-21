@@ -110,6 +110,9 @@ mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeo
 - `inv.*` only reaches block-entity containers. The **player inventory**: `scan.findEntities`
   (box around the player) for the uuid, then `raw entity.getNbt '{"uuid":"..."}'` -> `Inventory[]`
   (its `Slot` is the player's own numbering), or `gui screen` while a container GUI is open.
+  Server command feedback is returned by RPC and stays out of operator chat by default on updated mods.
+  To restore chat feedback, use `raw --show-chat server.runCommand ...` or set `"showChat":true` in raw RPC params.
+  Older mods retain their original chat behavior.
   To give the player an item: `raw server.runCommand '{"command":"give @p minecraft:diamond 4"}'`
   (any server command works this way; it is also how to clear, teleport, set time).
 - `storage list` shows which handles a block exposes. `storage.*` is the generic item/fluid/energy API (handles `vanilla:inventory`, `fabric:item`,

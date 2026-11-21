@@ -112,6 +112,7 @@ object ServerOps : RpcHandlerGroup {
         RpcContext.onServer(server) {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
             val command = p.requireString("command")
+            val showChat = p.getBoolOrFalse("showChat")
             val dim = p.getStringOrNull("dim")?.let {
                 ServerContext.world(server, it)  // validate dim
             }
@@ -135,7 +136,7 @@ object ServerOps : RpcHandlerGroup {
                 }
                 override fun acceptsSuccess(): Boolean = true
                 override fun acceptsFailure(): Boolean = true
-                override fun shouldInformAdmins(): Boolean = true
+                override fun shouldInformAdmins(): Boolean = showChat
             }
             // Vanilla's own entry point (Commands.performCommand) runs the command inside an execution context, which
             // 1.20.3+ needs for /function, /return and macro functions (a bare dispatcher.execute fails them with

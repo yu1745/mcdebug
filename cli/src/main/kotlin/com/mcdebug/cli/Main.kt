@@ -274,15 +274,22 @@ class StatusCmd : CliktCommand(
 
 class RawCmd : CliktCommand(name = "raw", help = "call an arbitrary JSON-RPC method; jsonParams is JSON or @file; params follow the SERVER schema, e.g. {\"pos\":[x,y,z]} (pos is an array, there is no --x/--y/--z here) — check the equivalent subcommand's --help for the schema. gui.stop requires instanceId and sessionToken identity; prefer session stop for normal managed shutdown") {
     val method by argument("method", help = "method name, e.g. world.getBlock")
+    val showChat by option("--show-chat", help = "server.runCommand only: allow vanilla admin feedback in player chat (quiet by default on updated mods)").flag()
     val jsonParams by argument("jsonParams", help = "JSON params object, or @file to read from file").optional()
 
     override fun run() {
         val cli = requireNotNull(currentContext.parent?.command as? McDebugCli)
+        if (showChat && method != "server.runCommand") throw UsageError("--show-chat requires server.runCommand")
         // gui.* 只存在于客户端平面；raw 自动选平面，省掉一层开关。
         withPlaneFor(cli, method) { client ->
             val params = jsonParams?.let { s ->
                 val txt = if (s.startsWith("@")) java.nio.file.Files.readString(java.nio.file.Path.of(s.substring(1))) else s
                 parseJson(txt)
+            }
+            if (showChat) {
+                val commandParams = params as? com.google.gson.JsonObject
+                    ?: throw UsageError("--show-chat requires a JSON params object")
+                commandParams.addProperty("showChat", true)
             }
             val r = client.call(method, params)
             printJson(r)

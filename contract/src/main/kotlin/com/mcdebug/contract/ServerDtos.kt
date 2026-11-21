@@ -26,6 +26,7 @@ data class ListDimensionsResp(
 data class RunCommandReq(
     val command: String,
     val dim: String? = null,
+    val showChat: Boolean = false,
 )
 
 /** server.runCommand 响应。 */
