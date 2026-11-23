@@ -23,7 +23,8 @@ tasks.register('verifyModCoreHasNoGameImports') {
 	def sources = fileTree('mod-core/src/main/kotlin') { include '**/*.kt' }
 	inputs.files sources
 	doLast {
-		def gameReference = java.util.regex.Pattern.compile('net\\.(minecraft|fabricmc|neoforged|minecraftforge)\\.')
+		// com.mojang.*（Brigadier / DFU / blaze3d / authlib）与 org.lwjgl.* 是 Minecraft 的传递依赖，同样禁止。
+		def gameReference = java.util.regex.Pattern.compile('net\\.(minecraft|fabricmc|neoforged|minecraftforge)\\.|com\\.mojang\\.|org\\.lwjgl\\.')
 		def commentPrefixes = ['//', '*', '/*'] as Set
 		def offenders = []
 		sources.files.sort().each { source ->

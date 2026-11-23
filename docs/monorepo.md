@@ -74,11 +74,15 @@ java -jar mcdebug-cli.jar jar --mc 1.21.1 --loader neoforge --output <gameDir>/m
 在 Fabric 版本目录里裸写 `./gradlew build` 会同时执行 `:neoforge:build`（任务名在所有项目中匹配），
 与显式的 `:neoforge:build` 等价。各版本目录下的 `scripts/fabric-smoke.sh`、`scripts/neoforge-smoke.sh`
 启动一次性专用服做冒烟，需要先在仓库根生成 `mcdebug-cli.jar`，并按版本把 `JAVA_HOME` 指向对应 JDK。
+在 `versions/mc26.3` / `versions/mc1.21.1` 自身起托管会话（`session start --project versions/mc<ver>`）要写
+`--task :runClient`：裸 `runClient` 同时匹配 `:neoforge:runClient` 转发任务，后者不接受 `--args`。
 NeoForge 冒烟跑的是版本目录下的 dev 服；仓库所在路径很深时默认的 unix socket 路径会超过 AF_UNIX 上限，
 脚本会自动改用 `/tmp` 下的短路径并经 `MCDEBUG_SOCKET` 传给 dev 服。
 
 `build.sh` 默认只构建根模块；设置 `MCDEBUG_BUILD_VERSIONS=26.3,1.21.1,1.20.1`（或 `all`）时
 再依次构建各版本（JDK 取 `JAVA25_HOME` / `JAVA21_HOME` / `JAVA17_HOME`）并重新打包 CLI。
+`dist/` 里只收本次构建的版本的模组 JAR，并按 Release 命名改名为 `mcdebug-<loader>-<mc>-<version>.jar`
+（26.3 与 1.21.1 的原始文件名相同，直接复制会互相覆盖）。
 
 ## 公共层（第 1 层）约定
 
@@ -128,9 +132,10 @@ NeoForge 冒烟跑的是版本目录下的 dev 服；仓库所在路径很深时
 | `client/render/RenderSchedule.kt` | 自有副本 | 共享 | 共享 | 内容相同，但 1.20.1 位于 `com.mcdebug.client` |
 | `client/render/CaptureGeometry.kt`（自 `Capture.kt` 拆出） | 自有副本 | 共享 | 共享 | 同上；1.20.1 的几何代码仍在其 `Capture.kt` 内 |
 
-根构建的 `check` 带有 `verifyModCoreHasNoGameImports`：`mod-core/` 下任何对 `net.minecraft.*`、
-`net.fabricmc.*`、`net.neoforged.*`、`net.minecraftforge.*` 的引用都会让根 `./gradlew build` 失败，
-规则约定见 `mod-core/README.md`。
+根构建有两道门禁：`verifyModCoreHasNoGameImports`（挂在各 JVM 模块的 `check` 上）扫描 `mod-core/` 下对
+`net.minecraft.*`、`net.fabricmc.*`、`net.neoforged.*`、`net.minecraftforge.*`、`com.mojang.*`、`org.lwjgl.*`
+的引用；不发布的 `:mod-core` 子项目只带 Kotlin 标准库与 Gson 独立编译（`apiVersion = 1.9`），
+同包引用了版本目录里的类也会失败。任一失败都会让根 `./gradlew build` 失败，规则约定见 `mod-core/README.md`。
 
 客户端三个文件不与 1.20.1 共享的原因是**包名**：1.20.1 冻结源码把它们放在扁平的
 `com.mcdebug.client` 包里并由同包其他文件直接引用，迁移到 `input` / `render` 子包需要改写多份
@@ -140,8 +145,9 @@ NeoForge 冒烟跑的是版本目录下的 dev 服；仓库所在路径很深时
 
 - GitHub Release（`release.yml`）在 tag 上构建全部五个模组 JAR 与 CLI，附件按
   `mcdebug-<loader>-<mc>-<version>.jar` 命名并附 `.sha256`。
-- `build.yml` 按改动路径触发：根模块、`contract/`、`mod-core/` 变化只跑纯 JVM job；
-  `versions/mc<ver>/` 变化只跑对应版本的 job。
+- `build.yml` 按改动路径触发：根模块、`contract/`、`mod-core/`、`gradle/`、工作流等共用部分变化时
+  纯 JVM job 与三个版本 job 全部运行；只动 `versions/mc<ver>/` 时只跑对应版本的 job。
+  有版本 job 成功时，`cli-with-mods` 下载它们的工件、按文件名放回 `versions/*/build/libs` 并重新打包 CLI。
 - Maven 仓库（`maven.yml`）暂存全部构件：纯 JVM 的 `mcdebug-contract` / `mcdebug-sdk` / `mcdebug-testkit`，
   以及每个 `<mc, loader>` 的预编译模组 JAR `mcdebug-mod-<mc>-<loader>`（与 Release 文件名一一对应）；
   旧坐标 `mcdebug-neoforge` 作为 26.3 NeoForge 代理的兼容别名保留。构件清单只在 `frontend/build.gradle`

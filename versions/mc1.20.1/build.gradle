@@ -142,9 +142,6 @@ processResources {
 	filesMatching('META-INF/mods.toml') { expand 'version': project.version }
 }
 
-// ForgeGradle adds `--gameDir .` itself; mdb's session launcher appends its own `--gameDir`, and
-// ModLauncher rejects the duplicate. Drop FG's copy when both are present.
-
 // The shippable jar is the jarJar one (bundles MixinExtras, which Forge 1.20.1 does not provide).
 tasks.named('jarJar') {
 	archiveClassifier = ''

@@ -157,16 +157,18 @@ jobs:
       - name: place mod jars where cli/build.gradle scans
         run: |
           set -euo pipefail
-          for v in 26.3 1.21.1; do
+          # upload-artifact 以各路径的最近公共祖先为根：26.3 / 1.21.1 的工件里是 build/libs/ 与
+          # neoforge/build/libs/ 两层子目录，1.20.1 则直接是 jar。按文件名放回，不依赖工件内的目录形状。
+          for v in 26.3 1.21.1 1.20.1; do
             d="downloaded/$v"; [[ -d "$d" ]] || continue
             mkdir -p "versions/mc$v/build/libs" "versions/mc$v/neoforge/build/libs"
-            mv "$d"/mcdebug-neoforge-*.jar "versions/mc$v/neoforge/build/libs/"
-            mv "$d"/mcdebug-*.jar "versions/mc$v/build/libs/"
+            while IFS= read -r -d '' jar; do
+              case "$(basename "$jar")" in
+                mcdebug-neoforge-*.jar) mv "$jar" "versions/mc$v/neoforge/build/libs/" ;;
+                *)                      mv "$jar" "versions/mc$v/build/libs/" ;;
+              esac
+            done < <(find "$d" -type f -name 'mcdebug-*.jar' -print0)
           done
-          if [[ -d downloaded/1.20.1 ]]; then
-            mkdir -p versions/mc1.20.1/build/libs
-            mv downloaded/1.20.1/mcdebug-forge-*.jar versions/mc1.20.1/build/libs/
-          fi
           find versions -path '*/build/libs/*.jar' | sort
       - name: rebuild the CLI with every built mod jar
         run: |

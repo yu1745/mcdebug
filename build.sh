@@ -17,6 +17,7 @@
 #       然后重新打包 CLI 把这些模组 JAR 内嵌进去。各版本需要的 JDK：26.3→25，1.21.1→21，
 #       1.20.1→17；依次取 JAVA25_HOME / JAVA21_HOME / JAVA17_HOME，未设置时回退
 #       /usr/lib/jvm/java-<N>-openjdk-amd64。不设置时只构建根模块，不触发任何 Minecraft 构建。
+#       收集到 <out>/ 的模组 JAR 改名为 mcdebug-<loader>-<mc>-<version>.jar（与 Release 一致）。
 # ═══════════════════════════════════════════════════════════════════════
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -74,9 +75,27 @@ fi
 rm -rf "$OUT"
 mkdir -p "$OUT"
 
-# 收集产物 jar：排除 sources/dev/slim 件（slim 是 Forge 未打 MixinExtras 的中间件）；其余（含 shadow/-all）都收
+# 收集产物 jar：排除 sources/dev/slim 件（slim 是 Forge 未打 MixinExtras 的中间件）；其余（含 shadow/-all）都收。
+# 26.3 与 1.21.1 的模组 JAR 同名（mcdebug-<v>.jar / mcdebug-neoforge-<v>.jar），直接 cp 会互相覆盖：
+# versions/ 下的模组 JAR 按 Release 的命名改名为 mcdebug-<loader>-<mc>-<version>.jar。
+# 只收本次构建的版本，避免把以前构建遗留在 versions/*/build/libs 的旧 JAR 混进产物。
+built_lines=",${requested:-},"
 find . -path '*/build/libs/*.jar' ! -name '*-sources.jar' ! -name '*-dev.jar' ! -name '*-slim.jar' -print0 \
-  | while IFS= read -r -d '' j; do cp "$j" "$OUT/"; done
+  | while IFS= read -r -d '' j; do
+      case "$j" in
+        ./versions/mc*/build/libs/*)
+          rel="${j#./versions/mc}"; line="${rel%%/*}"
+          [[ "$built_lines" == *",$line,"* ]] || continue
+          name="$(basename "$j" .jar)"
+          case "$name" in
+            mcdebug-neoforge-*) loader=neoforge; ver="${name#mcdebug-neoforge-}" ;;
+            mcdebug-forge-*)    loader=forge;    ver="${name#mcdebug-forge-}" ;;
+            *)                  loader=fabric;   ver="${name#mcdebug-}" ;;
+          esac
+          cp "$j" "$OUT/mcdebug-$loader-$line-$ver.jar" ;;
+        *) cp "$j" "$OUT/" ;;
+      esac
+    done
 
 # 可选过滤：build-jars.txt 每行一个 glob，只保留匹配的 jar
 if [ -f build-jars.txt ]; then

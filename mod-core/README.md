@@ -1,7 +1,8 @@
 # mod-core
 
-三个 Minecraft 版本**源码级共享**的纯 Kotlin 文件：零 `net.minecraft.*` / 加载器传递依赖，不是 Gradle
-项目，不发 JAR。各版本构建按相对路径把它编进自己的模组 JAR（`srcDir` 或 `Sync`），所以发布 JAR 仍是
+三个 Minecraft 版本**源码级共享**的纯 Kotlin 文件：零 `net.minecraft.*` / 加载器传递依赖，不发 JAR。
+根构建把它作为不发布的 `:mod-core` 子项目**独立编译**一次（只有 Kotlin 标准库与 Gson 2.10.1，`apiVersion = 1.9`），
+作为门禁：引用了 Minecraft、加载器或某个版本目录里的类就编不过。各版本构建按相对路径把它编进自己的模组 JAR（`srcDir` 或 `Sync`），所以发布 JAR 仍是
 自包含的。共享范围的逐文件比对与原因见 [docs/monorepo.md](../docs/monorepo.md)。
 
 | 文件 | 共享范围 |

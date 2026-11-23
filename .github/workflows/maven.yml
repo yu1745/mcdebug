@@ -6,7 +6,7 @@ on:
   push:
     branches: ['26.3']
     # maven_version 是是否发布的唯一开关；已发布的版本会被下面的不可变检查跳过。
-    paths: ['gradle.properties', 'frontend/', '.github/workflows/maven.yml']
+    paths: ['gradle.properties', 'frontend/**', 'gradle/maven-publishing.gradle', '.github/workflows/maven.yml']
   workflow_dispatch:
 
 permissions:

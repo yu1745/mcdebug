@@ -1,0 +1,29 @@
+plugins {
+	id 'org.jetbrains.kotlin.jvm' version "${kotlin_version}"
+}
+
+// 只做“独立可编译”门禁，不发布、不被任何项目依赖：mod-core 仍以源码形式由各版本构建 srcDir / Sync 引入。
+// 能在这里单独编译 = 没有引用 Minecraft、加载器或某个版本目录里的类（文本扫描
+// verifyModCoreHasNoGameImports 抓不到同包引用与 com.mojang.* 之类的传递依赖）。
+// 依赖面与最旧的目标一致：Gson 取 MC 1.20.1 自带的 2.10.1，标准库 API 锁 1.9（KotlinForForge 4.x）。
+dependencies {
+	compileOnly 'com.google.code.gson:gson:2.10.1'
+}
+
+java {
+	sourceCompatibility = JavaVersion.VERSION_17
+	targetCompatibility = JavaVersion.VERSION_17
+}
+
+kotlin {
+	jvmToolchain(25)
+	compilerOptions {
+		jvmTarget = org.jetbrains.kotlin.gradle.dsl.JvmTarget.JVM_17
+		apiVersion = org.jetbrains.kotlin.gradle.dsl.KotlinVersion.KOTLIN_1_9
+		// 1.9 API 是刻意锁定的（见上），不要让“已弃用”提示破坏 0 warning 的门禁。
+		freeCompilerArgs.add('-Xsuppress-version-warnings')
+	}
+}
+
+// 不产出构件：编译通过即门禁通过。
+tasks.named('jar') { enabled = false }

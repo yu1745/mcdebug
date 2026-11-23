@@ -13,3 +13,5 @@ include 'contract'
 include 'sdk'
 include 'testkit'
 include 'cli'
+// mod-core 不发布：只在这里独立编译一次，证明它不依赖 Minecraft / 加载器 / 版本目录里的类。
+include 'mod-core'
