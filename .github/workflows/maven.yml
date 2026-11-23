@@ -4,7 +4,7 @@ name: publish Maven repository
 # <mc, loader> 的预编译模组 JAR 到 GitHub `maven` 分支。构件清单只在 frontend/build.gradle 维护。
 on:
   push:
-    branches: ['26.3']
+    branches: ['main']
     # maven_version 是是否发布的唯一开关；已发布的版本会被下面的不可变检查跳过。
     paths: ['gradle.properties', 'frontend/**', 'gradle/maven-publishing.gradle', '.github/workflows/maven.yml']
   workflow_dispatch:

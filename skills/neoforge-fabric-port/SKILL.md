@@ -40,7 +40,7 @@ description: 基于已知源码，将 Minecraft 1.21.x NeoForge 模组自动移�
 - 已移植范围、这轮要接通的用户行为、非目标、允许的平台差异和验收证据。
 - 实际构建任务、源码集、资源生成方式、运行目录、测试存档与显示环境。
 
-mdb 已验证的双加载器环境是 **Minecraft 1.21.1 / NeoForge 21.1.x / Fabric**；其他 1.21.x 小版本先核实工具及依赖支持，不把 1.21.1 的成功外推为全系列兼容。
+mdb 已验证的环境覆盖 **Minecraft 26.3 与 1.21.1（Fabric / NeoForge）以及 1.20.1（Forge）**；其他小版本先核实工具及依赖支持，不把已验证版本的成功外推为全系列兼容。
 
 缺少影响路线的输入时先澄清；不把未授权的功能删减、依赖替换或数据迁移当成默认决定。源码和生产数据分离：只在隔离开发环境操作，参考源码保持只读，原始存档先离线复制。不部署、不推送、不修改真实玩家世界。
 
@@ -96,7 +96,7 @@ mdb 已验证的双加载器环境是 **Minecraft 1.21.1 / NeoForge 21.1.x / Fab
 
 加载可用的 mdb 操作技能，并读本机 `mdb --help` 及相关子命令 `--help`。参数以实际版本为准，不猜 RPC 字段。没有 native `mdb` 时用同版本 CLI JAR，后文 `mdb` 代表选定的命令。
 
-- CLI 与游戏中的调试工具版本匹配。通过 `mdb jar --loader fabric|neoforge --output <gameDir>/mods` 安装对应工具 JAR；首次启动前按 JAR 元数据补齐语言适配器与加载器依赖，避免重复版本。
+- CLI 与游戏中的调试工具版本匹配（`v0.9.0+` 单仓多版本 CLI 支持 `mdb jar --list` 查看内嵌组合）。通过 `mdb jar --mc <26.3|1.21.1|1.20.1> --loader <fabric|neoforge|forge> --output <gameDir>/mods` 安装对应工具 JAR（写出 `mcdebug-<loader>-<mc>-<version>.jar`，写入目录时会自动清理旧版与其他加载器/版本的 `mcdebug-*.jar`）。Fabric 与 NeoForge 版已内嵌 Kotlin 标准库无需额外语言适配器；仅 1.20.1 Forge 需要 KotlinForForge 4.x。
 - 工具 JAR 放在**被移植项目/参考消费者项目**的 `mods/`，不放到调试工具自己的开发类路径注入目录；不进入目标模组的发布依赖。
 - 目标端与参考端使用不同会话、gameDir、存档副本和端点；资源不足时顺序运行。不让两个进程打开同一存档。
 - 隔离运行须显式指定本轮 `--sessions-dir`；注册表和启动日志不属于 gameDir，省略它会写默认用户目录。start、路由命令和 stop 使用同一注册表（或同一 `MCDEBUG_SESSIONS_DIR` 环境）。
@@ -104,7 +104,7 @@ mdb 已验证的双加载器环境是 **Minecraft 1.21.1 / NeoForge 21.1.x / Fab
 - 会话后端需要可用的 Gradle 包装器和 `runClient`。NeoForge 的启动参数交给会话适配，不手工用 `--args` 覆盖其启动参数文件。
 - 截图需要真实客户端、可用显示服务和 GL；只有专用服务器拿不到像素。无显示环境时记录阻塞，不用数据 JSON 冒充视觉验收。
 - 启动前显式选择并验证显示（如 `glxinfo -B` 看渲染器与 direct rendering），优先硬件加速；代理 shell 继承的 `DISPLAY` 可能不可用。软件渲染得到的截图不能充当视觉基线，证据里记录所用显示。
-- **截图前关闭原版遮挡提示**：每个测试 gameDir 启动前将 `options.txt` 的 `tutorialStep` 设为 `none`，避免新世界的 WASD/鼠标教程；已启动时用客户端原生 `Minecraft.getInstance().getTutorial().setStep(TutorialSteps.NONE)` 立即关闭并保存。每次连接本地离线测试服后，用客户端原生 `SystemToast.forceHide(Minecraft.getInstance().getToasts(), SystemToast.SystemToastId.UNSECURE_SERVER_WARNING)` 定点关闭“不安全聊天 / original message”提示。通过 mdb 客户端反射调用即可；`demand`/`gui-only` 下不要靠等待其自动消失。随后强制新帧并读图确认 GUI 无遮挡，不通过裁图、隐藏整个 HUD 或修改发布模组来掩盖这些测试环境提示。
+- **截图前关闭原版遮挡提示**：每个测试 gameDir 启动前将 `options.txt` 的 `tutorialStep` 设为 `none`，避免新世界的 WASD/鼠标教程；已启动时用客户端原生 `Minecraft.getInstance().getTutorial().setStep(TutorialSteps.NONE)` 立即关闭并保存。26.3 / 1.21.1 的托管会话默认隐藏提示弹窗（可用 `mdb --session NAME gui toasts on|off` 切换，或 `session start --show-toasts` 开启）；在不支持 `gui.toasts` 的旧版本或非托管客户端连接本地离线测试服后，再通过 mdb 客户端反射调用 `SystemToast.forceHide(Minecraft.getInstance().getToasts(), SystemToast.SystemToastId.UNSECURE_SERVER_WARNING)` 定点关闭“不安全聊天 / original message”提示，`demand`/`gui-only` 下不要靠等待其自动消失。随后强制新帧并读图确认 GUI 无遮挡，不通过裁图、隐藏整个 HUD 或修改发布模组来掩盖这些测试环境提示。
 
 - **新区块的世界截图需要地形渲染预热**：传送或首次加载区块后，`demand` 下少量截图帧可能只画出天空、粒子或实体，地形网格仍在编译/上传；不能据此判定方块模型缺失，也不能把服务端生成计数当视觉通过。必要时临时恢复连续正常渲染，确认客户端区块已收到、网格队列完成并读图看到实际地形，再采证；结束恢复原渲染策略。GUI 截图与世界地形截图分别核实。
 

@@ -26,7 +26,7 @@ mcdebug 是通过 Unix 套接字提供 JSON-RPC 的模组，一个 JAR 同时包
 `gui hotswap` 另需完整 JDK。选择游戏内模组的版本，即 `status` 中的 `modVersion`，或最新发布版本：
 
 ```bash
-V=0.6.3   # 最新版本见 gh release list -R yu1745/mcdebug -L 1 或 GitHub 发布页面
+V=0.9.0   # 最新版本见 gh release list -R yu1745/mcdebug -L 1 或 GitHub 发布页面
 D="${XDG_DATA_HOME:-$HOME/.local/share}/mcdebug/$V"
 U="https://github.com/yu1745/mcdebug/releases/download/v$V"
 mkdir -p "$D" "$HOME/.local/bin"

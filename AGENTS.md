@@ -293,7 +293,7 @@ node scripts/set-version.mjs X.Y.Z
 □ java -jar mcdebug-cli.jar --version  ← 必须输出 X.Y.Z
 □ git commit -m "vX.Y.Z: ..."
 □ git tag -a vX.Y.Z -m "..."   ← 这段 message 会成为 Release 说明（release.yml 用 --notes-from-tag），写清这一版装哪个 jar
-□ git push origin <活跃分支> && git push origin vX.Y.Z
+□ git push origin main && git push origin vX.Y.Z
 □ Release 页有 mcdebug-fabric-26.3-X.Y.Z.jar / mcdebug-neoforge-26.3-X.Y.Z.jar / mcdebug-fabric-1.21.1-X.Y.Z.jar / mcdebug-neoforge-1.21.1-X.Y.Z.jar / mcdebug-forge-1.20.1-X.Y.Z.jar / mcdebug-cli.jar 及各自 .sha256（release.yml 生成；tag 与 mod_version 不符会失败）
 ```
 

@@ -25,7 +25,9 @@ async function updateText(relativePath, updater) {
 }
 
 await updateText('gradle.properties', (text) =>
-  text.replace(/^mod_version=.*$/m, `mod_version=${version}`),
+  text
+    .replace(/^mod_version=.*$/m, `mod_version=${version}`)
+    .replace(/^maven_version=.*$/m, `maven_version=${version}`),
 );
 
 console.log(`mcdebug version set to ${version}`);

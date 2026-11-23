@@ -16,7 +16,7 @@ publishing {
             licenses {
                 license {
                     name = 'CC0 1.0 Universal'
-                    url = 'https://github.com/yu1745/mcdebug/blob/26.3/LICENSE'
+                    url = 'https://github.com/yu1745/mcdebug/blob/main/LICENSE'
                 }
             }
             scm {
