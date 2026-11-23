@@ -14,3 +14,35 @@ allprojects {
 		mavenCentral()
 	}
 }
+
+// mod-core 被三个版本直接编进各自的模组 JAR，必须保持零 Minecraft / 加载器依赖：
+// 任何游戏侧引用都会让某个版本编不过，或让发布 JAR 悄悄多出不该有的依赖。
+tasks.register('verifyModCoreHasNoGameImports') {
+	group = 'verification'
+	description = 'Fail when mod-core references Minecraft or mod-loader classes'
+	def sources = fileTree('mod-core/src/main/kotlin') { include '**/*.kt' }
+	inputs.files sources
+	doLast {
+		def gameReference = java.util.regex.Pattern.compile('net\\.(minecraft|fabricmc|neoforged|minecraftforge)\\.')
+		def commentPrefixes = ['//', '*', '/*'] as Set
+		def offenders = []
+		sources.files.sort().each { source ->
+			source.readLines('UTF-8').eachWithIndex { line, index ->
+				def code = line.trim()
+				if (!commentPrefixes.any { code.startsWith(it) } && gameReference.matcher(code).find()) {
+					offenders << "${source.name}:${index + 1}: ${line.trim()}"
+				}
+			}
+		}
+		if (!offenders.isEmpty()) {
+			throw new GradleException("mod-core must stay free of Minecraft/loader references:\n" + offenders.join('\n'))
+		}
+		logger.lifecycle("verifyModCoreHasNoGameImports: ${sources.files.size()} Kotlin files under mod-core/, none references Minecraft or a loader")
+	}
+}
+
+// 根项目没有 check 任务（不产出构件）：挂到各 JVM 模块的 check 上，`./gradlew build` 即会执行。
+// 根脚本先于子项目求值，所以用按名字惰性匹配的 matching/configureEach，而不是 tasks.named。
+subprojects {
+	tasks.matching { it.name == 'check' }.configureEach { dependsOn rootProject.tasks.named('verifyModCoreHasNoGameImports') }
+}

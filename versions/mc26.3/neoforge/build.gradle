@@ -60,6 +60,8 @@ tasks.register('syncShared', Sync) {
 	}
 	// 契约是仓库根的纯 JVM 模块（三个 Minecraft 版本共用的方法并集），按相对路径编进来。
 	from('../../../contract/src/main/kotlin')
+	// mod-core：零 MC / 加载器依赖的共享源码，与 Fabric 版本编进同一个 jar。
+	from('../../../mod-core/src/main/kotlin')
 	into sharedDir
 }
 sourceSets.main.kotlin.srcDir(sharedDir)

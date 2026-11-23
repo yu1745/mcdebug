@@ -74,6 +74,8 @@ java -jar mcdebug-cli.jar jar --mc 1.21.1 --loader neoforge --output <gameDir>/m
 在 Fabric 版本目录里裸写 `./gradlew build` 会同时执行 `:neoforge:build`（任务名在所有项目中匹配），
 与显式的 `:neoforge:build` 等价。各版本目录下的 `scripts/fabric-smoke.sh`、`scripts/neoforge-smoke.sh`
 启动一次性专用服做冒烟，需要先在仓库根生成 `mcdebug-cli.jar`，并按版本把 `JAVA_HOME` 指向对应 JDK。
+NeoForge 冒烟跑的是版本目录下的 dev 服；仓库所在路径很深时默认的 unix socket 路径会超过 AF_UNIX 上限，
+脚本会自动改用 `/tmp` 下的短路径并经 `MCDEBUG_SOCKET` 传给 dev 服。
 
 `build.sh` 默认只构建根模块；设置 `MCDEBUG_BUILD_VERSIONS=26.3,1.21.1,1.20.1`（或 `all`）时
 再依次构建各版本（JDK 取 `JAVA25_HOME` / `JAVA21_HOME` / `JAVA17_HOME`）并重新打包 CLI。
@@ -125,6 +127,10 @@ java -jar mcdebug-cli.jar jar --mc 1.21.1 --loader neoforge --output <gameDir>/m
 | `client/input/GuiInputState.kt` | 自有副本 | 共享 | 共享 | 1.20.1 在扁平包 `com.mcdebug.client` 且缺 `held` 修饰键 |
 | `client/render/RenderSchedule.kt` | 自有副本 | 共享 | 共享 | 内容相同，但 1.20.1 位于 `com.mcdebug.client` |
 | `client/render/CaptureGeometry.kt`（自 `Capture.kt` 拆出） | 自有副本 | 共享 | 共享 | 同上；1.20.1 的几何代码仍在其 `Capture.kt` 内 |
+
+根构建的 `check` 带有 `verifyModCoreHasNoGameImports`：`mod-core/` 下任何对 `net.minecraft.*`、
+`net.fabricmc.*`、`net.neoforged.*`、`net.minecraftforge.*` 的引用都会让根 `./gradlew build` 失败，
+规则约定见 `mod-core/README.md`。
 
 客户端三个文件不与 1.20.1 共享的原因是**包名**：1.20.1 冻结源码把它们放在扁平的
 `com.mcdebug.client` 包里并由同包其他文件直接引用，迁移到 `input` / `render` 子包需要改写多份

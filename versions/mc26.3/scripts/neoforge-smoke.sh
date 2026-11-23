@@ -22,6 +22,15 @@ JAVA="${JAVA_HOME:+$JAVA_HOME/bin/}java"   # CLI 用 JAVA_HOME 指定的 JDK（d
 NEO_DIR="$ROOT/neoforge"
 RUN_DIR="$NEO_DIR/run"
 SOCK="$RUN_DIR/mcdebug/socket"
+# AF_UNIX 路径上限约 107 字节：仓库所在目录很深时默认路径绑不上（模组只 WARN 并回退成只有 TCP），
+# 冒烟等不到 socket。这里改用短路径，并经 MCDEBUG_SOCKET 告诉 dev 服（环境变量会穿过 Gradle daemon）。
+sock_bytes=${#SOCK}
+if (( sock_bytes >= 100 )); then
+  MCDEBUG_SOCKET=$(mktemp -u "${TMPDIR:-/tmp}/mcdebug-neoforge-smoke.XXXXXX")
+  export MCDEBUG_SOCKET
+  SOCK="$MCDEBUG_SOCKET"
+  echo "neoforge-smoke: default socket path is ${sock_bytes} bytes (too long for AF_UNIX); using $SOCK" >&2
+fi
 LOG="$RUN_DIR/server-smoke.log"
 CLI_JAR="$REPO/mcdebug-cli.jar"
 KEEP=${MCDEBUG_SMOKE_KEEP:-0}

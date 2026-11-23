@@ -13,7 +13,7 @@
 - `mod_version` / `maven_group` / `kotlin_version` 只在根 `gradle.properties` 定义一次；各版本目录的 `gradle.properties` 只放本版本专属属性。Kotlin 插件版本由各 `settings.gradle` 的 `pluginManagement.resolutionStrategy.eachPlugin` 从根读取（`plugins {}` 块读不到别的文件）。
 - 契约源码（`../../contract/src/main/kotlin`）与 `mod-core/` 的共享源码按相对路径编进每个模组 JAR，**不要**给版本构建加 `implementation project(':contract')` 之类的依赖。模组 JAR 必须自包含，五个构建各有一份 `verifyJarSelfContained`。
 - `contract/Methods.kt` 是三个版本的**并集**：只落在部分版本的方法要在 `Methods.MISSING_BY_MC_VERSION` 登记缺席的版本。各版本的 `RpcContractTest`、客户端启动自检与 `scripts/contract-parity.py --mc` 都按 `Methods.serverMethods/clientMethods/all(McDebug.MC_VERSION_LINE)` 校验子集。
-- `mod-core/src/main/kotlin` 只放零 MC / 加载器依赖的纯 Kotlin 文件，由各版本 `srcDir` / `Sync` 引入，不发 JAR；新增前先确认目标版本内容一致且 `apiVersion = '1.9'` 可编译（1.20.1 只共享与其逐字节相同的文件）。
+- `mod-core/src/main/kotlin` 只放零 MC / 加载器依赖的纯 Kotlin 文件，由各版本 `srcDir` / `Sync` 引入，不发 JAR；新增前先确认目标版本内容一致且 `apiVersion = '1.9'` 可编译（1.20.1 只共享与其逐字节相同的文件）。根 `check` 的 `verifyModCoreHasNoGameImports` 会拒绝其中任何 `net.minecraft.*` / 加载器引用。
 - **1.20.1 是冻结线**：源码是 1.20.1 分支就地改写后的快照，只保留 Forge 形态，不回合并到 1.21.1 / 26.3；除构建脚本与契约子集适配外不要改写它。
 - CLI（`cli/build.gradle`）只内嵌 `versions/*/build/libs` 中**已存在**的模组 JAR（`META-INF/mcdebug/<mc>/<loader>.jar`，`-PembedVersions` 可限定），**不触发**任何 Minecraft 构建。`mcdebug jar` 写出 `mcdebug-<loader>-<mc>-<version>.jar`，并清理 mods 目录中任何命名的旧 mcdebug JAR。
 - 旧消费者别名：`sdk` 里的 `com.mcdebug.cli` / `com.mcdebug.cli.session` 包保留 `@Deprecated` typealias，只为 1.21.1 之前的 Kotlin 消费者提供源码兼容；新代码一律用 `com.mcdebug.sdk`。

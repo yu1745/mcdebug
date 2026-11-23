@@ -42,6 +42,9 @@ sourceSets {
 		// mod keeps one source of truth and zero runtime dependencies.
 		// 契约是仓库根的纯 JVM 模块（三个 Minecraft 版本共用的方法并集），按相对路径编进来。
 		kotlin.srcDir rootProject.file('../../contract/src/main/kotlin')
+		// mod-core：零 MC / 加载器依赖的共享源码（RPC 基础类型、谓词 DSL、输入状态、渲染调度、截图几何），
+		// 由 1.21.1 与 26.3 共用；不是 Gradle 项目，不发 JAR，直接作为源码目录编进来。
+		kotlin.srcDir rootProject.file('../../mod-core/src/main/kotlin')
 	}
 }
 

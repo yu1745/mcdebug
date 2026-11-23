@@ -27,10 +27,21 @@ sourceSets {
 	main {
 		kotlin.srcDir 'src/client/kotlin'
 		kotlin.srcDir '../../contract/src/main/kotlin'
+		// mod-core 里只有下面三个 rpc 文件与本冻结线逐字节相同；其余文件在 1.20.1 有自己的副本
+		// （包名或内容不同，见 docs/monorepo.md），所以只同步这三个，而不是引入整棵树。
+		kotlin.srcDir layout.buildDirectory.dir('generated/mod-core')
 	}
 	devtest { compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
 		runtimeClasspath += sourceSets.main.output } }
 configurations { devtestImplementation.extendsFrom implementation }
+
+tasks.register('syncModCore', Sync) {
+	from('../../mod-core/src/main/kotlin') {
+		include 'com/mcdebug/rpc/JsonRpc.kt', 'com/mcdebug/rpc/RpcErrors.kt', 'com/mcdebug/rpc/RpcEnv.kt'
+	}
+	into layout.buildDirectory.dir('generated/mod-core')
+}
+tasks.named('compileKotlin') { dependsOn 'syncModCore' }
 
 mixin {
 	add sourceSets.main, 'mcdebug.refmap.json'
