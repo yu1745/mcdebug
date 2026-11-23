@@ -1,0 +1,102 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "com.mcdebug",
+    "module": "mcdebug-contract",
+    "version": "0.9.0",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.6.0"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.3.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "mcdebug-contract-0.9.0.jar",
+          "url": "mcdebug-contract-0.9.0.jar",
+          "size": 20503,
+          "sha512": "8de678c94704110fe07e15ca819b153cfb0bfd30dee64cd499dfdc2862115580ea1542beb6859031995b5d5034c86f70c645f2239bfe9f7789042e948b8602e6",
+          "sha256": "61cfc75393366e64888b80e7d900aa99147253e74fb6119b18a5d97c4e4c97fe",
+          "sha1": "3c2b29dc5031dde0b0a7efb37708f0839727b520",
+          "md5": "af1a2a2e4ef9d1f192126b33bb377bd7"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.3.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "mcdebug-contract-0.9.0.jar",
+          "url": "mcdebug-contract-0.9.0.jar",
+          "size": 20503,
+          "sha512": "8de678c94704110fe07e15ca819b153cfb0bfd30dee64cd499dfdc2862115580ea1542beb6859031995b5d5034c86f70c645f2239bfe9f7789042e948b8602e6",
+          "sha256": "61cfc75393366e64888b80e7d900aa99147253e74fb6119b18a5d97c4e4c97fe",
+          "sha1": "3c2b29dc5031dde0b0a7efb37708f0839727b520",
+          "md5": "af1a2a2e4ef9d1f192126b33bb377bd7"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "mcdebug-contract-0.9.0-sources.jar",
+          "url": "mcdebug-contract-0.9.0-sources.jar",
+          "size": 5411,
+          "sha512": "7b08960dedf735108295bae69be2dda5a0c4d94d13fdd7e8c745a5b1a5f1d3d67f55d4d5445028ea13d1e04ef9e3e86dbda39ede138ed6812dfd50fbc6d18637",
+          "sha256": "04ff1aec75e07b7275c604a3d19026a52742b3b41f9a665a120c4b217e8e9f6b",
+          "sha1": "ebdeaa47d1cd3171c3d6ca5bbe1d6a14d246237f",
+          "md5": "68e5c29dcb6db7e47fe55bfb22bdb36c"
+        }
+      ]
+    }
+  ]
+}

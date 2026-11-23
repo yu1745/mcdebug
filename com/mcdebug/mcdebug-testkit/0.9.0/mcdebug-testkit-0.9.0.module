@@ -1,0 +1,130 @@
+{
+  "formatVersion": "1.1",
+  "component": {
+    "group": "com.mcdebug",
+    "module": "mcdebug-testkit",
+    "version": "0.9.0",
+    "attributes": {
+      "org.gradle.status": "release"
+    }
+  },
+  "createdBy": {
+    "gradle": {
+      "version": "9.6.0"
+    }
+  },
+  "variants": [
+    {
+      "name": "apiElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-api",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "com.mcdebug",
+          "module": "mcdebug-sdk",
+          "version": {
+            "requires": "0.9.0"
+          }
+        },
+        {
+          "group": "org.junit.jupiter",
+          "module": "junit-jupiter-api",
+          "version": {
+            "requires": "5.10.2"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.3.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "mcdebug-testkit-0.9.0.jar",
+          "url": "mcdebug-testkit-0.9.0.jar",
+          "size": 43548,
+          "sha512": "4595987ec67ad473fa3e7c59b753beee1b720ea9e7c591d68924ca6b839b81d8f4e9ea6416d07a46fe1e797cd26deb8743ce7ef1730ddc71880e65268728d8e4",
+          "sha256": "a4ade151ef9b6bb173dd95868559e671237237df4443fbab51ed4843510b92ae",
+          "sha1": "9758865cb6048ca531cceece93b8e12ba04b8c12",
+          "md5": "fe8c770da6870b204126310092fe3309"
+        }
+      ]
+    },
+    {
+      "name": "runtimeElements",
+      "attributes": {
+        "org.gradle.category": "library",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.jvm.environment": "standard-jvm",
+        "org.gradle.jvm.version": 17,
+        "org.gradle.libraryelements": "jar",
+        "org.gradle.usage": "java-runtime",
+        "org.jetbrains.kotlin.platform.type": "jvm"
+      },
+      "dependencies": [
+        {
+          "group": "com.mcdebug",
+          "module": "mcdebug-sdk",
+          "version": {
+            "requires": "0.9.0"
+          }
+        },
+        {
+          "group": "org.junit.jupiter",
+          "module": "junit-jupiter-api",
+          "version": {
+            "requires": "5.10.2"
+          }
+        },
+        {
+          "group": "org.jetbrains.kotlin",
+          "module": "kotlin-stdlib",
+          "version": {
+            "requires": "2.3.10"
+          }
+        }
+      ],
+      "files": [
+        {
+          "name": "mcdebug-testkit-0.9.0.jar",
+          "url": "mcdebug-testkit-0.9.0.jar",
+          "size": 43548,
+          "sha512": "4595987ec67ad473fa3e7c59b753beee1b720ea9e7c591d68924ca6b839b81d8f4e9ea6416d07a46fe1e797cd26deb8743ce7ef1730ddc71880e65268728d8e4",
+          "sha256": "a4ade151ef9b6bb173dd95868559e671237237df4443fbab51ed4843510b92ae",
+          "sha1": "9758865cb6048ca531cceece93b8e12ba04b8c12",
+          "md5": "fe8c770da6870b204126310092fe3309"
+        }
+      ]
+    },
+    {
+      "name": "sourcesElements",
+      "attributes": {
+        "org.gradle.category": "documentation",
+        "org.gradle.dependency.bundling": "external",
+        "org.gradle.docstype": "sources",
+        "org.gradle.usage": "java-runtime"
+      },
+      "files": [
+        {
+          "name": "mcdebug-testkit-0.9.0-sources.jar",
+          "url": "mcdebug-testkit-0.9.0-sources.jar",
+          "size": 12559,
+          "sha512": "057d5222b750419910566984ef27222e5cc98e55840df3ebd3f23af72a5d38970dc7f77725540b20b50cab40a9a6651c20b83b9990dfacca56c06d1b24eb0a99",
+          "sha256": "c45d6b262d63424e8fc791b47d688eb08afae0df6d3ab9ff19ecbfd88b0ce41a",
+          "sha1": "2766bd186215367818f6c67cddfbf3647c30c0b3",
+          "md5": "04ec4d20449795a7f695884a6760ad43"
+        }
+      ]
+    }
+  ]
+}

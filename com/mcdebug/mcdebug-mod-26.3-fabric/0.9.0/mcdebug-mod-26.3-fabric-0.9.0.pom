@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd" xmlns="http://maven.apache.org/POM/4.0.0"
+    xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.mcdebug</groupId>
+  <artifactId>mcdebug-mod-26.3-fabric</artifactId>
+  <version>0.9.0</version>
+  <name>mcdebug-mod-26.3-fabric</name>
+  <description>Minecraft debugging and client integration tests over JSON-RPC</description>
+  <url>https://github.com/yu1745/mcdebug</url>
+  <licenses>
+    <license>
+      <name>CC0 1.0 Universal</name>
+      <url>https://github.com/yu1745/mcdebug/blob/main/LICENSE</url>
+    </license>
+  </licenses>
+  <scm>
+    <connection>scm:git:https://github.com/yu1745/mcdebug.git</connection>
+    <url>https://github.com/yu1745/mcdebug</url>
+  </scm>
+</project>
