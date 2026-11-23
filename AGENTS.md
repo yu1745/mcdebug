@@ -2,20 +2,35 @@
 
 仓库说明文档、示例说明与技能正文统一使用中文。命令、API、类名、字段、路径、版本号和原始输出保留原文；示例中的解释性注释使用中文。翻译标题时同步更新引用它的章节链接。
 
-## 26.3 分支说明（优先于下文保留的 1.21 开发指南）
+## 单仓多版本结构（优先于下文保留的 1.21 开发指南）
 
-- 基线为原生 `1.21.1` 分支 `72a70c2`，工作树 `../mcdebug-wt-263`；本分支只编译 Minecraft 26.3，不在源码内添加旧版条件分支。
-- JDK 25、Gradle 9.6.0、非 remap Loom 1.17.21；Fabric Loader 0.20.1 / API 0.166.2+26.3；NeoForge 26.3.0.103 / MDG 2.0.148。
+完整记录（目录、构建矩阵、共享范围、验证命令）在 `docs/monorepo.md`；这里是开发时必须遵守的要点。
+
+- **根 Gradle 只管理纯 JVM 模块**（`contract` / `sdk` / `testkit` / `cli`），不加载 Loom / ModDevGradle / ForgeGradle，产物为 Java 17 字节码。Minecraft 构建一律在 `versions/` 下，各自有独立的 `gradlew`、`gradle.properties` 与 JDK：
+  - `versions/mc26.3/`：JDK 25、Gradle 9.6.0，Fabric（非 remap Loom 1.17.21）+ `neoforge/`（26.3.0.103 / MDG 2.0.148）
+  - `versions/mc1.21.1/`：JDK 21、Gradle 9.4.1，Fabric（Loom 1.15-SNAPSHOT，生产为 intermediary）+ `neoforge/`（21.1.265）
+  - `versions/mc1.20.1/`：JDK 17、Gradle 8.1.1，**仅 Forge**（FG 6.0.6 + KotlinForForge 4.x，`apiVersion = '1.9'`）
+- `mod_version` / `maven_group` / `kotlin_version` 只在根 `gradle.properties` 定义一次；各版本目录的 `gradle.properties` 只放本版本专属属性。Kotlin 插件版本由各 `settings.gradle` 的 `pluginManagement.resolutionStrategy.eachPlugin` 从根读取（`plugins {}` 块读不到别的文件）。
+- 契约源码（`../../contract/src/main/kotlin`）与 `mod-core/` 的共享源码按相对路径编进每个模组 JAR，**不要**给版本构建加 `implementation project(':contract')` 之类的依赖。模组 JAR 必须自包含，五个构建各有一份 `verifyJarSelfContained`。
+- `contract/Methods.kt` 是三个版本的**并集**：只落在部分版本的方法要在 `Methods.MISSING_BY_MC_VERSION` 登记缺席的版本。各版本的 `RpcContractTest`、客户端启动自检与 `scripts/contract-parity.py --mc` 都按 `Methods.serverMethods/clientMethods/all(McDebug.MC_VERSION_LINE)` 校验子集。
+- `mod-core/src/main/kotlin` 只放零 MC / 加载器依赖的纯 Kotlin 文件，由各版本 `srcDir` / `Sync` 引入，不发 JAR；新增前先确认目标版本内容一致且 `apiVersion = '1.9'` 可编译（1.20.1 只共享与其逐字节相同的文件）。
+- **1.20.1 是冻结线**：源码是 1.20.1 分支就地改写后的快照，只保留 Forge 形态，不回合并到 1.21.1 / 26.3；除构建脚本与契约子集适配外不要改写它。
+- CLI（`cli/build.gradle`）只内嵌 `versions/*/build/libs` 中**已存在**的模组 JAR（`META-INF/mcdebug/<mc>/<loader>.jar`，`-PembedVersions` 可限定），**不触发**任何 Minecraft 构建。`mcdebug jar` 写出 `mcdebug-<loader>-<mc>-<version>.jar`，并清理 mods 目录中任何命名的旧 mcdebug JAR。
+- 旧消费者别名：`sdk` 里的 `com.mcdebug.cli` / `com.mcdebug.cli.session` 包保留 `@Deprecated` typealias，只为 1.21.1 之前的 Kotlin 消费者提供源码兼容；新代码一律用 `com.mcdebug.sdk`。
+- **用户要求：不添加基线中不存在的 MC 后端测试**（前端 / 契约子集 / CLI 适配测试除外）。优先运行和适配现有测试、冒烟脚本及 GUI 验证流程。
+
+### 26.3 实现约束（`versions/mc26.3`）
+
+- 基线为原生 `1.21.1` 分支 `72a70c2`；本版本只编译 Minecraft 26.3，不在源码内添加旧版条件分支。
 - 两个加载器都使用官方运行时名字；Fabric 的 `generateReflectMappings` 只生成短类名索引，不生成 intermediary 映射。发布产物来自 `jar`，没有 `remapJar`。
-- 查 API 先读本工作树 `mc_source/`（`./gradlew genSources` 后解压源 JAR）或 `fabric-api_source/`；NeoForge 源码在 `neoforge/build/source-reference/`，patched MC 源 JAR 在 `neoforge/build/moddev/artifacts/`。这些都是忽略的参考文件。
+- 查 API 先读工作树 `mc_source/`（在 `versions/mc26.3/` 下 `./gradlew genSources` 后解压源 JAR）或 `fabric-api_source/`；这些都是忽略的参考文件。
 - GUI 已迁移至 `GuiGraphicsExtractor` / `GuiTextRenderState`；Screen 状态位于 `Minecraft.gui`。截图用原版异步 GPU 读回，不能调用旧版 OpenGL 直接读帧缓冲的 API。
 - CLI 的按键码、按钮编号、修饰键位保持基线格式，由 `InputEvents` 转换为 SDL 事件。GUI 输入只派发到 Screen，不注入全局输入。
 - NeoForge 存储使用事务型 `ResourceHandler` / `EnergyHandler` / `ItemAccess`；禁止恢复旧 `IItemHandler` / `IFluidHandler`。物品和流体搬运必须在同一事务内提交或回滚。
 - 保留两平面、加载器接缝、自包含 JAR、被动 tick、隔离测试、进程清理等基线约束。26.3 的差异与验证记录见 `docs/port-26.3.md`。
-- **用户要求：不添加基线中不存在的测试，除非 26.3 的实现与 1.21 不同且使用新 API。**优先运行和适配现有测试、冒烟脚本及 GUI 验证流程。
-- JVM 前端拆分为 `sdk/`（`com.mcdebug.sdk`：RPC、类型化 API、截图比较、会话）和 `testkit/`（JUnit）；CLI 依赖 SDK。`frontend/` 独立构建与暂存这三个 JVM 模块及预构建的 NeoForge 代理，消费者使用 GitHub `maven` 分支的标准 Maven 依赖，版本由 `maven_version` 统一锁定。新增测试前端的宿主测试与消费者实机用例不属于 Minecraft 移植新增的后端用例。使用与生命周期约定见 `docs/testkit.md`。
+- JVM 前端拆分为 `sdk/`（`com.mcdebug.sdk`：RPC、类型化 API、截图比较、会话）和 `testkit/`（JUnit）；CLI 依赖 SDK。`frontend/` 独立构建与暂存这三个 JVM 模块及每个 `<mc, loader>` 的预构建模组 JAR（`mcdebug-mod-<mc>-<loader>`），是除 GitHub Release 外唯一的发布通道（JitPack 已弃用，见 §12）；消费者使用 GitHub `maven` 分支的标准 Maven 依赖，版本由 `maven_version` 统一锁定。新增测试前端的宿主测试与消费者实机用例不属于 Minecraft 移植新增的后端用例。使用与生命周期约定见 `docs/testkit.md`。
 
-本文件是 mcdebug 的唯一开发指南（仓库/协议/验证规则）。1.20.1 线（`main` 分支，yarn 映射，Kilt 容器测试环境）已归档，不再回移。
+本文件是 mcdebug 的唯一开发指南（仓库/协议/验证规则）。旧的 1.20.1 `main` 线（yarn 映射、Kilt 容器测试环境）已归档，不再回移；仓库内的 1.20.1 指 Forge 回移线 `versions/mc1.20.1`（冻结，见 `docs/monorepo.md`）。
 
 Fabric 1.21.1（Mojang 官方映射）+ Kotlin Mod，提供 JSON-RPC 服务，让 Kotlin CLI / JUnit 运行器远程读写世界/方块实体/物品栏/资源存储/快照/GUI，**用于 Mod 开发者自动化测试自己的机器方块**（Kotlin JUnit 5，见 ic2-fabric 的 `core/src/mcdebugTest/`）。
 
@@ -43,75 +58,73 @@ Fabric 1.21.1（Mojang 官方映射）+ Kotlin Mod，提供 JSON-RPC 服务，�
   - **快进例外（0.8.0）**：时间压缩不新造 tick 驱动 RPC，一律复用原版 tick-rate manager：手动加速直通 `server.runCommand` + `/tick rate`、`/tick sprint`；`wait.until` 的 `sprint:true` 只是申请一份原版 sprint 预算（timeout+poll+20 ticks）并在命中/超时/求值异常/断连时 `stopSprinting()`（`SprintOwnership` 保证并发 wait 只有最后一个结束才停全局 sprint）。引擎仍自己决定何时 tick，mcdebug 只是去掉 50ms 步进——与"不驱动 tick"原则一致。
 - 服务端默认监听 `0.0.0.0`，容器部署时通过端口发布规则或防火墙限制访问范围。
 - 不要在 `src/main/resources/assets/mcdebug/` 之外加资源（避免污染上游资源命名空间）。
+- **不要在版本源码之间复制粘贴共享逻辑**：三个版本的差异只在 MC API 调用；确认零 MC / 加载器依赖且内容一致的文件放进 `mod-core/`，其余留在各版本目录。根模块（`contract` / `sdk` / `testkit` / `cli`）里不允许 import 任何 `net.minecraft.*` / 加载器类。
 - **两个加载器（Fabric / NeoForge 21.1.x）共用同一份源码**：`src/main`、`src/client`、`contract` 里**不允许**出现 `net.fabricmc.*` / `net.neoforged.*` 的 import，一律走接缝（§2 的 `loader/` 与 `client/loader/`）；加载器专属代码只能放 `src/main/kotlin/com/mcdebug/loader/fabric/**`、`src/client/kotlin/com/mcdebug/client/loader/fabric/**`、两个入口和 `neoforge/`。改共享源码后**两个构建都要绿**（§8）。
 
 ## 2. 目录结构
 
-Gradle 根项目 + `contract`/`sdk`/`testkit`/`cli` 子项目。Gradle 插件、Kotlin test DSL、反编译源码参考均已不在仓库中（见 §12）。
+单仓多版本：根 Gradle 项目只含 `contract`/`sdk`/`testkit`/`cli` 四个纯 JVM 模块，三个 Minecraft 版本在 `versions/` 下各自独立构建（详见 `docs/monorepo.md`）。
 
-```
-mcdebug/
-├── build.gradle              # Fabric 1.21.1（Mojang 映射）+ Kotlin；generateReflectMappings 生成 reflect 映射表
-├── gradle.properties         # 锁版本（参考 ic2-fabric 工作配置）
-├── settings.gradle
+```text
+mcdebug/                              # 仓库根（纯 JVM）
+├── settings.gradle                   # 只 include contract / sdk / testkit / cli
+├── build.gradle                      # 根公共配置（无 Loom / MDG / ForgeGradle）
+├── gradle.properties                 # mod_version、maven_version、maven_group、kotlin_version（唯一来源）
 ├── AGENTS.md
-├── contract/                 # 共享契约（方法名清单 + DTO 样板，零依赖）
-├── sdk/                      # JVM SDK（RPC、类型化 API、会话、截图比较）
+├── contract/                 # 共享契约（方法名清单并集 + 版本子集 + DTO 样板，零依赖）
+├── sdk/                      # JVM SDK（RPC、类型化 API、截图比较、会话）+ 旧包名别名（com.mcdebug.cli.*）
 ├── testkit/                  # JUnit 前端与原有 server-grid runner
 ├── frontend/                 # SDK/testkit/contract 的独立 JVM 构建与 Maven 暂存入口
-├── cli/                      # Kotlin CLI（clikt）；依赖 SDK
+├── cli/                      # Kotlin CLI（clikt）；依赖 SDK；jar --mc/--loader 内嵌各版本模组 JAR
 │   └── src/main/kotlin/com/mcdebug/cli/
-├── neoforge/                  # NeoForge 21.1.x 移植：**独立 Gradle 构建**（ModDevGradle + Kotlin），
-│   │                          #   共享源码靠 Sync 拉进 build/generated/shared 再编译，见 §2b
-│   ├── build.gradle           # 服务端+客户端平面、runs、两个 verifyJarSelfContained 之一
-│   ├── delegate.gradle        # 根构建里 :neoforge:build/runServer/runClient 的转发任务
-│   └── src/main/kotlin/com/mcdebug/loader/neoforge/{McDebugNeoForge,McDebugNeoForgeClient,
-│       NeoForgeLoaderApi,NeoForgeClientLoaderApi,NeoForgeStorageApi}.kt + java/…/NeoCapabilities.java
-│                              #   + java/com/mcdebug/client/mixin/MixinTargets.java（每个加载器一份的注入点常量）
-├── mcdebug-cli.jar            # :cli:copyCliJar 产物（不进 git；发版由 release.yml 作为 Release 附件上传，
-│                              #   内含 mod.jar 与 mod-neoforge.jar 两份；`mcdebug jar --loader` 选一份写出）
-├── src/main/
-│   ├── kotlin/com/mcdebug/
-│   │   ├── McDebugMod.kt         # **Fabric** 服务端入口，注册服务端 lifecycle 钩子（+ ServerPlane）
-│   │   ├── loader/               # 加载器中立接缝：LoaderApi（环境/生命周期/tick/use-entity/命名）、
-│   │   │                         #   RuntimeNames（映射表）、StorageApi（item/fluid/energy 句柄）
-│   │   │                         #   + fabric/ 下的 Fabric 实现（唯一允许 import fabric 的服务端目录）
-│   │   ├── rpc/                  # 传输 + 协议层（JsonRpc/RpcServer/RpcDispatcher/RpcErrors/RpcHandler/TransportConfig）
-│   │   ├── api/                  # WorldOps（方块/区域）+ WorldPlayerActions（薄门面，委托 api/player/）
-│   │   │                         #   BlockEntityOps / InventoryOps / CraftingOps / FluidOps / ScanOps / ServerOps / StorageOps
-│   │   │                         #   SnapshotOps / TraceOps / ScreenOps / EntityOps / FixtureOps / RedstoneOps / ReflectOps / FakePlayer
-│   │   │                         #   Params.kt：所有 handler 共用的参数读取（requirePos/requireBox/requireInt…，缺参/类型错 → -32602）
-│   │   │                         #   player/：假玩家动作按手势分组——BlockPlayerActions（放置/右键/破坏/攻击方块）、
-│   │   │                         #   ItemPlayerActions（空手右键/蓄力释放）、EntityPlayerActions（交互/攻击实体）、
-│   │   │                         #   PlayerActionSupport（护甲/站位/反射桥等共享管线）
-│   │   ├── wait/WaitOps.kt       # wait.until — 被动观察
-│   │   └── util/{NbtJson,ServerContext,Mappings}.kt   # Mappings：reflect.* 的 intermediary↔Mojang 名字翻译
-│   └── resources/
-│       ├── fabric.mod.json       # environment "*" + server/client 两个入口（普通 Java 适配器，入口为可实例化 class）
-│       ├── mcdebug.mixins.json   # 服务端 mixin 配置（当前为空占位）
-│       └── modid.mixins.json     # ← Fabric 模板遗留，别删也别用
-└── src/client/                   # 客户端平面（gui.*），由客户端入口加载，见 §14
-    ├── kotlin/com/mcdebug/client/{McDebugClientMod,GuiOps,GuiScreenOps,GuiDevOps,ClientTasks,ClientRpc,ClientInfo,ClientPlane,ClientReflectOps,GuiParams}.kt
-    │                             # 根包只留引导/RPC 注册/参数工具；ClientPlane 与加载器无关，两个入口共用
-    │                             # + 加载器/{ClientLoaderApi.kt,fabric/FabricClientLoaderApi.kt}（客户端接缝）
-    │                             # + 渲染/{Capture,Annotator,DrawRecorder,RenderControl,RenderSchedule,WidgetFrames}（抓帧/渲染调度/绘制日志）
-    │                             # + input/{GuiClickOps,GuiPointerOps,GuiInputOps,GuiInputParams,GuiInputState,GuiSettle}（点击/hover/键入/拖拽/稳定等待）
-    │                             # + devloop/{Hotswap,ScreenReload,ProblemLog,ScreenGuard}（代理迭代回路，见 §14）
-    ├── java/com/mcdebug/client/mixin/{AbstractContainerScreenAccessor,…,GuiGraphicsMixin,ClientPacketListenerMixin,RenderSystemMixin}.java
-    └── resources/mcdebug.client.mixins.json
+├── mod-core/                 # 零 MC 依赖的共享源码（各版本 srcDir 引入，不发 JAR，见 docs/monorepo.md）
+├── docs/                     # 唯一文档目录（含单仓记录 docs/monorepo.md）
+├── skills/                   # skills/mcdebug（通用 SKILL.md + references/mc-<ver>.md）、neoforge-fabric-port
+├── scripts/                  # 跨版本共享脚本：contract-parity.py（--mc）/ parity-diff.py / stop-server.py 等
+└── versions/
+    ├── mc1.20.1/             # 仅 Forge：Gradle 8.1.1 + JDK 17；src/ 为冻结源码（src/main + src/client 同属一个源集）
+    ├── mc1.21.1/             # Fabric 1.21.1（JDK 21）+ neoforge/（21.1.265）
+    └── mc26.3/               # Fabric 26.3（JDK 25）+ neoforge/（26.3.0.103）—— 下面的树描述这一层
+        ├── build.gradle              # Fabric（Mojang 映射）+ Kotlin；generateReflectMappings 生成短类名索引
+        ├── settings.gradle           # include 'neoforge'（delegate.gradle 转发）；kotlin_version 取自仓库根
+        ├── gradle.properties         # 只放本版本专属属性（MC / 加载器 / 构建插件版本）
+        ├── src/main/
+        │   ├── kotlin/com/mcdebug/
+        │   │   ├── McDebug.kt        # MOD_ID / MOD_VERSION / MC_VERSION_LINE（契约子集键）
+        │   │   ├── McDebugMod.kt     # **Fabric** 服务端入口，注册服务端 lifecycle 钩子（+ ServerPlane）
+        │   │   ├── loader/               # 加载器中立接缝：LoaderApi、RuntimeNames、StorageApi + fabric/ 实现
+        │   │   ├── rpc/                  # 传输 + 协议层（RpcServer/RpcDispatcher/RpcHandler/TransportConfig；JsonRpc/RpcErrors/RpcEnv 在 mod-core）
+        │   │   ├── api/                  # WorldOps … StorageOps（ScreenOps 是服务端假玩家菜单；像素只能来自 gui.*）
+        │   │   ├── wait/WaitOps.kt       # wait.until — 被动观察（PredicateExpr 在 mod-core）
+        │   │   └── util/{NbtJson,ServerContext,Mappings}.kt
+        │   └── resources/                # fabric.mod.json（environment "*"，两个入口）、mcdebug.mixins.json、modid.mixins.json
+        ├── src/client/               # 客户端平面（gui.*），由客户端入口加载，见 §14
+        │   ├── kotlin/com/mcdebug/client/{引导、RPC 注册、GuiOps…}
+        │   │                          # + loader/{ClientLoaderApi,fabric/}、渲染/、input/、devloop/
+        │   ├── java/com/mcdebug/client/mixin/*.java
+        │   └── resources/mcdebug.client.mixins.json
+        ├── src/test/kotlin/          # 服务端平面单测（RpcContractTest 按本版本契约子集校验）
+        ├── neoforge/                 # NeoForge 移植：**独立 Gradle 构建**（ModDevGradle + Kotlin），见 §2b
+        │   ├── build.gradle / delegate.gradle / settings.gradle / gradle.properties / gradlew
+        │   └── src/main/…/loader/neoforge/*.kt + NeoCapabilities.java + client/mixin/MixinTargets.java
+        └── scripts/                  # 本版本的 fabric-smoke.sh / neoforge-smoke.sh
 ```
+
+`versions/mc1.21.1/` 与 `versions/mc26.3/` 结构相同（构建插件与 MC API 不同）；`versions/mc1.20.1/` 没有 Fabric 入口、`neoforge/` 与 `run/` 冒烟脚本，Forge 接缝在 `src/main/kotlin/com/mcdebug/loader/forge/`，Mixin 在 `src/main/java/`，入口为 `McDebugForge`。
 
 ## 2b. 两个加载器的构建形态
 
-| | Fabric 1.21.1（根构建） | NeoForge 21.1.x（`neoforge/` 嵌套构建） |
+下表对 `versions/mc1.21.1/` 与 `versions/mc26.3/` 两个 Fabric 版本目录都成立（命令在对应版本目录下执行）；`versions/mc1.20.1/` 只有 Forge（FG 6.0.6 + Gradle 8.1.1 + JDK 17，Kotlin 由 KotlinForForge 4.x 提供，`apiVersion = '1.9'`，见 `docs/monorepo.md`）。
+
+| | Fabric（版本目录的根构建） | NeoForge（版本目录下 `neoforge/` 嵌套构建） |
 |---|---|---|
-| 插件 | Fabric Loom 1.15 + Kotlin | ModDevGradle 2.0.148 + Kotlin 2.3.10 |
+| 插件 | Fabric Loom（1.21.1 用 1.15，26.3 用 1.17）+ Kotlin | ModDevGradle 2.0.148 + Kotlin（版本取自仓库根 `gradle.properties`） |
 | 源码 | `src/main` + `src/client` 原处 | `Sync` 到 `neoforge/build/generated/shared` 再编译：`src/main/kotlin`（去掉 `McDebugMod.kt` 与 `loader/fabric/**`）+ `src/client/kotlin`（去掉 `McDebugClientMod.kt` 与 `client/loader/fabric/**`）+ `src/client/java`（去掉 `MixinTargets.java`）+ `contract/src/main/kotlin` |
 | 元数据 | `fabric.mod.json`（两个入口） | `META-INF/neoforge.mods.toml`（`@Mod` 两个类 + `[[mixins]]` 引用**同一份** `mcdebug.client.mixins.json`） |
 | Kotlin 运行时 | JAR 内嵌 kotlin-stdlib（不重定位），无 FLK 前置 | JAR 内嵌 kotlin-stdlib（不重定位），`modLoader="javafml"`，`@Mod class`，无 KFF 前置 |
 | 命名空间 | 开发=Mojang、生产=intermediary（要映射表） | 开发与生产都是 **Mojang 官方名**（`reflect.*` 不需要表，短类名不支持） |
-| 任务 | `./gradlew build\|runServer\|runClient` | `./gradlew :neoforge:build\|:neoforge:runServer\|:neoforge:runClient`（= 进 `neoforge/` 跑同名任务） |
-| 冒烟 | `scripts/fabric-smoke.sh`（51 条断言） | `scripts/neoforge-smoke.sh`（45 条断言 + 契约 79/79） |
+| 任务 | `./gradlew build\|runServer\|runClient`（在 `versions/mc<ver>/` 下） | `./gradlew :neoforge:build\|:neoforge:runServer\|:neoforge:runClient`（= 进 `neoforge/` 跑同名任务） |
+| 冒烟 | `scripts/fabric-smoke.sh`（版本目录下；26.3 为 51 条断言） | `scripts/neoforge-smoke.sh`（版本目录下；契约检查经 `scripts/contract-parity.py --mc <ver>`） |
 
 设计取舍与实测差异（流体单位、`IFluidHandler` 罐索引、注入点位移等）全在 `docs/plan-neoforge-port.md` §11，改 NeoForge 侧前先读它。
 
@@ -165,36 +178,44 @@ mcdebug/
 ## 5. 常用命令
 
 ```bash
-# 完整 build（Kotlin 重编 + remap jar）
-./gradlew build
-
-# 启动开发服务器（dev launcher 注入 classpath）
-./gradlew runServer
-
-# 启动开发客户端（真实渲染，配合 gui.* 用；需要 X/Wayland display）
-DISPLAY=:0 ./gradlew runClient --args="--width 1280 --height 720"
-
-# NeoForge 侧（同一份源码，嵌套构建；首次会下 NeoForge + assets）
-./gradlew :neoforge:build            # 产出 neoforge/build/libs/mcdebug-neoforge-<version>.jar（含 check）
-./gradlew :neoforge:runServer        # NeoForge dev 专用服
-DISPLAY=:0 ./gradlew :neoforge:runClient    # NeoForge dev 客户端（gui.* 同样可用）
-scripts/neoforge-smoke.sh            # NeoForge 冒烟（45 条断言 + 契约 79/79）
-# 客户端平面自检 + 首次截图（run/ 下有 mcdebug/clientPort 时 CLI 会自动发现）
-java -jar mcdebug-cli.jar gui status --brief
-java -jar mcdebug-cli.jar gui screenshot --out /tmp/shot.png
-
-# CLI 端（Kotlin fat jar）
-./gradlew :cli:copyCliJar     # 产出根目录 mcdebug-cli.jar
+# ── 仓库根：纯 JVM 模块 ─────────────────────────────────────────────────────
+./gradlew test                      # contract / sdk / testkit / cli 的编译与单测（JDK 25 工具链）
+./gradlew :cli:copyCliJar           # 产出根目录 mcdebug-cli.jar；只内嵌 versions/*/build/libs 中已存在的模组 JAR
 java -jar mcdebug-cli.jar --help    # 查看所有 CLI 命令
-java -jar mcdebug-cli.jar status    # 调用 server.status RPC（unix socket，本机）
-java -jar mcdebug-cli.jar --tcp <host>:25580 status   # 跨机访问（TCP）
-java -jar mcdebug-cli.jar jar --output ../consumer/run/mods            # Fabric 版（默认），并删掉同目录另一种 jar
-java -jar mcdebug-cli.jar jar --loader neoforge --output ../consumer/run/mods  # NeoForge 版（已内嵌 Kotlin 标准库）
+java -jar mcdebug-cli.jar --version
+java -jar mcdebug-cli.jar jar --list                              # 内嵌 / 缺失的 <mc, loader> 组合
+java -jar mcdebug-cli.jar jar --mc 26.3 --output ../consumer/run/mods                  # Fabric 26.3（默认）
+java -jar mcdebug-cli.jar jar --mc 1.21.1 --loader neoforge --output ../consumer/run/mods  # NeoForge 1.21.1
+java -jar mcdebug-cli.jar jar --mc 1.20.1 --output ../consumer/run/mods                # Forge 1.20.1（--loader 默认 forge）
 java -jar mcdebug-cli.jar skill --name neoforge-fabric-port  # 从本次构建安装 port 技能及 references；默认技能仍为 mcdebug
+./gradlew -PembedVersions=26.3,1.21.1 :cli:copyCliJar       # 只内嵌指定版本（点名却缺产物时失败）
+
+# ── versions/mc26.3（JDK 25，Fabric + NeoForge）─────────────────────────────
+cd versions/mc26.3
+./gradlew build                     # Fabric 模组：Kotlin 重编 + 单测 + verifyJarSelfContained（任务名在所有项目匹配，连带 :neoforge:build）
+./gradlew :neoforge:build           # 只出 neoforge/build/libs/mcdebug-neoforge-<version>.jar（含 check）
+./gradlew runServer                 # Fabric dev 专用服（dev launcher 注入 classpath）
+DISPLAY=:0 ./gradlew runClient --args="--width 1280 --height 720"   # 真实渲染，配合 gui.* 用；需要 X/Wayland display
+DISPLAY=:0 ./gradlew :neoforge:runClient
+JAVA_HOME=<JDK 25> scripts/fabric-smoke.sh      # 冒烟：需先在仓库根生成 mcdebug-cli.jar
+JAVA_HOME=<JDK 25> scripts/neoforge-smoke.sh
+# 客户端平面自检 + 首次截图（版本目录的 run/ 下有 mcdebug/clientPort 时 CLI 会自动发现）
+java -jar ../../mcdebug-cli.jar gui status --brief
+java -jar ../../mcdebug-cli.jar gui screenshot --out /tmp/shot.png
+java -jar ../../mcdebug-cli.jar status                 # 服务端平面（unix socket，本机）
+java -jar ../../mcdebug-cli.jar --tcp <host>:25580 status   # 跨机访问（TCP）
+
+# ── versions/mc1.21.1（JDK 21，Fabric + NeoForge）──────────────────────────
+cd versions/mc1.21.1 && JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 ./gradlew build   # 连带 :neoforge:build
+JAVA_HOME=/usr/lib/jvm/java-21-openjdk-amd64 scripts/fabric-smoke.sh
+
+# ── versions/mc1.20.1（JDK 17，仅 Forge）──────────────────────────────────
+cd versions/mc1.20.1 && JAVA_HOME=/usr/lib/jvm/java-17-openjdk-amd64 ./gradlew build   # 产出 build/libs/mcdebug-forge-<version>.jar（reobfJarJar）
+# 可选的实机对照：-Poracle 需要 -PoracleDownloads=<含 Mantle/TConstruct JAR 的目录>
 ```
 
-> 反编译 MC / Fabric API 源码（参考用，不参与编译、不进仓库）：`./gradlew genSources`，
-> 产物在 `.gradle/loom-cache/...` 下，自行解压到本地未跟踪目录查看即可（`mc_source/`
+> 反编译 MC / Fabric API 源码（参考用，不参与编译、不进仓库）：在版本目录下 `./gradlew genSources`，
+> 产物在该版本目录的 `.gradle/loom-cache/...` 下，自行解压到本地未跟踪目录查看即可（`mc_source/`
 > 和 `fabric-api_source/` 已被 `.gitignore` 排除，不要再加回来）。
 
 ## 6. 添加新 RPC 方法的流程
@@ -202,10 +223,10 @@ java -jar mcdebug-cli.jar skill --name neoforge-fabric-port  # 从本次构建�
 1. 在对应的 `*Ops.kt` 里加一个 `RpcHandler`（签名 `(MinecraftServer, JsonObject?) -> CompletableFuture<JsonElement>`），处理器 body 通过 `RpcContext.onServer(server) { ... }` 切到服务端线程
 2. 错误抛出 `RpcException(code, message, data?)`（从 `RpcErrors` 选错误码）
 3. 类型在 `RpcHandlerGroup.methods(): Map<String, RpcHandler>` 注册
-4. **同步 `contract/src/main/kotlin/com/mcdebug/contract/Methods.kt`**：在对应组 setOf 中加方法名（`RpcContractTest` 会双向校验，漏加或写错直接构建失败）；有需要时同时补充 DTO 到 `contract/.../<Group>Dtos.kt`（字段名 = JSON 字段名，服务端 Gson 与未来 Kotlin 客户端共用）
+4. **同步 `contract/src/main/kotlin/com/mcdebug/contract/Methods.kt`**：在对应组 setOf 中加方法名（并集；`RpcContractTest` 会双向校验，漏加或写错直接构建失败）。只落在部分版本的方法还要在 `Methods.MISSING_BY_MC_VERSION` 登记缺席的版本，否则那些版本的 `RpcContractTest` 与客户端启动自检会报 `missing:`；有需要时同时补充 DTO 到 `contract/.../<Group>Dtos.kt`（字段名 = JSON 字段名，服务端 Gson 与未来 Kotlin 客户端共用）
 5. 对应在 `sdk/src/main/kotlin/com/mcdebug/sdk/DebugApi.kt` 加方法，参数与返回对齐
 6. CLI 命令在 `cli/src/main/kotlin/com/mcdebug/cli/commands/<Group>Commands.kt` 注册；没有专用 CLI 子命令时，至少更新 `raw`/REPL help 和 README 的 `mcdebug raw` 示例
-7. 重新 `./gradlew :cli:copyCliJar`（CLI fat JAR）和 `./gradlew build`（契约测试 + 服务端）
+7. 在仓库根重新 `./gradlew test`（契约/SDK/CLI 单测）与 `./gradlew :cli:copyCliJar`（CLI fat JAR），并在改了源码的每个版本目录下 `./gradlew build`（契约测试 + 服务端 + NeoForge）
 
 ## 7. Tick 设计原则
 
@@ -224,16 +245,17 @@ java -jar mcdebug-cli.jar skill --name neoforge-fabric-port  # 从本次构建�
 
 ## 8. 提交前验证
 
-- 改 Kotlin：`./gradlew build` 通过（0 warning, 0 error）
+- 改根模块 Kotlin（`contract` / `sdk` / `testkit` / `cli`）：仓库根 `./gradlew test`（或 `build`）通过（0 warning, 0 error）；改某版本模组源码：进对应 `versions/mc<ver>/` 执行 `./gradlew build`（Fabric 版本连带 `:neoforge:build`，JDK 见 §5）。
+- 改 `contract/` 或 `mod-core/`（三个版本共用的源码）：**三个版本的构建都要绿**，只跑一个版本不算数。
 - 改 Kotlin 逻辑（解析器/NBT/谓词/参数）：`./gradlew test` 通过（JUnit5，`src/test/kotlin/`）。服务端平面现有测试：`PredicateExprTest`（谓词 DSL）、`NbtJsonTest`（`#nbt` 标注+往返）、`ParamsTest`（参数校验与错误码）、`MappingsTest`（生成的映射表对应本 MC 版本）、`SnapshotOpsTest`、`RpcContractTest`、`RpcServerBindTest`
 - 新处理器读参数一律用 `api/Params.kt`（`requirePos`/`requireBox`/`requireInt`/`requireObject`…），不要直接 `getAsJsonArray(...)`/`get(...).asInt`：缺参会变成 `-32603` 的 Kotlin 空检查文本。意外异常由 `RpcErrors.internal` 包成 `-32603`，`data` 里带异常类和栈顶几帧
 - 改 CLI/SDK：`./gradlew :cli:copyCliJar` 通过
 - 改 entrypoint/资源：手动 `./gradlew runServer` 启动一次确认模组加载 + RPC 监听
-- 改冒烟脚本：`scripts/fabric-smoke.sh`（专用服）用 `scripts/contract-parity.py` 做契约+平面隔离校验（必须按 id 匹配响应、排除客户端平面 `gui.*`，曾因此报出假的 `inv.extract` 缺失），别再把解析内联回 shell
-- **改共享源码（`src/main`、`src/client`、`contract`）后两个加载器都要绿**：`./gradlew build` + `scripts/fabric-smoke.sh`，以及 `./gradlew :neoforge:build` + `scripts/neoforge-smoke.sh`。只跑一边的“绿”不算绿：接缝两侧的实现很容易在**你没跑的那一侧**出现 parity 缺陷（真实案例：NeoForge 侧 `insert` 误把示例栈 count 当上限，`storage.transfer` 只搬了 1 个，Fabric 侧一直是对的）
+- 改冒烟脚本：`versions/mc<ver>/scripts/fabric-smoke.sh`（专用服）用仓库根的 `scripts/contract-parity.py --mc <ver>` 做契约子集+平面隔离校验（必须按 id 匹配响应、排除客户端平面 `gui.*`，曾因此报出假的 `inv.extract` 缺失），别再把解析内联回 shell
+- **改某版本目录内的共享源码（`src/main`、`src/client`）后两个加载器都要绿**：在该版本目录下 `./gradlew build` + `scripts/fabric-smoke.sh`，以及 `./gradlew :neoforge:build` + `scripts/neoforge-smoke.sh`。只跑一边的“绿”不算绿：接缝两侧的实现很容易在**你没跑的那一侧**出现 parity 缺陷（真实案例：NeoForge 侧 `insert` 误把示例栈 count 当上限，`storage.transfer` 只搬了 1 个，Fabric 侧一直是对的）
 - **跨加载器验证有三层**（改共享源码/接缝时按需全跑）：① 两个冒烟脚本（Fabric 51 / NeoForge 45，含 storage 原子性护栏）；② `python3 scripts/parity-diff.py --a <fabric socket> --b <neoforge socket>`（53 条加载器中立任务打在两个实例上，输出 DIFF/EXPECTED/RESET 分类，任务表 `scripts/parity-tasks.json`；**实体夹具用 armor stand 不用 pig**——`Mob` 在 0 玩家服务器上会被 `checkDespawn` 丢掉，曾经因此报过假 DIFF）；③ 黑盒验收（`docs/plan-neoforge-verification.md`：只给 CLI JAR + `-h` + 技能的代理按批次跑任务，用 `scripts/neoforge-consumer/` 起发布 JAR 的实例）。
 - **storage 搬运的加载器语义不能拉平**：`storage.transfer` 先问 `StorageApi.moveItemsAtomically/moveFluidsAtomically`（Fabric 用 Transfer API 的 `Transaction`，语义是"目标收不下就整笔不发生"；NeoForge 没有事务，返回 null → 回退到 `StorageOps.moveBetween` 的 dry-run + 尽力回滚）。**不要**为了"两边代码一致"删掉这两个钩子：曾因此让 Fabric 侧丢掉原子性（目标部分接收 + 来源拒绝收回 = 资源消失）。两个冒烟都有护栏（目标箱子填满 → `transferred:0` 且来源数量不变）。
-- NeoForge 构建**没有自己的单测**（`neoforge/` 只有 `check` 里的 JAR 自包含门禁）：共享代码的逻辑只在根构建（Fabric）跑 JUnit；NeoForge 侧的回归靠 `scripts/neoforge-smoke.sh`（45 条）与黑盒验收 `docs/plan-neoforge-verification.md` 兜。
+- NeoForge 构建**没有自己的单测**（`versions/mc<ver>/neoforge/` 只有 `check` 里的 JAR 自包含门禁）：共享代码的逻辑只在根构建（Fabric）跑 JUnit；NeoForge 侧的回归靠 `scripts/neoforge-smoke.sh`（45 条）与黑盒验收 `docs/plan-neoforge-verification.md` 兜。
 - 改 `src/main/kotlin/com/mcdebug/loader/**` 或 `src/client/.../loader/**`：接口是契约，两套实现必须同时改；新增能力时**先在接口 KDoc 里写清语义**（例：`insert(stack, maxAmount)` 里 `stack` 只标识物品、`maxAmount` 才是数量）
 - 改 `src/client/**`（客户端平面）：`./gradlew compileClientKotlin` + `./gradlew build`（后者含 `verifyJarSelfContained`，见 §14）；真机验证要起 `runClient` 并用 CLI 打 `gui.*`（Java/Kotlin 改动必须重启客户端，只有贴图/语言/模型改动可以 `gui reload-resources`）
 - **发布 JAR 必须自包含**：`verifyJarSelfContained` 已挂在 `check` 上，缺失入口点运行时用到的类/资源会直接构建失败。历史上 `implementation project(':contract')` 就是这么炸的（开发类路径有、JAR 里没有 → 别的项目里 `NoClassDefFoundError`）
@@ -245,6 +267,7 @@ java -jar mcdebug-cli.jar skill --name neoforge-fabric-port  # 从本次构建�
 
 ## 9. 调试技巧
 
+- 下面路径都相对**版本目录**的 `run/`（Fabric dev 运行）或 `neoforge/run/`（NeoForge dev 运行）
 - 看 RPC socket：`cat run/mcdebug/port`（内容为 socket 路径）；TCP 端口：`cat run/mcdebug/tcpPort`
 - 实时看服务端日志：`run/logs/latest.log`（loom 写文件 + stdout）
 - Loom 缓存了旧 remap JAR：清 `run/.fabric/processedMods/`，再 `./gradlew build`
@@ -263,12 +286,15 @@ node scripts/set-version.mjs X.Y.Z
 
 ```
 □ node scripts/set-version.mjs X.Y.Z
-□ ./gradlew build :cli:copyCliJar      ← 契约测试 + 单测 + fat jar（内嵌同版本 mod jar）
+□ ./gradlew build :cli:copyCliJar      ← 仓库根：JVM 单测 + fat jar（此时未必内嵌 mod jar）
+□ (cd versions/mc26.3 && ./gradlew build)；(cd versions/mc1.21.1 && JAVA_HOME=<JDK 21> ./gradlew build)；(cd versions/mc1.20.1 && JAVA_HOME=<JDK 17> ./gradlew build)
+□                                       ← 三个版本各出模组 JAR（Fabric 版本连带 NeoForge）
+□ ./gradlew :cli:copyCliJar 再跑一次   ← 让 CLI 内嵌刚构建的 5 个模组 JAR；java -jar mcdebug-cli.jar jar --list 应全部 embedded
 □ java -jar mcdebug-cli.jar --version  ← 必须输出 X.Y.Z
 □ git commit -m "vX.Y.Z: ..."
 □ git tag -a vX.Y.Z -m "..."   ← 这段 message 会成为 Release 说明（release.yml 用 --notes-from-tag），写清这一版装哪个 jar
-□ git push origin 1.21.1 && git push origin vX.Y.Z   ← 1.21.1 是活跃分支（main = 归档的 1.20.1 线）
-□ Release 页有 mcdebug-X.Y.Z.jar / mcdebug-neoforge-X.Y.Z.jar / mcdebug-cli.jar 及各自 .sha256（release.yml 生成；tag 与 mod_version 不符会失败）
+□ git push origin <活跃分支> && git push origin vX.Y.Z
+□ Release 页有 mcdebug-fabric-26.3-X.Y.Z.jar / mcdebug-neoforge-26.3-X.Y.Z.jar / mcdebug-fabric-1.21.1-X.Y.Z.jar / mcdebug-neoforge-1.21.1-X.Y.Z.jar / mcdebug-forge-1.20.1-X.Y.Z.jar / mcdebug-cli.jar 及各自 .sha256（release.yml 生成；tag 与 mod_version 不符会失败）
 ```
 
 ### 踩过的坑
@@ -309,14 +335,15 @@ node scripts/set-version.mjs X.Y.Z
 - **Gradle 插件**（`gradle-plugin/` 子项目，曾含 `McDebugPlugin` / `McDebugExtension` / `McDebugTestTask` / `mcdebugTest` 任务）——已移除。测试编排改由消费者项目（Kotlin JUnit，`com.mcdebug.runner`）承担。
 - **TS 客户端 / TS 测试运行器**（`mcdebug-client/`）——0.5.0 起退役，由 Kotlin CLI（`cli/`）+ JUnit 运行器接替；TS 测试已全部移植为 Kotlin JUnit（见 ic2-fabric）。
 - **Gradle 插件的 JitPack 构件**——已随 `gradle-plugin/` 子项目移除，不要恢复该插件或其坐标。
-- **Server 模组 JAR 的 JitPack 构建仍在使用**。根项目是当前唯一的 Gradle 项目，`jitpack.yml` 通过 `publishToMavenLocal` 发布根项目的 `mavenJava` 构件。不要因为 Gradle 插件已移除而删除此配置。
-  - `build.gradle` 里的 `maven { url "https://jitpack.io" }` 用于拉取第三方依赖，与本项目发布配置是两个不同用途。
-  - GitHub Release（`.github/workflows/release.yml`）同时提供 remapped JAR，给不用 CLI 的人；它不取代 JitPack 服务端 JAR 构建。
-  - CLI 自带同一次构建的模组 JAR（`cli/build.gradle` 把 `remapJar` 产物放进 fat JAR 的 `META-INF/mcdebug/mod.jar`，native-image 由 `resource-config.json` 带上），`mcdebug jar [--output 文件|mods目录]` 直接写出、不联网。0.6.3 之前它从 Release 下载 + sha256 校验，没打 tag 的版本会 404，已删除。
+- **JitPack 发布链路已弃用，不要再加回来**：仓库没有 `jitpack.yml`，各版本构建也不带 `maven-publish`。发布只走两条通道：
+  - **GitHub Release**（`.github/workflows/release.yml`，tag 触发）：全部五个模组 JAR（`mcdebug-<loader>-<mc>-<version>.jar`）与内嵌它们的 `mcdebug-cli.jar`。
+  - **GitHub `maven` 分支**（`frontend/` + `.github/workflows/maven.yml`）：`./gradlew -p frontend stageMavenRepository` 暂存纯 JVM 构件（`mcdebug-contract` / `mcdebug-sdk` / `mcdebug-testkit`）与每个 `<mc, loader>` 的预编译模组 JAR（`mcdebug-mod-<mc>-<loader>`）；旧坐标 `mcdebug-neoforge` 作为 26.3 NeoForge 代理的兼容别名保留。构件清单只在 `frontend/build.gradle` 维护，`maven.yml` 用 `./gradlew -p frontend -q listPublicationArtifactIds` 读取它做不可变检查。
+  - CLI 自带同一仓库构建的模组 JAR（`cli/build.gradle` 把 `versions/*/build/libs` 的产物放进 fat JAR 的 `META-INF/mcdebug/<mc>/<loader>.jar`，native-image 由 `resource-config.json` 带上），`mcdebug jar [--mc <ver>] [--loader <loader>] [--output 文件|mods目录]` 直接写出、不联网。
+  - 各版本 `build.gradle` 里的 `maven { url = "https://jitpack.io" }` 只是拉取第三方依赖的仓库，与本项目发布无关，可按需保留。
 - **Kotlin test DSL / 注解扫描测试入口 / `scanPackages` 配置**——随 Gradle 插件一并移除。
 - **npm 壳包**（`package.json`、`bin/mcdebug.js`、`pnpm dlx` 用法）与进 git 的 `mcdebug-cli.jar`——0.6.3 移除，见 §10。
-- **Forge 1.20.1 原生移植**（`forge/` 嵌套 ForgeGradle 6 构建、`scripts/forge-smoke.sh`、`server.mantleInteract`/`server.forgeFluidCapability` 这两个 Kilt 时期的 Forge 诊断 RPC）——0.6.3 移除，1.20.1 线已归档。
-  - **不要把它和现在的 `neoforge/` 混为一谈**：`main` 线（1.20.1 Forge，SRG 名 + ForgeGradle）已死；`1.21.1` 线上**新增的 NeoForge 移植是活的**（ModDevGradle + Mojang 官方名，见 §2b 与 `docs/plan-neoforge-port.md`），两者只共享“嵌套构建 + 共享源码”的形态。
+- **Forge 1.20.1 上的 Kilt 时期诊断 RPC**（`server.mantleInteract`/`server.forgeFluidCapability`）与 `scripts/forge-smoke.sh`——0.6.3 随旧 `forge/` 目录移除，不要再加回来。Forge 形态本身在单仓合仓后以 `versions/mc1.20.1/`（仅 Forge、冻结源码、独立 FG 6 构建）回到仓库。
+  - **不要把它和 NeoForge 移植混为一谈**：旧的 `main` 线（1.20.1 Forge，SRG 名 + ForgeGradle）已归档；NeoForge 移植是活的（ModDevGradle + Mojang 官方名，见 §2b 与 `docs/plan-neoforge-port.md`），两者只共享“嵌套构建 + 共享源码”的形态。
 - **1.20.1 映射表**（`mappings/tiny-core.txt.gz` yarn、`mojang-core.txt.gz`）——0.6.3 起改为构建时从 Loom 生成 `mappings/reflect.txt.gz`（intermediary↔Mojang，必定与目标 MC 版本一致）。不要再手工打包映射表；yarn 名不再支持。
 - **`mc_source/` / `fabric-api_source/`**（反编译源码参考）——`.gitignore` 明确排除，永远不进仓库；需要时本地 `./gradlew genSources` 解压查看。
 
@@ -326,7 +353,7 @@ node scripts/set-version.mjs X.Y.Z
 
 遇到任何 Minecraft / Fabric API 的问题（类名、方法签名、继承链、事件、网络包），**直接查文件系统中的本地源码，不要猜、不要靠记忆、不要用 javap**：
 
-- MC 反编译源码（按版本）：`../mc_source_{version}/`
+- MC 反编译源码：26.3 在工作树 `mc_source/`（在 `versions/mc26.3/` 下 `./gradlew genSources` 后解压）；旧线按版本：`../mc_source_{version}/`
   - `../mc_source_1.21.1/`（Mojang 官方名）
 - Fabric API 源码：`../fabric-api_{version}/`
   - `../fabric-api_1.21.1/`（注意：fabric-api 树里它自己的 API 声明可信，但其中引用的 MC/JDK 方法名曾被工具损坏过，MC 名以 `mc_source_1.21.1` 为准）
@@ -401,7 +428,7 @@ node scripts/set-version.mjs X.Y.Z
 
 设计见 `docs/plan-session-management.md`。CLI 新目录 `cli/.../session/`：`SessionRecord` 显式 JSON 类结构（不用 Gson 类反射，兼顾 native CLI）、`SessionRegistry` 原子写/锁/CAS、`SessionRuntime` OS/RPC 边界、`SessionManager` 生命周期。命令 `session start|attach|list|status|logs|stop`，根 `--session NAME` 自动选择两平面，`--sessions-dir`/`MCDEBUG_SESSIONS_DIR` 控制注册表；无隐式全局 current 会话，batch 必须继承会话/registry。与显式 transport 参数互斥。
 
-- 第一版 backend 是目标项目自己的 Gradle 包装器 + runClient（qualified 任务也只允许 runClient），Linux setsid、日志重定向，无新守护进程、无 Gradle 插件、无独立 MC 实现。**启动方式按项目类型分流**（`SessionManager.detectFlavor`）：Loom（Fabric）继续用 Gradle `--args="--gameDir … --width … --height …"`；ModDevGradle（NeoForge）**不能**用 `--args`——它的 `runClient` 主类是 `net.neoforged.devlaunch.Main`，第一个程序参数是它自己的参数文件，`--args` 会替换掉它并把 `--gameDir` 当主类（`ClassNotFoundException: --gameDir`，客户端直接起不来）。MDG 走 `--init-script <registry/<name>-<token>.init.gradle>`，脚本在 `projectsEvaluated` 里给 `runClient` 设 `gameDirectory` 并用 `args(...)` **追加**（`JavaArgs` 的 `args()` 是追加，CLI 的 `--args` 是替换）`--width/--height/--quickPlaySingleplayer`；已被真机验证（消费者项目 `world_ready` + 1000x600 窗口 + 直接进存档）。改这段前先读 `docs/plan-neoforge-port.md` §11.3 #11。project 默认 CWD、gameDir 默认 project/run，子模块须显式 gameDir；显式相对路径相对 CWD。world 必须是已有 saves 目录名，不自动建/删世界，拒绝路径穿越及逃逸 symlink。
+- 第一版 backend 是目标项目自己的 Gradle 包装器 + runClient（qualified 任务也只允许 runClient），Linux setsid、日志重定向，无新守护进程、无 Gradle 插件、无独立 MC 实现。**启动方式按项目类型分流**（`SessionManager.detectFlavor`）：Loom（Fabric）继续用 Gradle `--args="--gameDir … --width … --height …"`；ModDevGradle（NeoForge）**不能**用 `--args`——它的 `runClient` 主类是 `net.neoforged.devlaunch.Main`，第一个程序参数是它自己的参数文件，`--args` 会替换掉它并把 `--gameDir` 当主类（`ClassNotFoundException: --gameDir`，客户端直接起不来）。MDG 走 `--init-script <registry/<name>-<token>.init.gradle>`，脚本在 `projectsEvaluated` 里给 `runClient` 设 `gameDirectory` 并用 `args(...)` **追加**（`JavaArgs` 的 `args()` 是追加，CLI 的 `--args` 是替换）`--width/--height/--quickPlaySingleplayer`；已被真机验证（消费者项目 `world_ready` + 1000x600 窗口 + 直接进存档）。ForgeGradle（Forge 1.20.1）只被识别、不被托管：`session start` 在 `normalize()` 阶段（任何记录写入或进程启动之前）以明确消息拒绝并提示 `session attach`，不再落到 Loom 的 `--args` 路径上静默失败。改这段前先读 `docs/plan-neoforge-port.md` §11.3 #11。project 默认 CWD、gameDir 默认 project/run，子模块须显式 gameDir；显式相对路径相对 CWD。world 必须是已有 saves 目录名，不自动建/删世界，拒绝路径穿越及逃逸 symlink。
 - Registry 默认 XDG_STATE_HOME/mcdebug/sessions 或 ~/.local/state/mcdebug/sessions，每会话 JSON 含 schemaVersion/recordId、本次 token、启动配置、包装器与真实 MC 的 PID/startTime、instanceId、端点和日志。recordId 是 CAS 世代，不能只用 sessionToken（attached token 可以为空）。锁不能跨主线程 RPC/长等待持有；同 canonical gameDir 的 mdb.lock + mdb-owner.json 覆盖跨 registry/bootstrap 窗口。
 - server.ready 现在必须有 process 对象：pid、startTime（OS ProcessHandle 的 ISO Instant）、instanceId（每 JVM UUID）、sessionToken、canonical gameDir。两平面同 JVM 共用 RpcEnv 身份。客户端原子发布 mcdebug/client.json，gui.status 同样返回 process。Session 路由不额外调用 status；实际 RPC 连接握手绑定完整 expectedProcess，禁止端点换实例后继续操作。
 - 客户端在 RPC 绑定前持有 mcdebug/client.lock 的进程锁，直到 JVM shutdown；不替代/删除 MC 的 session.lock。被取消或被新 token 超越的延迟 bootstrap 不绑定 RPC/不覆盖发现文件，在 CLIENT_STARTED 正常退出；启动过程中新增 stop 标记也会在 CLIENT_STARTED 检查。

@@ -1,0 +1,201 @@
+package com.mcdebug.api
+
+import com.google.gson.JsonElement
+import com.google.gson.JsonNull
+import com.google.gson.JsonObject
+import com.mcdebug.rpc.RpcContext
+import com.mcdebug.rpc.RpcErrors
+import com.mcdebug.rpc.RpcException
+import com.mcdebug.rpc.RpcHandler
+import com.mcdebug.rpc.RpcHandlerGroup
+import com.mcdebug.util.NbtJson
+import com.mcdebug.util.ServerContext
+import net.minecraft.world.level.block.entity.BlockEntity
+import net.minecraft.world.level.block.entity.BlockEntityTicker
+import net.minecraft.nbt.ByteTag
+import net.minecraft.nbt.CompoundTag
+import net.minecraft.nbt.DoubleTag
+import net.minecraft.nbt.FloatTag
+import net.minecraft.nbt.IntTag
+import net.minecraft.nbt.LongTag
+import net.minecraft.nbt.NumericTag
+import net.minecraft.nbt.ShortTag
+import net.minecraft.nbt.Tag
+import net.minecraft.server.MinecraftServer
+import net.minecraft.server.level.ServerLevel
+import net.minecraft.core.BlockPos
+import java.util.concurrent.CompletableFuture
+
+object BlockEntityOps : RpcHandlerGroup {
+    override fun methods(): Map<String, RpcHandler> = mapOf(
+        "getNbt" to ::getNbt,
+        "setNbt" to ::setNbt,
+        "getField" to ::getField,
+        "setField" to ::setField,
+        "tick" to ::tick
+    )
+
+    private fun getNbt(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
+        RpcContext.onServer(server) {
+            val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
+            val pos = p.requirePos("pos")
+            val world = ServerContext.world(server, p.getStringOrNull("dim"))
+            val be = ServerContext.blockEntity(world, pos)
+            val nbt = be.saveWithoutMetadata()
+            JsonObject().apply { add("nbt", NbtJson.toJson(nbt)) }
+        }
+
+    private fun setNbt(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
+        RpcContext.onServer(server) {
+            val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
+            val pos = p.requirePos("pos")
+            val world = ServerContext.world(server, p.getStringOrNull("dim"))
+            val be = ServerContext.blockEntity(world, pos)
+            val nbtJson = p.get("nbt") ?: throw RpcException(RpcErrors.INVALID_PARAMS, "nbt required")
+            val nbt = NbtJson.fromJson(nbtJson) as? CompoundTag
+                ?: throw RpcException(RpcErrors.NBT_PARSE_ERROR, "nbt must be a JSON object")
+            applyBeNbt(world, pos, be, nbt)
+            JsonObject().apply { addProperty("ok", true) }
+        }
+
+    private fun getField(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
+        RpcContext.onServer(server) {
+            val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
+            val pos = p.requirePos("pos")
+            val path = p.requireString("path")
+            val world = ServerContext.world(server, p.getStringOrNull("dim"))
+            val be = ServerContext.blockEntity(world, pos)
+            val nbt = be.saveWithoutMetadata()
+            val value = NbtJson.getByPathAsJson(nbt, path)
+            JsonObject().apply { add("value", value) }
+        }
+
+    private fun setField(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
+        RpcContext.onServer(server) {
+            val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
+            val pos = p.requirePos("pos")
+            val path = p.requireString("path")
+            val valueJson = p.get("value") ?: throw RpcException(RpcErrors.INVALID_PARAMS, "value required")
+            val world = ServerContext.world(server, p.getStringOrNull("dim"))
+            val be = ServerContext.blockEntity(world, pos)
+            val nbt = be.saveWithoutMetadata()
+            val oldValue = NbtJson.getByPath(nbt, path)
+            var newValue = NbtJson.fromJson(valueJson)
+            // 未标注 #nbt 的 JSON 数字一律是 NbtInt；字段已存在且是别的数值类型时按原类型写，
+            // 否则很多 BE 的 load 用 getLong/getDouble 读到类型不符就当缺省值，写了等于没写。
+            if (oldValue is NumericTag && newValue is IntTag && oldValue.id != newValue.id) {
+                newValue = coerceNumeric(oldValue, newValue.asLong)
+            }
+            NbtJson.setByPath(nbt, path, newValue)
+            applyBeNbt(world, pos, be, nbt)
+            val after = NbtJson.getByPath(be.saveWithoutMetadata(), path)
+            JsonObject().apply {
+                if (after == newValue) {
+                    addProperty("ok", true)
+                } else {
+                    // BE 的 load 没接收这个值（字段名/类型不对，或该字段是派生的）。
+                    addProperty("ok", false)
+                    addProperty("reason", "NOT_APPLIED")
+                    add("written", NbtJson.toJson(newValue))
+                    add("readBack", after?.let { NbtJson.toJson(it) } ?: JsonNull.INSTANCE)
+                }
+            }
+        }
+
+    private fun coerceNumeric(like: NumericTag, v: Long): Tag = when (like) {
+        is ByteTag -> ByteTag.valueOf(v.toByte())
+        is ShortTag -> ShortTag.valueOf(v.toShort())
+        is LongTag -> LongTag.valueOf(v)
+        is FloatTag -> FloatTag.valueOf(v.toFloat())
+        is DoubleTag -> DoubleTag.valueOf(v.toDouble())
+        else -> IntTag.valueOf(v.toInt())
+    }
+
+    /**
+     * Apply a full NBT compound to a block entity and fire all the downstream
+     * notifications that `BlockEntity.load` alone does NOT trigger:
+     *
+     *   - `setChanged()` — flag the chunk for save (vanilla readNbt does not do this)
+     *   - `ServerLevel.dirtyListeners(pos, old, new, NOTIFY_ALL)` — re-broadcast the
+     *     block state to any tracking client (BE NBT deltas are part of this packet).
+     *     On a dedicated server with no real player tracking the chunk this is a no-op,
+     *     which is fine.
+     *   - `Level.updateComparators(pos, block)` — re-evaluate adjacent comparators so
+     *     inventory/content changes (furnace cook progress, chest fullness, IC2 machine
+     *     energy level via property delegate) propagate to redstone immediately. This is
+     *     the bit the old implementation was missing, causing "set NBT but comparator
+     *     signal didn't update" symptoms.
+     *
+     * Note: some BlockEntity subclasses cache derived state (redstone output, model
+     * state) that `readNbt` doesn't fully rebuild. That is a per-subclass vanilla/mod
+     * limitation; this helper covers the common inventory/comparator case.
+     */
+    private fun applyBeNbt(world: ServerLevel, pos: BlockPos, be: BlockEntity, nbt: CompoundTag) {
+        be.load(nbt)
+        be.setChanged()
+        val state = world.getBlockState(pos)
+        world.sendBlockUpdated(pos, state, state, 3)
+        world.updateNeighbourForOutputSignal(pos, state.block)
+    }
+}
+
+// ---- tick ----
+
+/** Upper bound for one `be.tick` call (about 10 minutes of game time). */
+private const val MAX_BE_TICKS = 12000
+
+/**
+ * 主动 tick 指定位置的方块实体 N 次（默认 1 次）。
+ *
+ * 用途：机器类测试的加速器——`wait.until` 是干等自然 tick（15s=300t 预算），
+ * 而很多机器逻辑（配方进度、热量、能量消耗）只依赖机器自身 tick 与相邻
+ * 能量接口（`adjacentEnergyTransfer.tick()` 在机器 tick 内部调用），
+ * 可以直接 `be.tick` 驱动 N 次，毫秒级完成原本十几秒的等待。
+ *
+ * 注意：
+ *  - 在 server 线程执行，与自然 tick 语义一致（并发安全）；
+ *  - 只 tick 目标 BE，不 tick 邻居/世界（能量网络等全局逻辑不在其内）；
+ *  - 不适用于依赖自然 tick 跨度的用例（如"机器在 300 自然 tick 内完成"
+ *    的时序验证），这类仍用 `wait.until`；
+ *  - 机器 tick 中可能主动 `setChanged` / 改变世界状态（如离心机加热），
+ *    与真实 tick 行为一致。
+ */
+private fun tick(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
+    RpcContext.onServer(server) {
+        val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
+        val pos = p.requirePos("pos")
+        val world = ServerContext.world(server, p.getStringOrNull("dim"))
+        val count = p.getIntOr("ticks", 1)
+        // Runs synchronously on the server thread: an unbounded count would stall the server.
+        if (count !in 0..MAX_BE_TICKS) {
+            throw RpcException(RpcErrors.INVALID_PARAMS, "ticks must be 0..$MAX_BE_TICKS (one call blocks the server thread), got $count")
+        }
+        val be = ServerContext.blockEntity(world, pos)
+        val state = world.getBlockState(pos)
+        // 走 BlockState.getBlockEntityTicker —— 与自然 tick 完全相同的调用路径（BlockEntityTicker）。
+        @Suppress("UNCHECKED_CAST")
+        val ticker = state.getTicker(world, be.type) as BlockEntityTicker<BlockEntity>? 
+            ?: throw RpcException(RpcErrors.INVALID_PARAMS, "block at $pos has no ticker (not a ticking block entity)")
+        // Like the level's ticker, pass the CURRENT state each tick: a block entity that changes its own state
+        // (lit furnace, a multiblock controller's in-structure flag) must see the change on the next tick.
+        // Stops early if the block entity is removed or replaced.
+        var ticked = 0
+        var currentTicker = ticker
+        var block = state.block
+        while (ticked < count) {
+            if (be.isRemoved || world.getBlockEntity(pos) !== be) break
+            val now = world.getBlockState(pos)
+            if (now.block !== block) {
+                block = now.block
+                @Suppress("UNCHECKED_CAST")
+                currentTicker = (now.getTicker(world, be.type) as BlockEntityTicker<BlockEntity>?) ?: break
+            }
+            currentTicker.tick(world, pos, now, be)
+            ticked++
+        }
+        JsonObject().apply {
+            add("pos", ServerContext.posAsJson(pos))
+            addProperty("dim", world.dimension().location().toString())
+            addProperty("ticked", ticked)
+        }
+    }

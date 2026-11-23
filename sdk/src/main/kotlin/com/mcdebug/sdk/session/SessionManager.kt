@@ -246,6 +246,14 @@ class SessionManager(
         require(Files.isRegularFile(project.resolve("gradlew"))) { "target project has no Gradle wrapper" }
         val game = canonicalPath(request.gameDir ?: project.resolve("run"))
         val task = qualifyTask(request.task, project, game)
+        // Refuse before anything is reserved or launched: a misdetected launch would only fail
+        // later as an opaque `failed` session with a broken runClient in its log.
+        check(detectFlavor(project, task) != RunFlavor.FORGEGRADLE) {
+            "ForgeGradle projects are not supported by `session start`: ForgeGradle's runClient owns its " +
+                "program arguments and working directory, so the --args launch used for Loom projects " +
+                "breaks it. Launch the client yourself and register it with " +
+                "`session attach NAME --game-dir <gameDir>` (attached sessions cannot be stopped by mdb)."
+        }
         request.world?.let { world ->
             require(world.isNotBlank() && world !in setOf(".", "..") && world.none { it == '/' || it == '\\' || it.code < 32 }) {
                 "world must be a saves directory name, not a path"
@@ -291,7 +299,7 @@ class SessionManager(
      *    `gameDirectory`, so the values are injected with an init script instead (verified on a real
      *    NeoForge consumer project).
      */
-    private enum class RunFlavor { LOOM, MODDEVGRADLE }
+    private enum class RunFlavor { LOOM, MODDEVGRADLE, FORGEGRADLE }
 
     private fun detectFlavor(project: Path, task: String): RunFlavor {
         var dir = project
@@ -306,7 +314,13 @@ class SessionManager(
                 "gradle/libs.versions.toml").map { d.resolve(it) }
         } + listOf("buildSrc/build.gradle", "buildSrc/build.gradle.kts").map { project.resolve(it) }
         val text = files.mapNotNull { runCatching { Files.readString(it) }.getOrNull() }.joinToString("\n")
-        return if (text.contains("net.neoforged.moddev") || text.contains("net.neoforged.gradle")) RunFlavor.MODDEVGRADLE else RunFlavor.LOOM
+        return when {
+            text.contains("net.neoforged.moddev") || text.contains("net.neoforged.gradle") -> RunFlavor.MODDEVGRADLE
+            // Recognised only to refuse it explicitly; falling through to the Loom launch used to
+            // strip ForgeGradle's own arguments and fail with an unrelated-looking crash.
+            text.contains("net.minecraftforge.gradle") || text.contains("forgegradle") -> RunFlavor.FORGEGRADLE
+            else -> RunFlavor.LOOM
+        }
     }
 
     /** Init script for the ModDevGradle path: same knobs `--args` gives a Loom run. */
@@ -351,6 +365,8 @@ class SessionManager(
             }
             RunFlavor.MODDEVGRADLE -> listOf("setsid", "--wait", "/bin/sh", gradlew, task, "--console=plain",
                 "--init-script", writeInitScript(record).toString())
+            // normalize() refuses ForgeGradle before a record exists; kept exhaustive on purpose.
+            RunFlavor.FORGEGRADLE -> throw IllegalStateException("ForgeGradle projects are not supported by `session start`")
         }
         if (flavor == RunFlavor.MODDEVGRADLE) {
             System.err.println("session launch: ModDevGradle project detected — game dir/window args go " +

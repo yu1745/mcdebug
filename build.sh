@@ -12,6 +12,11 @@
 # 可选仓库级覆盖：
 #   - build-tasks.txt  存在则其内容（一行一个任务）替代默认 `build` 任务
 #   - build-jars.txt   存在则只收集其中列出的 jar 文件名模式（每行一个 glob）
+#   - MCDEBUG_BUILD_VERSIONS=26.3,1.21.1,1.20.1 或 all
+#       根构建（纯 JVM 模块）之后，再用各自的 JDK 构建 versions/ 下的 Minecraft 版本，
+#       然后重新打包 CLI 把这些模组 JAR 内嵌进去。各版本需要的 JDK：26.3→25，1.21.1→21，
+#       1.20.1→17；依次取 JAVA25_HOME / JAVA21_HOME / JAVA17_HOME，未设置时回退
+#       /usr/lib/jvm/java-<N>-openjdk-amd64。不设置时只构建根模块，不触发任何 Minecraft 构建。
 # ═══════════════════════════════════════════════════════════════════════
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -40,11 +45,37 @@ if [ "$CLEAN" = 1 ]; then
 fi
 ./gradlew $TASKS --console=plain
 
+build_mc_version() {  # $1=versions/ 下的目录名  $2=Gradle 守护进程使用的 JDK 主版本
+  local jdk_var="JAVA$2_HOME"
+  local jdk="${!jdk_var:-/usr/lib/jvm/java-$2-openjdk-amd64}"
+  if [ ! -x "$jdk/bin/java" ]; then
+    echo "build.sh: versions/$1 需要 JDK $2：请设置 JAVA$2_HOME（当前候选：$jdk）" >&2
+    exit 1
+  fi
+  echo "build.sh: building versions/$1 with $jdk"
+  ( cd "versions/$1" && JAVA_HOME="$jdk" ./gradlew build --console=plain )
+}
+
+if [ -n "${MCDEBUG_BUILD_VERSIONS:-}" ]; then
+  requested="${MCDEBUG_BUILD_VERSIONS/all/26.3,1.21.1,1.20.1}"
+  IFS=',' read -r -a mc_lines <<< "$requested"
+  for line in "${mc_lines[@]}"; do
+    case "$line" in
+      26.3)   build_mc_version mc26.3 25 ;;
+      1.21.1) build_mc_version mc1.21.1 21 ;;
+      1.20.1) build_mc_version mc1.20.1 17 ;;
+      *) echo "build.sh: MCDEBUG_BUILD_VERSIONS 只接受 26.3,1.21.1,1.20.1 或 all（得到 '$line'）" >&2; exit 2 ;;
+    esac
+  done
+  # 模组 JAR 已在 versions/*/build/libs：重新打包 CLI，把它们内嵌进 mcdebug-cli.jar
+  ./gradlew :cli:copyCliJar --console=plain
+fi
+
 rm -rf "$OUT"
 mkdir -p "$OUT"
 
-# 收集产物 jar：排除 sources/dev 件；其余（含 shadow/-all）都收
-find . -path '*/build/libs/*.jar' ! -name '*-sources.jar' ! -name '*-dev.jar' -print0 \
+# 收集产物 jar：排除 sources/dev/slim 件（slim 是 Forge 未打 MixinExtras 的中间件）；其余（含 shadow/-all）都收
+find . -path '*/build/libs/*.jar' ! -name '*-sources.jar' ! -name '*-dev.jar' ! -name '*-slim.jar' -print0 \
   | while IFS= read -r -d '' j; do cp "$j" "$OUT/"; done
 
 # 可选过滤：build-jars.txt 每行一个 glob，只保留匹配的 jar

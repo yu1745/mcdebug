@@ -1,0 +1,23 @@
+// Minecraft 1.20.1 的独立构建（仅 Forge；ForgeGradle 6 需要 Gradle 8.1.1 + JDK 17，
+// 所以本目录自带低版本 wrapper，不与 26.3 / 1.21.1 的 Gradle 9 共用）。
+// 契约与共享源码按相对路径引用：
+//   ../../contract/src/main/kotlin   RPC 方法清单（三个版本的并集）
+//   ../../mod-core/src/main/kotlin   零 MC 依赖的共享源码（仅与本版本一致的那部分）
+// mod_version / maven_group / kotlin_version 在仓库根 gradle.properties。
+// `plugins {}` 块只能读本构建的 gradle.properties，所以 Kotlin 插件版本在这里统一指定。
+pluginManagement {
+	def rootProps = new Properties()
+	file('../../gradle.properties').withInputStream { rootProps.load(it) }
+	repositories {
+		gradlePluginPortal()
+		maven { name = 'Sponge'; url = 'https://repo.spongepowered.org/repository/maven-public/' }
+		maven { name = 'MinecraftForge'; url = 'https://maven.minecraftforge.net/' }
+	}
+	resolutionStrategy {
+		eachPlugin {
+			if (requested.id.id == 'org.jetbrains.kotlin.jvm') useVersion(rootProps.getProperty('kotlin_version'))
+		}
+	}
+}
+
+rootProject.name = 'mcdebug-forge'

@@ -1,0 +1,185 @@
+plugins {
+	id 'eclipse'
+	id 'idea'
+	id 'net.minecraftforge.gradle' version "${forgegradle_version}"
+	id 'org.spongepowered.mixin' version '0.7.+'
+	// 版本号由 settings.gradle 的 pluginManagement.resolutionStrategy 从仓库根 gradle.properties 读取
+	id 'org.jetbrains.kotlin.jvm'
+}
+
+// 产品版本（mod_version）与 Maven 组在仓库根 gradle.properties，三个 Minecraft 版本共用，不单独 bump。
+def rootProps = new Properties()
+file('../../gradle.properties').withInputStream { rootProps.load(it) }
+version = rootProps.getProperty('mod_version')
+group = rootProps.getProperty('maven_group')
+base { archivesName = project.archives_base_name }
+
+java.toolchain.languageVersion = JavaLanguageVersion.of(17)
+
+// 本版本是 1.20.1 分支就地改写后**冻结**的源码（只保留 Forge 形态，不与其他版本同步）：
+//   src/main/kotlin          服务端平面（无 Fabric 入口与 Fabric 接缝）
+//   src/client/kotlin        客户端平面（无 Fabric 入口与 Fabric 接缝）
+//   src/main/{java,kotlin}   Forge 接缝与每个 loader 一份的客户端 Mixin
+//   src/main/resources       mods.toml 与两份 mixin 配置
+// Forge 构建只有一个源集。契约按相对路径从仓库根编进来：发布 jar 必须自包含，
+// `implementation` 一个外部契约模块在别的游戏环境里会 NoClassDefFoundError。
+sourceSets {
+	main {
+		kotlin.srcDir 'src/client/kotlin'
+		kotlin.srcDir '../../contract/src/main/kotlin'
+	}
+	devtest { compileClasspath += sourceSets.main.output + sourceSets.main.compileClasspath
+		runtimeClasspath += sourceSets.main.output } }
+configurations { devtestImplementation.extendsFrom implementation }
+
+mixin {
+	add sourceSets.main, 'mcdebug.refmap.json'
+	config 'mcdebug.client.mixins.json'
+	config 'mcdebug.mixins.json'
+}
+
+minecraft {
+	mappings channel: 'official', version: "${minecraft_version}"
+
+	runs {
+		client {
+			workingDirectory project.file(project.findProperty('gameDir') ?: 'run-client')
+			property 'forge.logging.markers', 'REGISTRIES'
+			property 'forge.logging.console.level', 'info'
+			mods { mcdebug { source sourceSets.main } }
+		}
+		server {
+			workingDirectory project.file('run')
+			property 'forge.logging.markers', 'REGISTRIES'
+			property 'forge.logging.console.level', 'info'
+			mods { mcdebug { source sourceSets.main } }
+		}
+		gameTestServer {
+			workingDirectory project.file('run-gametest')
+			property 'forge.logging.markers', 'REGISTRIES'
+			property 'forge.logging.console.level', 'info'
+			property 'forge.enabledGameTestNamespaces', 'mcdebug'
+			if (project.hasProperty('devFlag')) property 'mcdebug.devtest.flag', project.property('devFlag')
+			arg '--world'
+			arg 'gametestworld'
+			mods { mcdebug { source sourceSets.main; source sourceSets.devtest } }
+		}
+	}
+}
+
+repositories {
+	// 可选的实机对照（-Poracle）需要本机已有的 Mantle / TConstruct JAR：目录由
+	// `-PoracleDownloads=<dir>` 指定。不传时不注册 flatDir，普通构建照常进行。
+	if (project.hasProperty('oracleDownloads')) {
+		flatDir { dirs project.property('oracleDownloads') }
+	} else if (project.hasProperty('oracle')) {
+		throw new GradleException('-Poracle needs -PoracleDownloads=<dir> containing the Mantle/TConstruct jars')
+	}
+	mavenCentral()
+	maven { url = 'https://maven.minecraftforge.net' }
+	maven { url = 'https://repo.spongepowered.org/repository/maven-public/' }
+	maven { url = 'https://thedarkcolour.github.io/KotlinForForge/' }
+}
+
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).configureEach {
+	kotlinOptions {
+		jvmTarget = '17'
+		// 语言版本跟随编译器（共享源码用到了 Kotlin 2.2+ 特性），但 API 面锁定 1.9：
+		// 运行时 KotlinForForge 4.x 只带 Kotlin 1.9.x 标准库，禁止调用更新的标准库 API。
+		apiVersion = '1.9'
+	}
+}
+
+dependencies {
+	minecraft "net.minecraftforge:forge:${minecraft_version}-${forge_version}"
+	implementation "thedarkcolour:kotlinforforge:${kff_version}"
+	if (project.hasProperty('oracle')) { // dev-only: run the real mods (jars in the flatDir above) next to mcdebug
+		runtimeOnly fg.deobf('local:Mantle:1.20.1-1.11.115')
+		runtimeOnly fg.deobf('local:TConstruct:1.20.1-3.12.1.231')
+	}
+	annotationProcessor 'org.spongepowered:mixin:0.8.5:processor'
+	compileOnly annotationProcessor('io.github.llamalad7:mixinextras-common:0.4.1')
+	implementation jarJar('io.github.llamalad7:mixinextras-forge:0.4.1') { jarJar.ranged(it, '[0.4.1,)') }
+	compileOnly 'org.slf4j:slf4j-api:2.0.9'
+	testImplementation 'org.junit.jupiter:junit-jupiter:5.10.2'
+	testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+// 原有单测（谓词 DSL、NBT 往返、参数校验、契约、纯客户端调度/几何）不需要启动游戏：
+// 测试类路径带上 main 的输出，与 Fabric 版本的配置一致。
+sourceSets.test.compileClasspath += sourceSets.main.output
+sourceSets.test.runtimeClasspath += sourceSets.main.output
+
+test {
+	useJUnitPlatform()
+	testLogging {
+		events "FAILED", "PASSED", "SKIPPED"
+		exceptionFormat "full"
+	}
+}
+
+jarJar.enable()
+
+jar {
+	archiveClassifier = 'slim'
+	finalizedBy 'reobfJar'
+	manifest { attributes 'Implementation-Title': 'mcdebug-forge', 'Implementation-Version': project.version }
+}
+
+processResources {
+	inputs.property 'version', project.version
+	filesMatching('META-INF/mods.toml') { expand 'version': project.version }
+}
+
+// ForgeGradle adds `--gameDir .` itself; mdb's session launcher appends its own `--gameDir`, and
+// ModLauncher rejects the duplicate. Drop FG's copy when both are present.
+
+// The shippable jar is the jarJar one (bundles MixinExtras, which Forge 1.20.1 does not provide).
+tasks.named('jarJar') {
+	archiveClassifier = ''
+	finalizedBy 'reobfJarJar'
+}
+tasks.named('build') { dependsOn 'jarJar' }
+
+// ---- 自包含校验 ---------------------------------------------------------------
+// 与 Fabric / NeoForge 构建同一条线：发布 jar 是单个文件丢进 mods/，缺失入口点、接缝、
+// Mixin 配置或契约类时必须在构建期失败，而不是在消费者项目的启动崩溃里才发现。
+// Kotlin 标准库由 KotlinForForge 提供（本 jar 不内嵌），所以不检查 kotlin/*。
+tasks.register('verifyJarSelfContained') {
+	description = 'Fail if the Forge jar misses classes/resources the entrypoints need at runtime'
+	group = 'verification'
+	def jarTask = tasks.named('jarJar')
+	dependsOn jarTask
+	mustRunAfter 'reobfJarJar'
+	doLast {
+		def required = [
+			'META-INF/mods.toml',
+			'mcdebug.mixins.json',
+			'mcdebug.client.mixins.json',
+			// 入口 + Forge 接缝实现
+			'com/mcdebug/loader/forge/McDebugForge.class',
+			'com/mcdebug/loader/forge/ForgeLoaderApi.class',
+			'com/mcdebug/loader/forge/ForgeClientLoaderApi.class',
+			'com/mcdebug/loader/forge/ForgeStorageApi.class',
+			// 共享平面（服务端 + 客户端 + loader 中立接缝）
+			'com/mcdebug/ServerPlane.class',
+			'com/mcdebug/loader/LoaderApi.class',
+			'com/mcdebug/loader/StorageApi.class',
+			'com/mcdebug/client/ClientPlane.class',
+			'com/mcdebug/client/GuiOps.class',
+			'com/mcdebug/client/mixin/MinecraftRenderMixin.class',
+			'com/mcdebug/client/mixin/MixinTargets.class',
+			// contract 源码直接编进 jar，发布 jar 必须自包含
+			'com/mcdebug/contract/Methods.class',
+		]
+		def jarFile = jarTask.get().archiveFile.get().asFile
+		def entries = new java.util.zip.ZipFile(jarFile).withCloseable { zip -> zip.entries().collect { it.name } as Set }
+		def missing = required.findAll { !entries.contains(it) }
+		if (missing) {
+			throw new GradleException("${jarFile.name} is not self-contained, missing: ${missing}")
+		}
+		logger.lifecycle("verifyJarSelfContained (forge): ${required.size()} required entries present in ${jarFile.name}")
+	}
+}
+
+tasks.named('check') { dependsOn 'verifyJarSelfContained' }

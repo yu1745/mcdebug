@@ -9,31 +9,41 @@
 
 ## 安装与构建
 
-使用 **JDK 25** 和 Gradle 9.6.0 构建模组。独立 CLI 仍支持 Java 17+。
-本次移植基于 `1.21.1` 的提交 `72a70c2`，版本实现差异和验证说明见
-[26.3 平台适配](port-26.3.md)。两个加载器的 Minecraft 运行时均使用官方名称。
+仓库同时维护三个 Minecraft 版本，每个版本是 `versions/` 下的独立构建；
+CLI、SDK 与协议模块是仓库根的纯 JVM 工程。完整矩阵见[单仓多版本说明](monorepo.md)。
 
 ```bash
-./gradlew build              # Fabric 模组、协议模块及 JAR 自包含检查
-./gradlew :cli:copyCliJar    # CLI 完整 JAR，输出到仓库根目录，不进 Git；内嵌两个加载器的 JAR
+./gradlew test                                            # 纯 JVM 模块（JDK 25 工具链，字节码 Java 17）
+(cd versions/mc26.3 && ./gradlew build)                   # Fabric 26.3 + 单测 + 自包含检查
+(cd versions/mc26.3 && ./gradlew :neoforge:build)         # NeoForge 26.3
+(cd versions/mc1.21.1 && JAVA_HOME=<JDK 21> ./gradlew build && JAVA_HOME=<JDK 21> ./gradlew :neoforge:build)
+(cd versions/mc1.20.1 && JAVA_HOME=<JDK 17> ./gradlew build)   # 仅 Forge，reobfJarJar
+./gradlew :cli:copyCliJar                                 # CLI 完整 JAR，输出到仓库根目录，不进 Git
 
 java -jar mcdebug-cli.jar --help
 ```
 
-NeoForge 26.3 通过独立的嵌套构建使用**同一份源码**
+CLI 不触发任何 Minecraft 构建，只内嵌 `versions/*/build/libs` 中**已存在**的模组 JAR
+（全部构建完毕时为 5 个，位于 `META-INF/mcdebug/<mc>/<loader>.jar`）；
+`-PembedVersions=26.3,1.21.1` 可限定版本。`java -jar mcdebug-cli.jar jar --list` 列出内嵌与缺失的组合。
+NeoForge 通过各版本目录下的嵌套构建与 Fabric 共享同一份源码
 （`./gradlew :neoforge:build|:neoforge:runServer|:neoforge:runClient`），
-冒烟脚本为 `scripts/neoforge-smoke.sh`。
-架构、验证结果和加载器差异见 [NeoForge 移植说明](plan-neoforge-port.md)。
+冒烟脚本为各版本目录下的 `scripts/fabric-smoke.sh` 与 `scripts/neoforge-smoke.sh`。
+架构、验证结果和加载器差异见 [NeoForge 移植说明](plan-neoforge-port.md)；
+26.3 的 API 适配见 [26.3 平台适配](port-26.3.md)，两个加载器的 26.3 运行时均使用官方名称。
 
 编码代理可使用 Claude Code 技能了解工作流与常见问题；具体命令仍以 CLI 的 `--help` 为准。
 CLI 携带与自身版本匹配的技能：`mcdebug skill` 将其写入
 `~/.agents/skills/mcdebug/SKILL.md`，支持 `--output DIR` 和 `--print`，源码位于 `skills/mcdebug/`。
+各 Minecraft 版本的差异（加载器、JDK、安装命令、版本专属行为）在同目录的
+`references/mc-<ver>.md`，技能正文会指向对应文件。
 `mcdebug skill --name neoforge-fabric-port` 会把内嵌移植技能及其参考文件安装到
 `~/.agents/skills/neoforge-fabric-port/`，同样支持 `--output DIR`。
 
 下文的 `mcdebug` 均可替换为 `java -jar mcdebug-cli.jar` 或原生可执行文件 `mdb`
 （见[原生可执行文件分发](#原生可执行文件分发)）。带标签的版本会在 GitHub Release 中附上
-`mcdebug-cli.jar` 和模组 JAR；CLI 也携带同一次构建的模组 JAR，可通过 `mcdebug jar` 提取。
+`mcdebug-cli.jar` 和模组 JAR（`mcdebug-<loader>-<mc>-<version>.jar`）；
+CLI 也携带同仓库构建的模组 JAR，可通过 `mcdebug jar` 提取。
 
 Fabric 工程创建说明：<https://docs.fabricmc.net/develop/getting-started/creating-a-project#setting-up>。
 NeoForge 工程创建说明：<https://docs.neoforged.net/docs/gettingstarted/>。
@@ -46,12 +56,15 @@ NeoForge 工程创建说明：<https://docs.neoforged.net/docs/gettingstarted/>�
 CLI 内嵌自身构建的模组 JAR，以下命令会安装相同版本，无需下载：
 
 ```bash
-mcdebug jar --output path/to/consumer/run/mods                  # Fabric：mcdebug-<version>.jar
-mcdebug jar --loader neoforge --output .../run/mods             # NeoForge：mcdebug-neoforge-<version>.jar
+mcdebug jar --mc 26.3 --loader fabric --output .../run/mods     # mcdebug-fabric-26.3-<version>.jar
+mcdebug jar --mc 1.21.1 --loader neoforge --output .../run/mods  # mcdebug-neoforge-1.21.1-<version>.jar
+mcdebug jar --mc 1.20.1 --output .../run/mods                   # mcdebug-forge-1.20.1-<version>.jar（--loader 默认 forge）
 ```
 
-两种模式都会删除该目录中另一加载器的 JAR，因为相同 `modId` 的两个副本会中止模组加载。
-两个 JAR 均内嵌未重定位的 Kotlin 标准库，mcdebug 无需 Fabric Language Kotlin 或 KotlinForForge。
+所有模式都会删除该目录中其他 Minecraft 版本、其他加载器与旧命名的 mcdebug JAR
+（`mcdebug-<version>.jar`、`mcdebug-neoforge-<version>.jar` 等），因为相同 `modId` 的两个副本会中止模组加载。
+`--mc` 默认 `26.3`，`--loader` 默认 `fabric`（1.20.1 只有 `forge`）；CLI 未内嵌所选组合时会报错并列出构建命令。
+Fabric 与 NeoForge 的 JAR 内嵌未重定位的 Kotlin 标准库；Forge 1.20.1 版由 KotlinForForge 4.x 提供。
 
 单人客户端在同一进程中运行两个平面，因此 `world.*` / `be.*` / `inv.*` 和 `gui.*`
 可同时操作同一个集成服务器。

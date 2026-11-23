@@ -1,12 +1,15 @@
 ---
 name: mcdebug
-description: 通过 mcdebug CLI（mdb / java -jar mcdebug-cli.jar）操作正在运行的 Minecraft 26.3（Fabric 或 NeoForge）：在服务端平面设置方块、NBT、库存、存储和实体，在客户端平面截图、点击、悬停及热重载 GUI Screen，并用 wait.until 断言。用于测试或调试运行中模组的方块、机器、GUI，或通过 mcdebug RPC 套接字操作服务端。
+description: 通过 mcdebug CLI（mdb / java -jar mcdebug-cli.jar）操作正在运行的 Minecraft（26.3、1.21.1：Fabric 或 NeoForge；1.20.1：Forge）：在服务端平面设置方块、NBT、库存、存储和实体，在客户端平面截图、点击、悬停及热重载 GUI Screen，并用 wait.until 断言。用于测试或调试运行中模组的方块、机器、GUI，或通过 mcdebug RPC 套接字操作服务端。各版本的差异在 references/mc-<ver>.md。
 ---
 
 # mcdebug CLI 使用说明
 
-本构建面向 Minecraft 26.3，游戏需要 JDK 25，CLI 支持 Java 17+。
-保留 CLI 原有的 GLFW 数值键码和鼠标按钮编号（0 左键 / 1 右键 / 2 中键），内部转换为 SDL。
+一份 CLI 服务三个 Minecraft 版本：26.3 与 1.21.1（Fabric、NeoForge）和 1.20.1（仅 Forge）。
+CLI 支持 Java 17+，游戏所需的 JDK、加载器与各版本的行为差异见参考文件：
+`references/mc-26.3.md`、`references/mc-1.21.1.md`、`references/mc-1.20.1.md`（与本文一同安装）。
+先确认目标游戏的 Minecraft 版本与加载器，再读对应参考。
+键名与鼠标按钮编号在 CLI 层始终沿用 GLFW 约定（0 左键 / 1 右键 / 2 中键）。
 
 mcdebug 是通过 Unix 套接字提供 JSON-RPC 的模组，一个 JAR 同时包含服务端和客户端，CLI 与之通信。
 每个子命令的 `--help` 都包含详细结构和注意事项，**先读帮助，不要猜选项**。
@@ -36,10 +39,14 @@ mcdebug --version
 
 v0.6.3 之前的发布没有 `mcdebug-cli.jar` 附件。也可从源码构建：
 `./gradlew :cli:copyCliJar` 会生成 `./mcdebug-cli.jar`。
-CLI 内嵌**两个加载器**的模组 JAR 和本技能，均与 CLI 同版本：
-`mcdebug jar --output <gameDir>/mods` 安装 Fabric 模组，
-`mcdebug jar --loader neoforge --output <gameDir>/mods` 安装 NeoForge 模组，
-两者都会移除另一加载器或旧版本的 JAR。`mcdebug skill` 将本技能刷新为 CLI 对应版本。
+CLI 内嵌各 `<mc, loader>` 组合的模组 JAR（全部构建完毕时共 5 个）和本技能，均与 CLI 同版本；
+`mcdebug jar --list` 列出已内嵌与缺失的组合（未构建的版本不会被内嵌，报错里给出构建命令）。
+安装到 `mods/`：`mcdebug jar --mc 26.3 --loader fabric --output <gameDir>/mods`
+（`--mc` 默认 26.3，`--loader` 默认 fabric，1.20.1 只有 forge），
+写出的文件名是 `mcdebug-<loader>-<mc>-<version>.jar`。
+写入目录时会移除其中**所有**其他 mcdebug JAR：其他 Minecraft 版本、其他加载器，
+以及旧命名的 `mcdebug-<version>.jar` / `mcdebug-neoforge-<version>.jar`。
+`mcdebug skill` 将本技能刷新为 CLI 对应版本。
 `mcdebug skill --name neoforge-fabric-port` 安装内嵌移植工作流和全部参考文件。
 
 下文的 `mcdebug` 代表找到的任一入口。
@@ -49,7 +56,7 @@ CLI 内嵌**两个加载器**的模组 JAR 和本技能，均与 CLI 同版本�
 - **自有开发客户端，模组开发时优先使用**：托管会话会启动工程的 `runClient` 并发现两个平面：
 
   ```bash
-  mcdebug jar --output run/mods                     # 将同版本模组装入消费者的 mods/，移除旧版本
+  mcdebug jar --mc <ver> --loader <loader> --output run/mods   # 同版本模组装入消费者的 mods/，移除旧版本
   mcdebug session start dev --project . --world "New World"                  # world 是 saves/ 下的目录名
   mcdebug --session dev status                      # 后续每次调用都带 --session dev
   mcdebug session stop dev                          # 仅限自有会话，会保存世界
@@ -62,6 +69,8 @@ CLI 内嵌**两个加载器**的模组 JAR 和本技能，均与 CLI 同版本�
   `failed`，`lastError` 包含崩溃行，`session logs dev` 提供完整输出。
   Fabric 加载器错误，如重映射或缺少依赖，也会返回 `failed`，但错误窗口可能使 JVM 继续存活，
   此时使用 `session stop --force`。
+  托管启动只支持 Fabric Loom 与 NeoForge ModDevGradle 工程；ForgeGradle 工程（1.20.1）会被
+  `session start` 在创建任何记录之前明确拒绝，需自行启动客户端后用 `session attach NAME --game-dir <gameDir>` 连接。
   `--width/--height` 的优先级低于工程 `loom.runs.client` 中的 `programArgs '--width' ...`。
   会话记录仍显示请求尺寸，`gui status` 显示实际窗口。
   托管会话的 `--render` 默认是 **demand**，模组全局默认仍是 continuous。
@@ -70,6 +79,7 @@ CLI 内嵌**两个加载器**的模组 JAR 和本技能，均与 CLI 同版本�
   `session start --show-toasts` 在启动时开启，`mcdebug --session NAME gui toasts on|off` 在当前进程内切换；
   关闭时清理已显示和排队中的弹窗，重新开启后只显示之后的弹窗，`gui status` 的 `toastsEnabled` 报告状态。
   模组通过启动令牌环境变量识别托管启动，普通启动与 `session attach` 保持原版行为。
+  1.20.1 模组没有 `gui.toasts`，提示弹窗始终按原版显示。
   旧 CLI 启动的托管客户端同样隐藏，可用 `raw gui.toasts '{"enabled":true}'` 打开；
   新 CLI 启动旧模组时弹窗照常显示，`gui toasts` 返回方法不存在（退出码 3）。
 
@@ -124,10 +134,11 @@ mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeo
   **数量使用加载器原生单位**，跨加载器比较前先读取 `server.status.fluidUnit`：
   Fabric 为 `droplet`，81000 = 1 桶；NeoForge 为 `mb`，1000 = 1 桶。
   能量读取 `server.status.energyUnit`，Fabric 为 `E`，NeoForge 为 `FE`。
+  Forge 1.20.1 同为 `mb` 与 `FE`。
   NeoForge 的 `fluid.* --index` 只选择**报告**哪个罐，填充与抽取通过整个 `IFluidHandler` 路由；
   `supportsInsertion/supportsExtraction` 表示**当前状态**，例如满罐返回 `supportsInsertion:false` 但仍可抽取，
   Fabric 则使用能力标志。不要跨加载器比较这两个值，也不要将 false 理解为永远不接收。
-  26.3 两个加载器的 `reflect.*` 均使用官方名称，只有 Fabric 支持短类名。
+  `reflect.*` 的名称空间与短类名支持情况随 Minecraft 版本与加载器不同，见版本参考文件。
   `reflect get` 和 `reflect set` 均接收 `--path`；`set` 写入**最后**一段，
   例如 `--path overworld.dayTime` 写入 overworld 的 dayTime；`--field` 是直接形式。
   大集合返回摘要，引用含 `size`，被截断时附带 `truncated:true` 和 `returned:N`；
@@ -152,10 +163,12 @@ mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeo
   `"/tick sprint stop"` 提前停止；或 `"/tick rate 200"` 持续提速，**不会自动恢复**，须用 `/tick rate 20` 还原。
   `server health` 显示加速后的实际 TPS，上限随目标速率变化。
   只有 tick 驱动的状态会加速，按 `System.currentTimeMillis` 等墙钟计时的冷却不会。
+  1.20.1 没有原版 `/tick` 命令与 tick 速率管理器：`sprint:true` 被接受但只按自然速率等待，不会加速。
   不要混用手动 `/tick sprint` 和 `--sprint`；集成服务器必须未暂停。
 - 物品参数中的 `--nbt` **只表示 `minecraft:custom_data` 复合标签**。
   `inv.getSlot` 会原样回传，因此往返一致不能证明模组已读取它。
   注册表数据或原版数据，如附魔、储存附魔、药水内容、损伤、自定义名称，须使用 `--components` / `"components"`，
+  1.20.1 没有数据组件：`--nbt` 就是物品的完整 NBT 标签，`components` 参数被忽略。
   格式为原版补丁：`--components '{"minecraft:enchantments":{"levels":{"minecraft:unbreaking":3}}}'`；
   `"!minecraft:id":{}` 移除默认组件。所有接收物品的命令均支持，包括
   `world use-on-block/use-item/attack-block/...`、`inv set-slot/insert`、

@@ -52,40 +52,75 @@ tasks.named('processResources') {
 	}
 }
 
-// The mod jar of this same build travels inside the CLI (`mcdebug jar` writes it out): versions
-// always match and nothing is downloaded. The root project is evaluated first, so remapJar exists.
-def modJar = rootProject.tasks.named('jar')
-
-// The NeoForge jar of this same build travels inside the CLI as well (`mcdebug jar --loader neoforge`).
-// neoforge/ is an independent Gradle build, so this goes through the root delegate task
-// `:neoforge:build`; the file name carries the same mod_version, read from the root gradle.properties.
-def neoJarFile = rootProject.file("neoforge/build/libs/mcdebug-neoforge-${version}.jar")
+// ---- 内嵌的模组 JAR ----
+// The mod jars travel inside the CLI (`mcdebug jar --mc <line> --loader <loader>` writes one out):
+// same repository, same mod_version, nothing is downloaded. The three Minecraft lines are
+// independent builds that each need their own JDK (see versions/), so this build never triggers
+// them. It only collects jars that already exist under versions/*/build/libs:
+//   ./gradlew :cli:copyCliJar                      embed every built jar (all five when everything is built)
+//   ./gradlew :cli:copyCliJar -PembedVersions=26.3 restrict to the listed Minecraft lines
+// A listed line without any built jar fails the build; an unlisted/missing line is simply not embedded.
+def modJarCandidates = [
+	'26.3'  : [fabric  : "versions/mc26.3/build/libs/mcdebug-${version}.jar",
+	           neoforge: "versions/mc26.3/neoforge/build/libs/mcdebug-neoforge-${version}.jar"],
+	'1.21.1': [fabric  : "versions/mc1.21.1/build/libs/mcdebug-${version}.jar",
+	           neoforge: "versions/mc1.21.1/neoforge/build/libs/mcdebug-neoforge-${version}.jar"],
+	'1.20.1': [forge   : "versions/mc1.20.1/build/libs/mcdebug-forge-${version}.jar"],
+]
+// 路径相对仓库根（cli/ 只是子项目目录）。
+def repoFile = { String relativePath -> rootProject.file(relativePath) }
+def requestedVersions = (providers.gradleProperty('embedVersions').orNull ?: '')
+	.split(',').collect { it.trim() }.findAll { !it.isEmpty() }
+requestedVersions.each { line ->
+	if (!(line in modJarCandidates)) {
+		throw new GradleException("unknown -PembedVersions entry '$line' (expected one of ${modJarCandidates.keySet()})")
+	}
+}
+// "<mc>/<loader>" -> file, for every built jar that should be embedded.
+def embeddedModJars = [:]
+modJarCandidates.each { line, loaders ->
+	if (requestedVersions && !(line in requestedVersions)) return
+	loaders.each { loader, path ->
+		def jarFile = repoFile(path)
+		if (jarFile.isFile()) embeddedModJars["${line}/${loader}".toString()] = jarFile
+	}
+}
+requestedVersions.each { line ->
+	if (!embeddedModJars.keySet().any { it.startsWith("${line}/") }) {
+		throw new GradleException("-PembedVersions=${line}: no built mod jar under versions/mc${line}/*/build/libs; " +
+			"build that Minecraft line first (see docs/monorepo.md)")
+	}
+}
 
 tasks.shadowJar {
-	dependsOn ':neoforge:build'
 	archiveClassifier = ''
 	archiveFileName = 'mcdebug-cli.jar'
 	mergeServiceFiles()
-	from(modJar.flatMap { it.archiveFile }) {
-		into 'META-INF/mcdebug'
-		rename { 'mod.jar' }
-	}
-	from(neoJarFile) {
-		into 'META-INF/mcdebug'
-		rename { 'mod-neoforge.jar' }
+	embeddedModJars.each { combination, jarFile ->
+		def (line, loader) = combination.split('/') as List
+		from(jarFile) {
+			into "META-INF/mcdebug/${line}"
+			rename { "${loader}.jar" }
+		}
 	}
 	doLast {
 		// `from(file)` silently skips a missing file: check the produced fat jar instead of trusting it.
-		def required = ['META-INF/mcdebug/mod.jar', 'META-INF/mcdebug/mod-neoforge.jar']
+		def required = embeddedModJars.keySet().collect { "META-INF/mcdebug/${it}.jar" }.sort()
 		def zip = new java.util.zip.ZipFile(tasks.shadowJar.archiveFile.get().asFile)
 		try {
 			def missing = required.findAll { zip.getEntry(it) == null }
 			if (!missing.isEmpty()) {
 				throw new GradleException("CLI fat jar is missing embedded mod jars: ${missing} " +
-					"(run './gradlew :neoforge:build' first, or check the neoforge build output name)")
+					"(a version build was rewritten while the CLI was packaging; run again)")
 			}
 		} finally {
 			zip.close()
+		}
+		if (embeddedModJars.isEmpty()) {
+			logger.lifecycle("CLI fat jar embeds no mod jar (none built under versions/); " +
+				"'mcdebug jar' will explain how to build them")
+		} else {
+			logger.lifecycle("CLI fat jar embeds mod jars: ${embeddedModJars.keySet().sort().join(', ')}")
 		}
 	}
 	manifest {

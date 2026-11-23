@@ -4,6 +4,10 @@
 1.21 工作树保持不变。Minecraft 版本移植复用现有后端测试用例；
 独立的 [JUnit 测试前端](testkit.md) 使用自己的宿主测试验证。
 
+> 合仓后（见[单仓多版本说明](monorepo.md)），本文的构建命令都在 `versions/mc26.3/` 下执行，
+> 冒烟脚本位于 `versions/mc26.3/scripts/`，CLI 在仓库根用 `./gradlew :cli:copyCliJar` 打包。
+> 下文保留移植当时的原始记录，路径按此对应。
+
 ## 构建
 
 使用 JDK 25 和项目自带的 Gradle 9.6.0 包装器：

@@ -1,0 +1,21 @@
+{
+  "required": true,
+  "package": "com.mcdebug.client.mixin",
+  "compatibilityLevel": "JAVA_21",
+  "client": [
+    "AbstractContainerScreenAccessor",
+    "AbstractWidgetRenderMixin",
+    "MinecraftRenderMixin",
+    "GameRendererMixin",
+    "ScreenInputMixin",
+    "ClientPacketListenerMixin",
+    "NativeImageAccessor",
+    "ClientTextTooltipAccessor",
+    "GuiGraphicsMixin",
+    "RenderSystemMixin",
+    "ToastComponentMixin"
+  ],
+  "injectors": {
+    "defaultRequire": 1
+  }
+}

@@ -1,0 +1,40 @@
+{
+	"schemaVersion": 1,
+	"id": "mcdebug",
+	"version": "${version}",
+	"name": "mcdebug",
+	"description": "JSON-RPC debug agent for mod development automation. Two planes in one jar: the server plane (world/block-entity/inventory inspection and modification over a unix socket + TCP) and the client plane (real GUI/rendering: screenshots and Screen-level clicks, method group gui.*).",
+	"authors": [
+		"mcdebug"
+	],
+	"contact": {
+		"homepage": "https://github.com/yu1745/mcdebug"
+	},
+	"license": "MIT",
+	"environment": "*",
+	"entrypoints": {
+		"server": [
+			{
+				"value": "com.mcdebug.McDebugMod"
+			}
+		],
+		"client": [
+			{
+				"value": "com.mcdebug.client.McDebugClientMod"
+			}
+		]
+	},
+	"mixins": [
+		"mcdebug.mixins.json",
+		{
+			"config": "mcdebug.client.mixins.json",
+			"environment": "client"
+		}
+	],
+	"depends": {
+		"fabricloader": ">=0.14.21",
+		"minecraft": "~1.21.1",
+		"java": ">=21",
+		"fabric-api": "*"
+	}
+}

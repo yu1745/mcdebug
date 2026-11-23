@@ -1,0 +1,329 @@
+package com.mcdebug.api
+
+import com.google.gson.JsonObject
+import com.mcdebug.rpc.RpcErrors
+import com.mcdebug.rpc.RpcException
+import com.mojang.authlib.GameProfile
+import net.minecraft.world.entity.Entity
+import net.minecraft.network.Connection
+import net.minecraft.network.protocol.PacketFlow
+import net.minecraft.server.MinecraftServer
+import net.minecraft.server.level.ServerPlayer
+import net.minecraft.server.level.ServerLevel
+import net.minecraft.world.level.GameType
+import org.slf4j.Logger
+import org.slf4j.LoggerFactory
+import java.util.UUID
+import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
+import net.minecraft.server.level.ClientInformation
+import net.minecraft.server.network.CommonListenerCookie
+import com.mcdebug.loader.Loader
+
+/**
+ * Fake ServerPlayer used by the interaction RPCs (world.placeAsPlayer,
+ * world.useOnBlock, world.attackBlock, world.breakBlock, world.useItem,
+ * world.useItemHold, world.interactEntity, world.attackEntity, ...).
+ *
+ * The fake player is SPAWNED into the world: it is created through the same path
+ * real players use (`ServerLevel.onPlayerConnected`), so it is registered in the
+ * world's entity manager and ticked every server tick. Consequences:
+ *   - `world.getPlayers()`, `getEntitiesByClass(ServerPlayer...)`, mob
+ *     targeting and per-player tick hooks all see it — mods that initialize
+ *     per-player state in join/tick hooks no longer crash on null state.
+ *   - It is NOT registered in PlayerManager: invisible to /list, @a, tab list
+ *     and permission plugins, and no packets are ever sent to a real client
+ *     (the network handler is a no-op that drops all outbound packets, so
+ *     openHandledScreen / sendMessageToClient / Criteria.trigger() don't NPE).
+ *   - Its presence in `world.players` keeps the world ticking even with no real
+ *     players online (desirable for a debug tool).
+ *
+ * Because it is spawned, the player must never die or drift: it is kept
+ * invulnerable, gravity-less and velocity-reset every tick (see
+ * [ensureProtected] and the keepalive registered by [install]). The resting
+ * game mode is SURVIVAL; every RPC applies its own mode via the optional
+ * `gamemode` param (default survival) and restores afterwards.
+ *
+ * One instance is kept per (server, world) pair, plus one per screen session
+ * (ScreenOps). All interaction state (position, yaw/pitch, hand stacks) is set
+ * per call and cleaned up afterwards, so calls are isolated.
+ */
+internal object FakePlayerPool {
+    private val LOGGER: Logger = LoggerFactory.getLogger("mcdebug-fakeplayer")
+
+    // Fixed UUID — same identity across server restarts, across calls, across dims.
+    // mcdebug_<random> namespace makes it easy to grep in NBT.
+    val PROFILE: GameProfile = GameProfile(
+        UUID.fromString("8c0a4d6e-3f2b-4a1e-9d8c-5e7f0a1b2c3d"),
+        "[mcdebug_fake_player]"
+    )
+
+    private val cache = HashMap<Pair<MinecraftServer, ServerLevel>, ServerPlayer>()
+
+    /** Every player created through this pool (cached + per-screen-session), for keepalive/pruning. */
+    private val allSpawned = HashSet<ServerPlayer>()
+
+    /**
+     * Single global lock serializing all fake-player interactions.
+     *
+     * Why a lock is needed: the cached ServerPlayer is mutated per call
+     * (position, yaw/pitch, hand stack, sneaking, game mode, abilities). The RPC
+     * server dispatches each connection on its own thread inside
+     * `RpcContext.onServer { ... }` (on the MC main thread, but multiple handler
+     * futures can be queued and interleaved). Without serialization, handler A's
+     * state could be overwritten by handler B before A reads it back.
+     *
+     * Deadlock safety: every `withFakePlayer` block runs on the MC main thread
+     * and contains only synchronous vanilla calls — no `server.execute { }`, no
+     * future.get(), no cross-Ops dispatch, no blocking IO. The block never waits
+     * on another main-thread task, so holding this lock can't deadlock.
+     *
+     * The lock is reentrant so a future nested `withFakePlayer` call (e.g. via
+     * a helper) doesn't self-deadlock.
+     */
+    private val interactionLock = ReentrantLock()
+
+    fun get(server: MinecraftServer, world: ServerLevel): ServerPlayer {
+        val key = server to world
+        cache[key]?.let { if (!it.isRemoved) return it }
+        val p = create(server, world, PROFILE)
+        cache[key] = p
+        return p
+    }
+
+    // NeoForge deprecates ServerPlayer#mayfly (its own flight model); vanilla/Fabric do not.
+    @Suppress("DEPRECATION")
+    fun create(server: MinecraftServer, world: ServerLevel, profile: GameProfile): ServerPlayer {
+        val p = ServerPlayer(server, world, profile, ClientInformation.createDefault())
+        // Resting state: survival + protected (a spawned player must never die or drift).
+        p.abilities.instabuild = false
+        p.abilities.mayBuild = true
+        p.abilities.flying = false
+        p.abilities.mayfly = false
+        ensureProtected(p)
+
+        // Install a no-op network handler so mod code that calls
+        // player.openMenu() / player.sendMessageToClient() /
+        // Criteria.trigger() / etc. doesn't NPE on null networkHandler.
+        // Packets are silently dropped — no real client receives them.
+        val connection = Connection(PacketFlow.CLIENTBOUND)
+        val handler = Loader.api.fakePlayerPacketListener(
+            server, connection, p, CommonListenerCookie.createInitial(profile, false),
+        )
+        p.connection = handler
+
+        // Spawn into the world through the same path real players use
+        // (world.players list + entity manager): the player is ticked every server
+        // tick, visible to world.getPlayers() / entity queries, and fires
+        // entity-load / join hooks. It is NOT in PlayerManager and never receives
+        // packets.
+        world.addFreshEntity(p)
+        allSpawned.add(p)
+
+        return p
+    }
+
+    /**
+     * Run [block] with the fake player for (server, world) while holding the
+     * interaction lock. Applies [gamemode] (default SURVIVAL) for the duration
+     * of the block and restores the resting state afterwards.
+     */
+    fun <T> withFakePlayer(
+        server: MinecraftServer,
+        world: ServerLevel,
+        gamemode: GameType = GameType.SURVIVAL,
+        block: (ServerPlayer) -> T,
+    ): T = interactionLock.withLock {
+        val player = get(server, world)
+        val oldAbilities = AbilitiesSnapshot.capture(player)
+        val oldGameMode = player.gameMode.gameModeForPlayer
+        try {
+            applyGameMode(player, gamemode)
+            resetTransientState(player)
+            block(player)
+        } finally {
+            oldAbilities.restore(player)
+            player.setGameMode(oldGameMode)
+            ensureProtected(player)
+        }
+    }
+
+    /**
+     * Parse the optional `gamemode` param of a fake-player command.
+     * Default: survival. Override: "creative".
+     */
+    fun gameModeFrom(p: JsonObject?): GameType {
+        val s = p?.getStringOrNull("gamemode") ?: return GameType.SURVIVAL
+        return when (s.lowercase()) {
+            "survival" -> GameType.SURVIVAL
+            "creative" -> GameType.CREATIVE
+            else -> throw RpcException(
+                RpcErrors.INVALID_PARAMS,
+                "invalid gamemode: $s (allowed: survival, creative)"
+            )
+        }
+    }
+
+    /**
+     * Set the fake player's game mode through the vanilla API
+     * (ServerPlayerInteractionManager.changeGameMode) so game-mode hooks fire,
+     * then re-assert the protection flags survival mode clears.
+     */
+    fun applyGameMode(player: ServerPlayer, mode: GameType) {
+        player.setGameMode(mode)
+        player.abilities.mayBuild = true
+        ensureProtected(player)
+    }
+
+    /**
+     * Drop item cooldowns left by an earlier action. Without a connection the fake player never runs
+     * Player.tick (ServerPlayer.doTick is driven by the network handler), so ItemCooldowns never
+     * advance and one cooldown (shield block, ender pearl, a modded ability) would make every later
+     * use of that item PASS. Each action starts from a clean state. The map field is found by type
+     * so it works under any mapping.
+     */
+    /**
+     * Start each action from a clean fake player: without a connection it never runs Player.tick, so state an
+     * earlier action left (item cooldowns, fire, status effects from counterattacks) would never wear off and
+     * would change every later action (e.g. "attacker on fire" conditions).
+     */
+    fun resetTransientState(player: ServerPlayer) {
+        clearItemCooldowns(player)
+        player.clearFire()
+        player.removeAllEffects()
+    }
+
+    fun clearItemCooldowns(player: ServerPlayer) {
+        runCatching {
+            val field = ItemCooldownsMapField ?: return
+            (field.get(player.cooldowns) as MutableMap<*, *>).clear()
+        }
+    }
+
+    private val ItemCooldownsMapField: java.lang.reflect.Field? by lazy {
+        net.minecraft.world.item.ItemCooldowns::class.java.declaredFields
+            .firstOrNull { java.util.Map::class.java.isAssignableFrom(it.type) }
+            ?.apply { isAccessible = true }
+    }
+
+    /** Keep the spawned fake player from dying, falling or drifting. */
+    fun ensureProtected(player: ServerPlayer) {
+        player.setInvulnerable(true)
+        player.abilities.invulnerable = true
+        player.setNoGravity(true)
+        player.setDeltaMovement(0.0, 0.0, 0.0)
+        player.fallDistance = 0f
+        player.setOnGround(true)
+    }
+
+    /** Remove a fake player from its world (used by ScreenOps session teardown). */
+    fun discard(player: ServerPlayer) {
+        allSpawned.remove(player)
+        cache.entries.removeIf { (_, p) -> p === player }
+        val w = player.level()
+        if (!player.isRemoved && w is ServerLevel) {
+            w.removePlayerImmediately(player, Entity.RemovalReason.DISCARDED)
+        }
+        releasePlayerData(player)
+    }
+
+    /**
+     * What a real logout does besides leaving the world: the advancement tracker stops listening on the criteria
+     * triggers, and the server's per-UUID caches (advancements, stats) drop the player. Session players get a fresh
+     * UUID each, so without this every screen session leaks a full advancement tracker (thousands of sessions run the
+     * server out of heap). The caches are private maps of PlayerList: found by type, not by (mapping-dependent) name.
+     */
+    private fun releasePlayerData(player: ServerPlayer) {
+        runCatching { player.advancements.stopListening() }
+        runCatching { com.mcdebug.loader.Loader.api.releaseConnection(player.connection) }
+        val list = player.server.playerList
+        var c: Class<*>? = list.javaClass
+        while (c != null && c != Any::class.java) {
+            for (f in c.declaredFields) {
+                if (!java.util.Map::class.java.isAssignableFrom(f.type) || java.lang.reflect.Modifier.isStatic(f.modifiers)) continue
+                runCatching {
+                    f.isAccessible = true
+                    val m = f.get(list) as? MutableMap<*, *> ?: return@runCatching
+                    val v = m[player.uuid]
+                    if (v != null && v !is ServerPlayer) (m as MutableMap<Any?, Any?>).remove(player.uuid)
+                }
+            }
+            c = c.superclass
+        }
+    }
+
+    /** Register the keepalive tick through the loader seam. */
+    fun install() {
+        if (installed) return
+        installed = true
+        Loader.api.onServerTick {
+            // Prune removed players (killed / world unloaded) and pin the rest in place.
+            cache.entries.removeIf { (_, p) ->
+                if (p.isRemoved) { allSpawned.remove(p); true } else { pin(p); false }
+            }
+            allSpawned.removeIf { p ->
+                if (p.isRemoved) true else { pin(p); false }
+            }
+        }
+    }
+
+    /** Called on server stopping: discard every spawned fake player. */
+    fun shutdown() {
+        installed = false
+        allSpawned.forEach { p ->
+            runCatching {
+                if (!p.isRemoved) {
+                    val w = p.level()
+                    if (w is ServerLevel) w.removePlayerImmediately(p, Entity.RemovalReason.DISCARDED)
+                }
+            }
+        }
+        allSpawned.clear()
+        cache.clear()
+    }
+
+    private var installed = false
+
+    private fun pin(player: ServerPlayer) {
+        player.setNoGravity(true)
+        player.setDeltaMovement(0.0, 0.0, 0.0)
+        player.fallDistance = 0f
+        player.setOnGround(true)
+        player.setInvulnerable(true)
+        player.abilities.invulnerable = true
+    }
+
+    private data class AbilitiesSnapshot(
+        val invulnerable: Boolean,
+        val flying: Boolean,
+        val allowFlying: Boolean,
+        val creativeMode: Boolean,
+        val allowModifyWorld: Boolean,
+        val flySpeed: Float,
+        val walkSpeed: Float
+    ) {
+        @Suppress("DEPRECATION")
+        fun restore(player: ServerPlayer) {
+            player.abilities.invulnerable = invulnerable
+            player.abilities.flying = flying
+            player.abilities.mayfly = allowFlying
+            player.abilities.instabuild = creativeMode
+            player.abilities.mayBuild = allowModifyWorld
+            player.abilities.flyingSpeed = flySpeed
+            player.abilities.walkingSpeed = walkSpeed
+        }
+
+        companion object {
+            @Suppress("DEPRECATION")
+            fun capture(player: ServerPlayer): AbilitiesSnapshot = AbilitiesSnapshot(
+                invulnerable = player.abilities.invulnerable,
+                flying = player.abilities.flying,
+                allowFlying = player.abilities.mayfly,
+                creativeMode = player.abilities.instabuild,
+                allowModifyWorld = player.abilities.mayBuild,
+                flySpeed = player.abilities.flyingSpeed,
+                walkSpeed = player.abilities.walkingSpeed
+            )
+        }
+    }
+}

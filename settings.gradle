@@ -1,11 +1,10 @@
+// 单仓多版本：根构建只管理纯 JVM 模块（contract / sdk / testkit / cli），不含任何
+// Minecraft 依赖，也不加载 Loom / ModDevGradle / ForgeGradle。三个 Minecraft 版本各是
+// 独立构建，见 versions/mc<ver>/（结构与验证矩阵见 docs/monorepo.md）。
 pluginManagement {
 	repositories {
-		maven {
-			name = 'Fabric'
-			url = 'https://maven.fabricmc.net/'
-		}
-		mavenCentral()
 		gradlePluginPortal()
+		mavenCentral()
 	}
 }
 
@@ -14,10 +13,3 @@ include 'contract'
 include 'sdk'
 include 'testkit'
 include 'cli'
-
-// NeoForge 移植是独立 Gradle 构建（ModDevGradle + 自带 wrapper），这里只做任务转发：
-//   ./gradlew :neoforge:build      → neoforge/gradlew build
-//   ./gradlew :neoforge:runServer  → neoforge/gradlew runServer
-// 见 neoforge/delegate.gradle。
-include 'neoforge'
-project(':neoforge').buildFileName = 'delegate.gradle'

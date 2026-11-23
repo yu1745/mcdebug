@@ -8,6 +8,8 @@ on:
 permissions:
   contents: write
 
+# 单仓多版本：一个 tag 出五个模组 JAR（26.3 与 1.21.1 各有 Fabric + NeoForge，1.20.1 只有 Forge）
+# 加上内嵌全部五个的 CLI fat jar。三个版本各需自己的 JDK（25 / 21 / 17）。
 jobs:
   release:
     runs-on: ubuntu-24.04
@@ -15,19 +17,43 @@ jobs:
       - name: checkout repository
         uses: actions/checkout@v4
 
-      - name: setup jdk
+      - name: setup jdk 17 (Minecraft 1.20.1, Gradle 8.1.1)
+        id: java17
+        uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: temurin
+      - name: setup jdk 21 (Minecraft 1.21.1)
+        id: java21
+        uses: actions/setup-java@v4
+        with:
+          java-version: 21
+          distribution: temurin
+      - name: setup jdk 25 (Minecraft 26.3 and the JVM modules)
         uses: actions/setup-java@v4
         with:
           java-version: 25
-          distribution: 'microsoft'
+          distribution: temurin
 
-      - name: make gradle wrapper executable
-        run: chmod +x ./gradlew
+      - name: make gradle wrappers executable
+        run: chmod +x ./gradlew versions/*/gradlew versions/*/neoforge/gradlew
 
-      - name: build
-        # :cli:copyCliJar 依赖 :neoforge:build（CLI 里内嵌两个 loader 的 mod jar），
-        # 所以这一行同时产出 Fabric remap jar + NeoForge jar + CLI fat jar。
-        run: ./gradlew build :cli:copyCliJar
+      - name: build Minecraft 26.3 (Fabric + NeoForge)
+        working-directory: versions/mc26.3
+        run: ./gradlew build :neoforge:build --console=plain
+      - name: build Minecraft 1.21.1 (Fabric + NeoForge)
+        working-directory: versions/mc1.21.1
+        env:
+          JAVA_HOME: ${{ steps.java21.outputs.path }}
+        run: ./gradlew build :neoforge:build --console=plain
+      - name: build Minecraft 1.20.1 (Forge, reobfJarJar)
+        working-directory: versions/mc1.20.1
+        env:
+          JAVA_HOME: ${{ steps.java17.outputs.path }}
+        run: ./gradlew build --console=plain
+      # :cli:copyCliJar 只内嵌上面已生成的五个模组 JAR，不触发任何 Minecraft 构建。
+      - name: build JVM modules and the CLI with all five mod jars
+        run: ./gradlew build :cli:copyCliJar --console=plain
 
       - name: extract version from tag
         id: version
@@ -37,29 +63,30 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          # Both mod jars are named after mod_version: a tag that does not match it fails here.
+          # Every mod jar is named after mod_version: a tag that does not match it fails here.
           VERSION="${{ steps.version.outputs.VERSION }}"
-          CANONICAL="mcdebug-${VERSION}.jar"
-          NEOFORGE="mcdebug-neoforge-${VERSION}.jar"
-          for f in "$CANONICAL" "$NEOFORGE"; do
-            src=$([[ "$f" == "$NEOFORGE" ]] && echo "neoforge/build/libs/$f" || echo "build/libs/$f")
-            test -f "$src" || { echo "$src missing: tag v$VERSION != mod_version?"; ls build/libs neoforge/build/libs; exit 1; }
-            cp "$src" "$f"
-          done
+          copy() {  # $1 = source (must exist)  $2 = release asset name
+            test -f "$1" || { echo "$1 missing: tag v$VERSION != mod_version?" >&2; find versions -path '*/build/libs/*.jar'; exit 1; }
+            cp "$1" "$2"
+          }
+          copy "versions/mc26.3/build/libs/mcdebug-${VERSION}.jar"               "mcdebug-fabric-26.3-${VERSION}.jar"
+          copy "versions/mc26.3/neoforge/build/libs/mcdebug-neoforge-${VERSION}.jar" "mcdebug-neoforge-26.3-${VERSION}.jar"
+          copy "versions/mc1.21.1/build/libs/mcdebug-${VERSION}.jar"             "mcdebug-fabric-1.21.1-${VERSION}.jar"
+          copy "versions/mc1.21.1/neoforge/build/libs/mcdebug-neoforge-${VERSION}.jar" "mcdebug-neoforge-1.21.1-${VERSION}.jar"
+          copy "versions/mc1.20.1/build/libs/mcdebug-forge-${VERSION}.jar"       "mcdebug-forge-1.20.1-${VERSION}.jar"
+          test -f mcdebug-cli.jar
+          # The CLI must carry all five combinations; `jar --list` marks each as embedded or missing.
+          java -jar mcdebug-cli.jar jar --list | tee /tmp/embedded.txt
+          test "$(grep -c $'\tembedded$' /tmp/embedded.txt)" -eq 5 || { echo "CLI does not embed all five mod jars" >&2; exit 1; }
 
           # SHA256 sidecars: <filename>.sha256 contains just the hex digest.
-          # mcdebug-cli.jar (built at the repo root, not in git) also carries the mod jar.
-          for f in "$CANONICAL" "$NEOFORGE" mcdebug-cli.jar; do
+          assets=()
+          for f in mcdebug-*-*.jar mcdebug-cli.jar; do
             sha256sum "$f" | awk '{print $1}' > "$f.sha256"
             echo "SHA256 $f: $(cat "$f.sha256")"
+            assets+=("$f" "$f.sha256")
           done
 
-          gh release create "${GITHUB_REF_NAME}" \
-            "$CANONICAL" \
-            "${CANONICAL}.sha256" \
-            "$NEOFORGE" \
-            "${NEOFORGE}.sha256" \
-            mcdebug-cli.jar \
-            mcdebug-cli.jar.sha256 \
+          gh release create "${GITHUB_REF_NAME}" "${assets[@]}" \
             --title "${GITHUB_REF_NAME}" \
             --notes-from-tag   # tag 的 annotated message 就是 Release 说明（见 AGENTS.md §10）

@@ -1,0 +1,391 @@
+package com.mcdebug.api
+
+import com.google.gson.JsonArray
+import com.google.gson.JsonElement
+import com.google.gson.JsonObject
+import com.mcdebug.rpc.RpcContext
+import com.mcdebug.rpc.RpcErrors
+import com.mcdebug.rpc.RpcException
+import com.mcdebug.rpc.RpcHandler
+import com.mcdebug.rpc.RpcHandlerGroup
+import com.mcdebug.util.ServerContext
+import com.mojang.authlib.GameProfile
+import net.minecraft.core.registries.BuiltInRegistries
+import net.minecraft.world.inventory.AbstractContainerMenu
+import net.minecraft.world.inventory.ClickType
+import net.minecraft.server.MinecraftServer
+import net.minecraft.server.level.ServerPlayer
+import net.minecraft.network.chat.Component
+import net.minecraft.core.BlockPos
+import net.minecraft.core.Direction
+import net.minecraft.world.InteractionHand
+import net.minecraft.world.item.ItemStack
+import net.minecraft.world.phys.BlockHitResult
+import net.minecraft.world.phys.Vec3
+import java.util.UUID
+import java.util.concurrent.CompletableFuture
+
+object ScreenOps : RpcHandlerGroup {
+    private val sessions = LinkedHashMap<String, ScreenSession>()
+    private const val MAX_SESSIONS = 256
+
+    override fun methods(): Map<String, RpcHandler> = mapOf(
+        "openBlock" to ::openBlock,
+        "snapshot" to ::snapshot,
+        "setPlayerSlot" to ::setPlayerSlot,
+        "clickSlot" to ::clickSlot,
+        "clickButton" to ::clickButton,
+        "quickMove" to ::quickMove,
+        "close" to ::close,
+        "batch" to ::batch,
+    )
+
+    fun clear() {
+        sessions.values.toList().forEach { session ->
+            runCatching { closeSession(session) }
+        }
+        sessions.clear()
+    }
+
+    private fun openBlock(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
+        RpcContext.onServer(server) { openBlockNow(server, params) }
+
+    private fun openBlockNow(server: MinecraftServer, params: JsonObject?): JsonElement = run {
+            val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
+            val pos = p.requirePos("pos")
+            val world = ServerContext.world(server, p.getStringOrNull("dim"))
+            val side = StorageOps.parseSide(p.getObjectOrNull("opts")?.getStringOrNull("side") ?: p.getStringOrNull("side"))
+            val state = world.getBlockState(pos)
+            val factory = state.getMenuProvider(world, pos)
+
+            val sessionUuid = UUID.randomUUID()
+            val player = FakePlayerPool.create(server, world, GameProfile(sessionUuid, "[mcdebug_screen]"))
+            positionPlayerForScreen(player, pos, side)
+
+            closeSessionsForPlayer(player)
+            // Direct path: the block's MenuProvider. Loaders reject some providers here (Fabric extended screen handlers
+            // need the factory the block builds in its own use handler; NeoForge menus that write extra data likewise),
+            // so any failure falls back to the real interaction path: an empty-handed right click on the block.
+            var openedBy = "menu_provider"
+            val direct = factory?.let { f -> runCatching { player.openMenu(f) } }
+            if (direct == null || direct.isFailure || direct.getOrNull()?.isEmpty != false) {
+                if (player.containerMenu !== player.inventoryMenu) player.closeContainer()
+                openedBy = "use_block"
+                val face = side ?: Direction.NORTH
+                val hit = BlockHitResult(Vec3.atCenterOf(pos).relative(face, 0.5), face, pos, false)
+                player.setItemInHand(InteractionHand.MAIN_HAND, ItemStack.EMPTY)
+                player.gameMode.useItemOn(player, world, ItemStack.EMPTY, InteractionHand.MAIN_HAND, hit)
+                if (player.containerMenu === player.inventoryMenu) {
+                    val why = direct?.exceptionOrNull()?.let { "${it.javaClass.simpleName}: ${it.message}" }
+                        ?: if (factory == null) "no menu provider" else "menu provider returned empty"
+                    throwScreenNotFound("no screen opened at $pos (direct: $why; use_block opened nothing)", null)
+                }
+            }
+
+            val handler = player.containerMenu
+            val id = UUID.randomUUID().toString()
+            val title = factory?.displayName ?: state.block.name
+            val session = ScreenSession(id, player, handler, title, world.dimension().location().toString(), pos)
+            sessions[id] = session
+            // sessions a client never closed (it crashed or forgot) would keep their fake players forever: the
+            // oldest are closed past MAX_SESSIONS
+            while (sessions.size > MAX_SESSIONS) {
+                val oldest = sessions.keys.first()
+                sessions.remove(oldest)?.let { runCatching { closeSession(it) } }
+            }
+            screenSnapshot(session).apply { addProperty("openedBy", openedBy) }
+        }
+
+    private fun snapshot(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
+        RpcContext.onServer(server) { snapshotNow(server, params) }
+
+    private fun snapshotNow(server: MinecraftServer, params: JsonObject?): JsonElement = run {
+            val session = session(params)
+            screenSnapshot(session)
+        }
+
+    private fun setPlayerSlot(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
+        RpcContext.onServer(server) { setPlayerSlotNow(server, params) }
+
+    private fun setPlayerSlotNow(server: MinecraftServer, params: JsonObject?): JsonElement = run {
+            val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
+            val session = session(p)
+            val slot = p.requireLong("slot").toInt()
+            if (slot !in 0 until 36) {
+                throw RpcException(RpcErrors.INVALID_PARAMS, "player inventory slot must be in 0..35, got $slot")
+            }
+            val stack = itemStackFromJson(server, p.requireObject("stack"))
+            requireUsable(session)
+            session.player.inventory.setItem(slot, stack)
+            session.player.inventory.setChanged()
+            session.handler.sendAllDataToRemote()
+            screenSnapshot(session)
+        }
+
+    private fun clickSlot(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
+        RpcContext.onServer(server) { clickSlotNow(server, params) }
+
+    private fun clickSlotNow(server: MinecraftServer, params: JsonObject?): JsonElement = run {
+            val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
+            val session = session(p)
+            val slot = p.requireLong("slot").toInt()
+            val button = p.getIntOr("button", 0)
+            val actionType = parseActionType(p.requireString("actionType"))
+            requireUsable(session)
+            session.handler.clicked(slot, button, actionType, session.player)
+            session.handler.sendAllDataToRemote()
+            screenSnapshot(session)
+        }
+
+    /**
+     * Vanilla menu button: AbstractContainerMenu.clickMenuButton(player, id), exactly what the server does for
+     * ServerboundContainerButtonClickPacket (stonecutter recipe, loom pattern, enchanting option, lectern page and
+     * any modded menu using the same mechanism). `accepted` is the menu's own answer.
+     */
+    private fun clickButton(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
+        RpcContext.onServer(server) { clickButtonNow(server, params) }
+
+    private fun clickButtonNow(server: MinecraftServer, params: JsonObject?): JsonElement = run {
+            val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
+            val session = session(p)
+            val button = p.requireLong("button").toInt()
+            requireUsable(session)
+            val accepted = session.handler.clickMenuButton(session.player, button)
+            if (accepted) session.handler.broadcastChanges()
+            screenSnapshot(session).apply { addProperty("accepted", accepted) }
+        }
+
+    private fun quickMove(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
+        RpcContext.onServer(server) { quickMoveNow(server, params) }
+
+    private fun quickMoveNow(server: MinecraftServer, params: JsonObject?): JsonElement = run {
+            val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
+            val session = session(p)
+            val slot = p.requireLong("slot").toInt()
+            requireUsable(session)
+            session.handler.clicked(slot, 0, ClickType.QUICK_MOVE, session.player)
+            session.handler.sendAllDataToRemote()
+            screenSnapshot(session)
+        }
+
+    private fun close(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
+        RpcContext.onServer(server) { closeNow(server, params) }
+
+    private fun closeNow(server: MinecraftServer, params: JsonObject?): JsonElement = run {
+            val session = session(params)
+            sessions.remove(session.id)
+            closeSession(session)
+            JsonObject().apply {
+                addProperty("screenId", session.id)
+                addProperty("closed", true)
+            }
+        }
+
+
+    /**
+     * Many menu operations in ONE rpc (one hop to the server thread, one round trip). `steps` run in order; each is
+     * `{op, ...params of that single call}` with op one of open (pos/dim/side, makes the new screen the current one),
+     * setPlayerSlot, setSlot (any menu slot written directly), clearPlayerSlots, clickSlot, clickButton, quickMove,
+     * snapshot, close. A step uses the current screen unless it names `screenId`. Results are compact: `snap:true` on
+     * a step (always for op snapshot) adds `slots` (item stacks only), clickButton adds `accepted`. The first failing step
+     * stops the batch with `{error}` as its result; `closeAtEnd:true` closes the current screen then, even after a failure.
+     */
+    private fun batch(server: MinecraftServer, params: JsonObject?): CompletableFuture<JsonElement> =
+        RpcContext.onServer(server) {
+            val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
+            val steps = p.get("steps")?.takeIf { it.isJsonArray }?.asJsonArray
+                ?: throw RpcException(RpcErrors.INVALID_PARAMS, "steps (array) required")
+            var current = p.getStringOrNull("screenId")
+            val results = JsonArray()
+            try {
+                for (el in steps) {
+                    val step = el.asJsonObject
+                    val op = step.get("op")?.asString ?: throw RpcException(RpcErrors.INVALID_PARAMS, "step without op")
+                    val out = JsonObject()
+                    results.add(out)
+                    try {
+                        val q = step.deepCopy()
+                        if (!q.has("screenId") && current != null) q.addProperty("screenId", current)
+                        val r: JsonObject = when (op) {
+                            "open" -> openBlockNow(server, q).asJsonObject.also { current = it.get("screenId").asString }
+                            "setPlayerSlot" -> setPlayerSlotNow(server, q).asJsonObject
+                            "setSlot" -> setSlotNow(server, q)
+                            "clearPlayerSlots" -> clearPlayerSlotsNow(server, q)
+                            "clickSlot" -> clickSlotNow(server, q).asJsonObject
+                            "clickButton" -> clickButtonNow(server, q).asJsonObject
+                            "quickMove" -> quickMoveNow(server, q).asJsonObject
+                            "snapshot" -> snapshotNow(server, q).asJsonObject
+                            "close" -> closeNow(server, q).asJsonObject.also { current = null }
+                            else -> throw RpcException(RpcErrors.INVALID_PARAMS, "unknown batch op: $op")
+                        }
+                        out.addProperty("ok", true)
+                        r.get("screenId")?.let { out.add("screenId", it) }
+                        r.get("accepted")?.let { out.add("accepted", it) }
+                        r.get("openedBy")?.let { out.add("openedBy", it) }
+                        if (op == "snapshot" || step.get("snap")?.asBoolean == true) r.get("slots")?.let { out.add("slots", it) }
+                    } catch (e: RpcException) {
+                        out.addProperty("error", e.message)
+                        break
+                    }
+                }
+            } finally {
+                if (p.get("closeAtEnd")?.asBoolean == true) {
+                    current?.let { id -> sessions.remove(id)?.let { runCatching { closeSession(it) } } }
+                }
+            }
+            JsonObject().apply { add("results", results) }
+        }
+
+    private fun setSlotNow(server: MinecraftServer, p: JsonObject): JsonObject {
+        val session = session(p)
+        val slot = p.requireLong("slot").toInt()
+        requireUsable(session)
+        if (slot !in 0 until session.handler.slots.size) {
+            throw RpcException(RpcErrors.INVALID_PARAMS, "menu slot must be in 0..${session.handler.slots.size - 1}, got $slot")
+        }
+        session.handler.getSlot(slot).set(itemStackFromJson(server, p.requireObject("stack")))
+        session.handler.slotsChanged(session.handler.getSlot(slot).container)
+        session.handler.broadcastChanges()
+        return JsonObject().apply { addProperty("screenId", session.id) }
+    }
+
+    private fun clearPlayerSlotsNow(server: MinecraftServer, p: JsonObject): JsonObject {
+        val session = session(p)
+        requireUsable(session)
+        for (i in 0 until 36) session.player.inventory.setItem(i, ItemStack.EMPTY)
+        session.player.inventory.setChanged()
+        return JsonObject().apply { addProperty("screenId", session.id) }
+    }
+
+    private fun screenSnapshot(session: ScreenSession): JsonObject =
+        JsonObject().apply {
+            session.handler.sendAllDataToRemote()
+            addProperty("screenId", session.id)
+            addProperty("title", session.title.string)
+            addProperty("handlerType", handlerTypeId(session.handler))
+            addProperty("syncId", session.handler.containerId)
+            addProperty("dim", session.dim)
+            add("pos", ServerContext.posAsJson(session.pos))
+            add("slots", JsonArray().apply {
+                session.handler.slots.forEach { slot ->
+                    add(ServerContext.itemStackToJson(slot.item))
+                }
+            })
+            add("slotDetails", JsonArray().apply {
+                session.handler.slots.forEachIndexed { index, slot ->
+                    add(JsonObject().apply {
+                        addProperty("index", index)
+                        addProperty("id", index)
+                        addProperty("x", slot.x)
+                        addProperty("y", slot.y)
+                        addProperty("canTake", runCatching { slot.mayPickup(session.player) }.getOrDefault(false))
+                        addProperty("canInsert", runCatching { slot.mayPlace(slot.item) }.getOrDefault(false))
+                        add("stack", ServerContext.itemStackToJson(slot.item))
+                    })
+                }
+            })
+            add("cursor", ServerContext.itemStackToJson(session.handler.carried))
+            add("properties", JsonArray().apply {
+                screenHandlerProperties(session.handler).forEach { add(it) }
+            })
+        }
+
+    private fun closeSession(session: ScreenSession) {
+        if (session.player.containerMenu == session.handler) {
+            session.player.closeContainer()
+        } else {
+            session.handler.removed(session.player)
+        }
+        // The session player was spawned into the world (FakePlayerPool.create) —
+        // remove it so it stops ticking.
+        FakePlayerPool.discard(session.player)
+    }
+
+    private fun closeSessionsForPlayer(player: ServerPlayer) {
+        val ids = sessions.values.filter { it.player == player }.map { it.id }
+        for (id in ids) {
+            val session = sessions.remove(id) ?: continue
+            closeSession(session)
+        }
+    }
+
+    private fun session(params: JsonObject?): ScreenSession {
+        val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
+        val id = p.requireString("screenId")
+        return sessions[id] ?: throwScreenNotFound("screen not found: $id", id)
+    }
+
+    private fun requireUsable(session: ScreenSession) {
+        if (session.player.containerMenu != session.handler) {
+            throwScreenNotFound("screen is no longer the player's current handler: ${session.id}", session.id)
+        }
+        if (!session.handler.stillValid(session.player)) {
+            throwScreenNotFound("screen can no longer be used: ${session.id}", session.id)
+        }
+    }
+
+    private fun handlerTypeId(handler: AbstractContainerMenu): String? {
+        val type = runCatching { handler.type }.getOrNull() ?: return null
+        return BuiltInRegistries.MENU.getKey(type)?.toString()
+    }
+
+    private fun positionPlayerForScreen(player: ServerPlayer, pos: BlockPos, side: Direction?) {
+        val face = side ?: Direction.NORTH
+        player.moveTo(
+            pos.x + 0.5 + face.stepX * 0.75,
+            pos.y + 0.5 + face.stepY * 0.75,
+            pos.z + 0.5 + face.stepZ * 0.75,
+            yawFor(face.opposite),
+            pitchFor(face.opposite),
+        )
+    }
+
+    private fun yawFor(facing: Direction): Float = when (facing) {
+        Direction.SOUTH -> 0f
+        Direction.WEST -> 90f
+        Direction.NORTH -> 180f
+        Direction.EAST -> -90f
+        Direction.UP, Direction.DOWN -> 0f
+    }
+
+    private fun pitchFor(facing: Direction): Float = when (facing) {
+        Direction.UP -> -90f
+        Direction.DOWN -> 90f
+        else -> 0f
+    }
+
+    private fun parseActionType(value: String): ClickType =
+        runCatching { ClickType.valueOf(value.uppercase()) }
+            .getOrElse {
+                throw RpcException(
+                    RpcErrors.INVALID_PARAMS,
+                    "invalid actionType: $value (allowed: ${ClickType.entries.joinToString { it.name.lowercase() }})"
+                )
+            }
+
+    private fun itemStackFromJson(server: MinecraftServer, obj: JsonObject) =
+        ServerContext.itemStackFromJson(
+            server,
+            obj.getStringOrNull("item") ?: "minecraft:air",
+            obj.getIntOr("count", 0),
+            obj.get("nbt"),
+            obj.get("components"),
+        )
+
+    private fun throwScreenNotFound(message: String, screenId: String?): Nothing {
+        val data = JsonObject().apply {
+            addProperty("reason", "SCREEN_NOT_FOUND")
+            if (screenId != null) addProperty("screenId", screenId)
+        }
+        throw RpcException(RpcErrors.SCREEN_NOT_FOUND, message, data)
+    }
+
+    private data class ScreenSession(
+        val id: String,
+        val player: ServerPlayer,
+        val handler: AbstractContainerMenu,
+        val title: Component,
+        val dim: String,
+        val pos: BlockPos,
+    )
+}

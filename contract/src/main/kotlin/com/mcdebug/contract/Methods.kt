@@ -16,8 +16,18 @@ package com.mcdebug.contract
  * 加/改/删方法名时两边都要同步，否则测试/自检失败。
  *
  * 方法名 = `<组>.<后缀>`，与 `RpcHandlerGroup.methods()` 的注册 key 一一对应。
+ *
+ * **按 Minecraft 版本的子集**：上面的清单是本仓库三个版本（1.20.1 / 1.21.1 / 26.3）的**并集**。
+ * 某个版本尚未提供的方法登记在 [MISSING_BY_MC_VERSION]，该版本实际注册的是
+ * "并集 − 缺席项"，用 [serverMethods] / [clientMethods] / [all] 取得。各版本的
+ * `RpcContractTest`、客户端启动自检与 `scripts/contract-parity.py --mc` 都按子集校验。
  */
 object Methods {
+    /** 本仓库维护的 Minecraft 版本线；与 `versions/mc<id>` 目录名、CLI `mcdebug jar --mc` 一致。 */
+    const val MC_1_20_1 = "1.20.1"
+    const val MC_1_21_1 = "1.21.1"
+    const val MC_26_3 = "26.3"
+
     // ------------------------------------------------------------------
     // 服务端平面
     // ------------------------------------------------------------------
@@ -109,10 +119,48 @@ object Methods {
     /** 全部方法名（两个平面的并集）。 */
     val ALL: Set<String> = SERVER_METHODS + CLIENT_METHODS
 
+    // ------------------------------------------------------------------
+    // 按 Minecraft 版本的子集
+    // ------------------------------------------------------------------
+
+    /** 本仓库维护的全部 Minecraft 版本线。 */
+    val MC_VERSIONS: Set<String> = setOf(MC_1_20_1, MC_1_21_1, MC_26_3)
+
+    /**
+     * 各版本**尚未提供**的方法（上面的清单是三个版本的并集）。
+     * 新增只落在部分版本的方法时在这里登记缺席的版本；键必须是 [MC_VERSIONS] 之一。
+     * `scripts/contract-parity.py` 按文本解析这个 map，保持 `"x.y.z" to setOf(...)` 的写法。
+     */
+    val MISSING_BY_MC_VERSION: Map<String, Set<String>> = mapOf(
+        "1.20.1" to setOf("gui.toasts"),
+        "1.21.1" to emptySet(),
+        "26.3" to emptySet(),
+    )
+
+    /** [mcVersion] 尚未提供的方法名；未知版本抛 [IllegalArgumentException]。 */
+    fun missingIn(mcVersion: String): Set<String> =
+        MISSING_BY_MC_VERSION[mcVersion]
+            ?: throw IllegalArgumentException("unknown Minecraft version '$mcVersion' (expected one of $MC_VERSIONS)")
+
+    /** [mcVersion] 的服务端平面应当完整注册的方法。 */
+    fun serverMethods(mcVersion: String): Set<String> = SERVER_METHODS - missingIn(mcVersion)
+
+    /** [mcVersion] 的客户端平面应当完整注册的方法。 */
+    fun clientMethods(mcVersion: String): Set<String> = CLIENT_METHODS - missingIn(mcVersion)
+
+    /** [mcVersion] 两个平面的全部方法。 */
+    fun all(mcVersion: String): Set<String> = serverMethods(mcVersion) + clientMethods(mcVersion)
+
     /** 方法所属平面：`"server"` / `"client"`；未声明返回 null。 */
     fun planeOf(method: String): String? = when (method) {
         in SERVER_METHODS -> "server"
         in CLIENT_METHODS -> "client"
         else -> null
     }
+
+    /**
+     * [mcVersion] 上是否存在 [method]：供只拿得到并集清单的前端（CLI / SDK）判断
+     * "某个版本是否该有这个方法"，例如旧版本返回 -32601 属于预期而不是陈旧 jar。
+     */
+    fun supports(mcVersion: String, method: String): Boolean = method in all(mcVersion)
 }

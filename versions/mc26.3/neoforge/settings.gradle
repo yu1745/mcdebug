@@ -1,0 +1,20 @@
+// 独立 Gradle 构建：NeoForge 用 ModDevGradle，根构建用 Fabric Loom，两者不共用 marketplace/
+// 运行时生成逻辑，故各自一个 build（根构建通过 delegate.gradle 暴露 :neoforge:* 任务）。
+// Gradle 版本与根构建一致（ModDevGradle 2.x 支持 Gradle 9），如需单独钉版本改这里即可。
+// kotlin_version 只在仓库根 gradle.properties 定义：`plugins {}` 块只能读本构建的属性，
+// 所以 Kotlin 插件版本在这里统一指定。
+pluginManagement {
+	def rootProps = new Properties()
+	file('../../../gradle.properties').withInputStream { rootProps.load(it) }
+	repositories {
+		gradlePluginPortal()
+		maven { name = 'NeoForged'; url = 'https://maven.neoforged.net/releases' }
+	}
+	resolutionStrategy {
+		eachPlugin {
+			if (requested.id.id == 'org.jetbrains.kotlin.jvm') useVersion(rootProps.getProperty('kotlin_version'))
+		}
+	}
+}
+
+rootProject.name = 'mcdebug-neoforge'

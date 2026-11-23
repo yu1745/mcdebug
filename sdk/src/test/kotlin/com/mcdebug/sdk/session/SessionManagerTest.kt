@@ -109,6 +109,25 @@ class SessionManagerTest {
         assertTrue(args.contains(game.toRealPath().toString()), args)
     }
 
+    /**
+     * ForgeGradle's runClient cannot take the Loom `--args` launch (it owns its program arguments
+     * and working directory). Such a project must be refused up front instead of being misdetected
+     * as Loom and failing later as an opaque `failed` session.
+     */
+    @Test fun `forgegradle project is refused before any record or launch`() {
+        val req = request()
+        Files.writeString(req.project.resolve("build.gradle"), """
+            plugins {
+                id 'net.minecraftforge.gradle' version '[6.0.6,)'
+            }
+        """.trimIndent())
+        val error = assertThrows(IllegalStateException::class.java) { manager.start(req) }
+        assertTrue(error.message!!.contains("ForgeGradle"), error.message)
+        assertTrue(error.message!!.contains("session attach"), error.message)
+        assertTrue(runtime.launches.isEmpty())
+        assertTrue(Files.notExists(registryDir.resolve("test.json")))
+    }
+
     @Test fun `same live configuration reuses launch while changed configuration is refused`() {
         val req = request()
         onLaunch(false)

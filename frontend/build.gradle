@@ -1,6 +1,9 @@
 plugins { id 'maven-publish' }
 
-// Build and publish the JVM modules without loading Loom/ModDevGradle.
+// 发布入口：不加载 Loom / ModDevGradle / ForgeGradle。
+//  - 纯 JVM 构件（contract / sdk / testkit）直接在这里构建；
+//  - 预编译的模组 JAR 是文件构件，来自各 Minecraft 版本目录已有的构建产物。
+// 这是除 GitHub Release 之外唯一的分发通道：模组 JAR 不再经 JitPack 或各版本构建自己发布。
 def shared = new Properties()
 file('../gradle.properties').withInputStream { shared.load(it) }
 allprojects {
@@ -11,23 +14,69 @@ allprojects {
 group = shared.getProperty('maven_group')
 version = providers.gradleProperty('version').getOrElse(shared.getProperty('maven_version'))
 
+// ---- 预编译的模组 JAR：每个 <mc, loader> 一个构件 ----
+// 暂存之前先构建对应的 Minecraft 版本（三套 JDK，见 docs/monorepo.md）。构件 ID 与 Release 文件名一一对应：
+//   mcdebug-mod-<mc>-<loader>  ↔  mcdebug-<loader>-<mc>-<version>.jar
+def modVersion = shared.getProperty('mod_version')
+def prebuiltModJars = [
+    'mcdebug-mod-26.3-fabric'    : "../versions/mc26.3/build/libs/mcdebug-${modVersion}.jar",
+    'mcdebug-mod-26.3-neoforge'  : "../versions/mc26.3/neoforge/build/libs/mcdebug-neoforge-${modVersion}.jar",
+    'mcdebug-mod-1.21.1-fabric'  : "../versions/mc1.21.1/build/libs/mcdebug-${modVersion}.jar",
+    'mcdebug-mod-1.21.1-neoforge': "../versions/mc1.21.1/neoforge/build/libs/mcdebug-neoforge-${modVersion}.jar",
+    'mcdebug-mod-1.20.1-forge'   : "../versions/mc1.20.1/build/libs/mcdebug-forge-${modVersion}.jar",
+]
+
 publishing {
     publications {
-        neoForgeAgent(MavenPublication) {
+        // 旧坐标：`0.8.0-mc26.3` 之前只发布 26.3 的 NeoForge 代理。内容与 mcdebug-mod-26.3-neoforge 相同，
+        // 仅为按版本号升级的既有消费者保留；新消费者用带 Minecraft 版本与加载器的构件。
+        legacyNeoForgeAgent(MavenPublication) {
             artifactId = 'mcdebug-neoforge'
-            // Self-contained game mod, resolved separately from the host test classpath.
-            // Build with the root :neoforge:build task before staging the repository.
-            artifact file("../neoforge/build/libs/mcdebug-neoforge-${shared.getProperty('mod_version')}.jar")
+            artifact file(prebuiltModJars['mcdebug-mod-26.3-neoforge'])
+        }
+        prebuiltModJars.each { id, path ->
+            create("mod_${id.replaceAll('[^a-zA-Z0-9]', '_')}", MavenPublication) {
+                artifactId = id
+                artifact file(path)
+            }
         }
     }
 }
+
 apply from: '../gradle/maven-publishing.gradle'
+
+// 模组 JAR 是文件构件：缺文件时 Gradle 只会报一句 "File ... does not exist"，这里先给出构建指引。
+tasks.register('verifyPrebuiltModJars') {
+    group = 'verification'
+    description = 'Fail with build instructions when a prebuilt mod jar that the publications ship is missing'
+    doLast {
+        def missing = prebuiltModJars.findAll { artifactId, path -> !file(path).isFile() }.keySet().sort()
+        if (!missing.isEmpty()) {
+            throw new GradleException("missing prebuilt mod jars: ${missing}; build every Minecraft line first " +
+                "(versions/mc26.3, versions/mc1.21.1 with :neoforge:build, versions/mc1.20.1 — see docs/monorepo.md)")
+        }
+    }
+}
+tasks.matching { it.name ==~ /publish(Mod_|LegacyNeoForgeAgent).*PublicationToGitHubMavenRepository/ }
+    .configureEach { dependsOn 'verifyPrebuiltModJars' }
 
 tasks.register('stageMavenRepository') {
     group = 'publishing'
-    description = 'Stage SDK, testkit, contract and the prebuilt NeoForge agent as a Maven repository.'
-    dependsOn 'publishNeoForgeAgentPublicationToGitHubMavenRepository'
-    dependsOn ':contract:publishMavenJavaPublicationToGitHubMavenRepository'
-    dependsOn ':sdk:publishMavenJavaPublicationToGitHubMavenRepository'
-    dependsOn ':testkit:publishMavenJavaPublicationToGitHubMavenRepository'
+    description = 'Stage contract, sdk, testkit and every prebuilt mod jar as a Maven repository.'
+    // 根项目：预编译模组 JAR 的文件构件；子项目：contract / sdk / testkit 的 mavenJava。
+    dependsOn tasks.matching { it.name.startsWith('publish') && it.name.endsWith('PublicationToGitHubMavenRepository') }
+    dependsOn subprojects.collect { sub -> sub.tasks.matching { it.name.endsWith('PublicationToGitHubMavenRepository') } }
+}
+
+// maven.yml 用它做“已发布版本不可覆盖”的检查，构件清单只在一份构建脚本里维护。
+tasks.register('listPublicationArtifactIds') {
+    group = 'help'
+    description = 'Print every artifactId this build publishes, one per line'
+    doLast {
+        allprojects { project ->
+            project.extensions.getByType(PublishingExtension).publications.withType(MavenPublication)
+                .collect { it.artifactId }
+                .each { println it }
+        }
+    }
 }

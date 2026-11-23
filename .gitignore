@@ -59,5 +59,9 @@ logs/
 dist/
 run/
 
+# Forge 1.20.1 的开发运行目录（versions/mc1.20.1，gameDir 默认 run-client）
+run-client/
+run-gametest/
+
 # CLI fat jar: built by ./gradlew :cli:copyCliJar, distributed as a GitHub Release asset
 /mcdebug-cli.jar

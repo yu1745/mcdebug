@@ -1,0 +1,241 @@
+plugins {
+	id 'net.fabricmc.fabric-loom-remap' version "${loom_version}" apply false
+	// 版本号由 settings.gradle 的 pluginManagement.resolutionStrategy 从仓库根 gradle.properties 读取
+	id 'org.jetbrains.kotlin.jvm' apply false
+}
+
+allprojects {
+	repositories {
+		mavenLocal()
+		mavenCentral()
+		maven { url "https://maven.fabricmc.net/" }
+		maven { url "https://maven.blamejared.com/" }
+		maven { url "https://api.modrinth.com/maven" }
+		maven { url "https://maven.ftb.dev/releases" }
+		maven { url "https://maven.architectury.dev/" }
+		maven { url "https://maven.shedaniel.me/" }
+		maven { url "https://maven.terraformersmc.com/releases/" }
+		maven { url "https://jitpack.io" }
+	}
+}
+
+apply plugin: 'net.fabricmc.fabric-loom-remap'
+apply plugin: 'org.jetbrains.kotlin.jvm'
+
+// 产品版本（mod_version）与 Maven 组在仓库根 gradle.properties，三个 Minecraft 版本共用，不单独 bump。
+def rootProps = new Properties()
+file('../../gradle.properties').withInputStream { rootProps.load(it) }
+version = providers.gradleProperty("version").orNull ?: rootProps.getProperty('mod_version')
+group = providers.gradleProperty("group").orNull ?: rootProps.getProperty('maven_group')
+
+base {
+	archivesName = project.archives_base_name
+}
+
+sourceSets {
+	main {
+		// `contract` is a separate, zero-dependency artifact (published for CLI / JUnit
+		// runner consumers), but the mod jar must be **self-contained**: a release jar is
+		// dropped into `mods/` on its own, so a plain `implementation project(':contract')`
+		// would leave `com.mcdebug.contract.Methods` missing at runtime and break the
+		// client entrypoint with NoClassDefFoundError. Compiling the same sources into the
+		// mod keeps one source of truth and zero runtime dependencies.
+		// 契约是仓库根的纯 JVM 模块（三个 Minecraft 版本共用的方法并集），按相对路径编进来。
+		kotlin.srcDir rootProject.file('../../contract/src/main/kotlin')
+	}
+}
+
+loom {
+	splitEnvironmentSourceSets()
+
+	mods {
+		"mcdebug" {
+			sourceSet sourceSets.main
+			// The client source set (src/client/{kotlin,java,resources}) holds the
+			// client-plane RPC agent (`gui.*`): real rendering + real Screen events.
+			// Both source sets are packaged into the same jar.
+			sourceSet sourceSets.client
+		}
+	}
+}
+
+// Unit-test pure client scheduling/geometry without starting Minecraft or a GL context.
+sourceSets.test.compileClasspath += sourceSets.client.output
+sourceSets.test.runtimeClasspath += sourceSets.client.output
+
+// Bundle only stdlib, without relocation or loader-specific Kotlin adapters.
+configurations { shadedKotlin { transitive = false } }
+
+dependencies {
+	def kotlinStdlib = "org.jetbrains.kotlin:kotlin-stdlib:${rootProps.getProperty('kotlin_version')}"
+	shadedKotlin kotlinStdlib
+	implementation kotlinStdlib
+	minecraft "com.mojang:minecraft:${project.minecraft_version}"
+	mappings loom.officialMojangMappings()
+	modImplementation "net.fabricmc:fabric-loader:${project.loader_version}"
+	modImplementation "net.fabricmc.fabric-api:fabric-api:${project.fabric_api_version}"
+	testImplementation "org.junit.jupiter:junit-jupiter:5.10.2"
+	testRuntimeOnly "org.junit.platform:junit-platform-launcher"
+}
+
+test {
+	useJUnitPlatform()
+	// Surface test failures clearly in build output instead of swallowing them.
+	testLogging {
+		events "FAILED", "PASSED", "SKIPPED"
+		exceptionFormat "full"
+	}
+}
+
+// reflect.* name table (util/Mappings.kt): intermediary <-> Mojang for exactly this Minecraft
+// version, taken from Loom's resolved mappings so it cannot drift from the game the jar targets.
+def reflectMappingsDir = layout.buildDirectory.dir("generated/reflect-mappings")
+def generateReflectMappings = tasks.register('generateReflectMappings') {
+	def tiny = loom.mappingConfiguration.tinyMappings.toFile()
+	def out = reflectMappingsDir.map { it.file("mappings/reflect.txt.gz") }
+	inputs.file(tiny)
+	outputs.file(out)
+	doLast {
+		def target = out.get().asFile
+		target.parentFile.mkdirs()
+		def header = tiny.withReader { it.readLine() }.split('\t')
+		def inter = header.findIndexOf { it == 'intermediary' } - 3
+		def named = header.findIndexOf { it == 'named' } - 3
+		if (header[0] != 'tiny' || header[1] != '2' || inter < 0 || named < 0) {
+			throw new GradleException("unexpected mappings header in $tiny: ${header.join(' ')}")
+		}
+		new java.util.zip.GZIPOutputStream(new FileOutputStream(target)).withWriter('UTF-8') { w ->
+			boolean keep = false
+			tiny.eachLine('UTF-8') { line ->
+				def p = line.split('\t', -1)
+				if (p[0] == 'c') {
+					keep = p[1 + inter].startsWith('net/minecraft/')
+					if (keep) w.write("c\t${p[1 + inter]}\t${p[1 + named]}\n")
+				} else if (keep && p.length >= 6 && p[0] == '' && (p[1] == 'm' || p[1] == 'f')) {
+					def i = p[3 + inter], n = p[3 + named]
+					if (i != n && !n.startsWith('<')) w.write("${p[1]}\t$i\t$n\n")
+				}
+			}
+		}
+	}
+}
+sourceSets.main.resources.srcDir(files(reflectMappingsDir).builtBy(generateReflectMappings))
+
+processResources {
+	def version = project.version
+	inputs.property "version", version
+
+	filesMatching("fabric.mod.json") {
+		expand "version": version
+	}
+}
+
+tasks.withType(JavaCompile).configureEach {
+	it.options.release = 21
+}
+
+tasks.withType(org.jetbrains.kotlin.gradle.tasks.KotlinCompile).all {
+	kotlinOptions {
+		jvmTarget = 21
+		freeCompilerArgs += [
+			"-Xemit-jvm-type-annotations"
+		]
+	}
+}
+
+java {
+	withSourcesJar()
+	sourceCompatibility = JavaVersion.VERSION_21
+	targetCompatibility = JavaVersion.VERSION_21
+}
+
+jar {
+	from({ configurations.shadedKotlin.collect { zipTree(it) } }) {
+		exclude 'META-INF/MANIFEST.MF', 'META-INF/*.SF', 'META-INF/*.RSA', 'META-INF/*.DSA'
+		exclude 'module-info.class', 'META-INF/versions/**/module-info.class'
+	}
+	def projectName = project.archives_base_name
+	inputs.property "projectName", projectName
+	from(rootProject.file('../../LICENSE')) { rename { "${it}_$projectName" } }
+}
+
+// The release jar is deployed on its own into `<gameDir>/mods` (server or client), so it
+// must carry everything the two entrypoints touch. A missing class only shows up as a
+// `NoClassDefFoundError` in a foreign environment — deps present in the dev classpath hide
+// it (`contract` classes are the classic case). Fail the build instead.
+tasks.register('verifyJarSelfContained') {
+	description = 'Fail if the release jar misses classes/resources the entrypoints need at runtime'
+	group = 'verification'
+	def jarTask = tasks.named('remapJar')
+	dependsOn jarTask
+	doLast {
+		def jarFile = jarTask.get().archiveFile.get().asFile
+		def required = [
+			'kotlin/jvm/internal/Intrinsics.class',
+			'kotlin/collections/CollectionsKt.class',
+			'kotlin/enums/EnumEntriesKt.class',
+			'com/mcdebug/McDebugMod.class',                        // server entrypoint
+			'com/mcdebug/client/McDebugClientMod.class',           // client entrypoint
+			'com/mcdebug/client/GuiOps.class',                     // gui.* handlers
+			'com/mcdebug/client/input/GuiInputOps.class',
+			'com/mcdebug/client/input/GuiInputParams.class',
+			'com/mcdebug/client/input/GuiInputValidation.class',
+			'com/mcdebug/client/input/GuiInputModifiers.class',
+			'com/mcdebug/client/input/GuiInputGestureState.class',
+			'com/mcdebug/client/mixin/ScreenInputMixin.class',
+			'com/mcdebug/client/render/Capture.class',
+			'com/mcdebug/client/render/CaptureGeometry.class',
+			'com/mcdebug/client/render/RenderCursor.class',
+			'com/mcdebug/client/render/RenderControl.class',
+			'com/mcdebug/client/render/RenderSchedule.class',
+			'com/mcdebug/client/render/RenderSettings.class',
+			'com/mcdebug/client/render/RenderMode.class',
+			'com/mcdebug/client/mixin/MinecraftRenderMixin.class',
+			'com/mcdebug/loader/LoaderApi.class',                    // loader 中立接缝（Fabric 与 NeoForge 各一份实现）
+			'com/mcdebug/loader/StorageApi.class',
+			'com/mcdebug/loader/fabric/FabricLoaderApi.class',
+			'com/mcdebug/loader/fabric/FabricStorageApi.class',
+			'com/mcdebug/client/ClientPlane.class',                 // 两个 loader 共用的客户端平面引导
+			'com/mcdebug/client/loader/ClientLoaderApi.class',
+			'com/mcdebug/client/loader/fabric/FabricClientLoaderApi.class',
+			'com/mcdebug/client/mixin/MixinTargets.class',          // 每个 loader 一份的注入点常量
+			'com/mcdebug/client/mixin/GameRendererMixin.class',
+			'com/mcdebug/client/mixin/AbstractContainerScreenAccessor.class',
+			'com/mcdebug/client/input/GuiClickOps.class',                // agent loop (0.7): settle/act/inspection
+			'com/mcdebug/client/GuiScreenOps.class',
+			'com/mcdebug/client/GuiDevOps.class',
+			'com/mcdebug/client/input/GuiPointerOps.class',
+			'com/mcdebug/client/input/GuiTargets.class',
+			'com/mcdebug/client/input/ScreenFactory.class',
+			'com/mcdebug/client/input/ScreenArgs.class',
+			'com/mcdebug/client/devloop/ScreenReload.class',
+			'com/mcdebug/client/devloop/ScreenClassLoader.class',
+			'com/mcdebug/client/input/GuiSettle.class',
+			'com/mcdebug/client/devloop/ProblemLog.class',
+			'com/mcdebug/client/devloop/ScreenGuard.class',
+			'com/mcdebug/client/render/DrawRecorder.class',
+			'com/mcdebug/client/render/Annotator.class',
+			'com/mcdebug/client/devloop/Hotswap.class',
+			'com/mcdebug/client/mixin/ClientPacketListenerMixin.class',
+			'com/mcdebug/client/mixin/GuiGraphicsMixin.class',
+			'com/mcdebug/client/mixin/NativeImageAccessor.class',
+			'com/mcdebug/client/mixin/ClientTextTooltipAccessor.class',
+			'com/mcdebug/client/mixin/RenderSystemMixin.class',
+			'com/mcdebug/contract/Methods.class',                  // contract used by the client self-check
+			'mcdebug.mixins.json',
+			'mcdebug.client.mixins.json',
+			'fabric.mod.json',
+			'mappings/reflect.txt.gz',                              // reflect.* names (generateReflectMappings)
+		]
+		def entries = new java.util.zip.ZipFile(jarFile).withCloseable { zip -> zip.entries().collect { it.name } as Set }
+		def missing = required.findAll { !entries.contains(it) }
+		if (missing) {
+			throw new GradleException("${jarFile.name} is not self-contained, missing: ${missing}")
+		}
+		logger.lifecycle("verifyJarSelfContained: ${required.size()} required entries present in ${jarFile.name}")
+	}
+}
+
+tasks.named('check') { dependsOn 'verifyJarSelfContained' }
+
+// 模组 JAR 不在本构建里发布：预编译构件由仓库根的 frontend/ 暂存到 GitHub maven 分支（或随 Release 附件发布）。

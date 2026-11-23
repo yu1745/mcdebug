@@ -1,0 +1,31 @@
+// Minecraft 1.21.1 的独立构建（Fabric Loom）。契约与共享源码按相对路径引用：
+//   ../../contract/src/main/kotlin   RPC 方法清单（三个版本的并集）
+//   ../../mod-core/src/main/kotlin   零 MC 依赖的共享源码
+// mod_version / maven_group / kotlin_version 在仓库根 gradle.properties。
+// `plugins {}` 块只能读本构建的 gradle.properties，所以 Kotlin 插件版本在这里统一指定，
+// 避免每个版本目录各抄一份 kotlin_version。
+pluginManagement {
+	def rootProps = new Properties()
+	file('../../gradle.properties').withInputStream { rootProps.load(it) }
+	repositories {
+		maven {
+			name = 'Fabric'
+			url = 'https://maven.fabricmc.net/'
+		}
+		mavenCentral()
+		gradlePluginPortal()
+	}
+	resolutionStrategy {
+		eachPlugin {
+			if (requested.id.id == 'org.jetbrains.kotlin.jvm') useVersion(rootProps.getProperty('kotlin_version'))
+		}
+	}
+}
+
+rootProject.name = 'mcdebug'
+
+// NeoForge 移植是本目录下的独立 Gradle 构建（ModDevGradle），这里只做任务转发：
+//   ./gradlew :neoforge:build      → neoforge/gradlew build
+//   ./gradlew :neoforge:runServer  → neoforge/gradlew runServer
+include 'neoforge'
+project(':neoforge').buildFileName = 'delegate.gradle'

@@ -26,7 +26,7 @@ cp gradle/wrapper/gradle-wrapper.jar gradle/wrapper/gradle-wrapper.properties "$
 控制器复制世界时排除 session.lock，不删除或绕过源世界的锁。
 
 ```bash
-python3 scripts/client-performance.py --project "$F/consumer" --cli "$REPO/mcdebug-cli.jar" --mod-jar "$REPO/build/libs/mcdebug-0.6.1.jar" --source-world "$REPO/run/saves/New World" --out "$F/results" --display :108
+python3 scripts/client-performance.py --project "$F/consumer" --cli "$REPO/mcdebug-cli.jar" --mod-jar "$REPO/versions/mc26.3/build/libs/mcdebug-<version>.jar" --source-world "$REPO/versions/mc26.3/run/saves/New World" --out "$F/results" --display :108
 python3 scripts/summarize-client-performance.py --manifest "$F/results/manifest.json" > "$F/summary.json"
 python3 -m unittest discover -s scripts -p 'test_*performance.py' -v
 ```

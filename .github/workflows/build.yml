@@ -1,29 +1,178 @@
 name: build
 on: [pull_request, push]
 
+# 单仓多版本：根模块是纯 JVM，三个 Minecraft 版本在 versions/ 下各自独立构建（各需不同 JDK）。
+# 按改动路径触发：只动某个版本目录时不跑其他版本；contract/、mod-core/ 等共用部分变化时全部都跑。
 jobs:
-  build:
+  changes:
+    runs-on: ubuntu-24.04
+    outputs:
+      frontend: ${{ steps.filter.outputs.frontend }}
+      mc263: ${{ steps.filter.outputs.mc263 }}
+      mc1211: ${{ steps.filter.outputs.mc1211 }}
+      mc1201: ${{ steps.filter.outputs.mc1201 }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: detect changed areas
+        id: filter
+        shell: bash
+        run: |
+          # PR 对比 base；push 对比上一次推送的 commit。拿不到基点（首次推送、强制推送、tag）时视为全部改动。
+          base="${{ github.event.before }}"
+          if [[ "${{ github.event_name }}" == pull_request ]]; then base="${{ github.event.pull_request.base.sha }}"; fi
+          if [[ -z "$base" ]] || ! git cat-file -e "$base" 2>/dev/null; then
+            changed=$(git ls-files)
+          else
+            changed=$(git diff --name-only "$base" HEAD)
+          fi
+          touched() { grep -Eq "$1" <<<"$changed"; }
+          out() { echo "$1=$2" >> "$GITHUB_OUTPUT"; }
+          shared='^(contract/|mod-core/|sdk/|testkit/|cli/|frontend/|gradle/|gradle\.properties|build\.gradle|settings\.gradle|\.github/workflows/)'
+          out frontend "$(touched "$shared" && echo true || echo false)"
+          out mc263    "$(touched "$shared|^versions/mc26\.3/" && echo true || echo false)"
+          out mc1211   "$(touched "$shared|^versions/mc1\.21\.1/" && echo true || echo false)"
+          out mc1201   "$(touched "$shared|^versions/mc1\.20\.1/" && echo true || echo false)"
+          echo "changed files:"; sed 's/^/  /' <<<"$changed" | head -50
+
+  # 纯 JVM：contract / sdk / testkit / cli 的编译、单测与 CLI fat jar（不内嵌模组 JAR，不需要任何 Minecraft 构建）
+  frontend:
+    needs: changes
+    if: needs.changes.outputs.frontend == 'true'
     runs-on: ubuntu-24.04
     steps:
-      - name: checkout repository
-        uses: actions/checkout@v4
-      - name: validate gradle wrapper
-        uses: gradle/actions/wrapper-validation@v4
-      - name: setup jdk
-        uses: actions/setup-java@v4
+      - uses: actions/checkout@v4
+      - uses: gradle/actions/wrapper-validation@v4
+      - uses: actions/setup-java@v4
         with:
           java-version: 25
-          distribution: 'microsoft'
-      - name: make gradle wrapper executable
-        run: chmod +x ./gradlew
-      - name: build
+          distribution: temurin
+      - run: chmod +x ./gradlew versions/*/gradlew versions/*/neoforge/gradlew
+      - name: build JVM modules
         run: ./gradlew build :cli:copyCliJar
-      - name: capture build artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: Artifacts
-          # both mod jars (Fabric + NeoForge, + sources) and the CLI fat jar, which carries both
+          name: mcdebug-cli-jvm-only
+          path: mcdebug-cli.jar
+
+  mc26.3:
+    needs: changes
+    if: needs.changes.outputs.mc263 == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: gradle/actions/wrapper-validation@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: 25
+          distribution: temurin
+      - run: chmod +x ./gradlew versions/*/gradlew versions/*/neoforge/gradlew
+      - name: build Fabric 26.3 + NeoForge 26.3
+        working-directory: versions/mc26.3
+        run: ./gradlew build :neoforge:build --console=plain
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mods-26.3
           path: |
-            build/libs/
-            neoforge/build/libs/
-            mcdebug-cli.jar
+            versions/mc26.3/build/libs/*.jar
+            versions/mc26.3/neoforge/build/libs/*.jar
+            !**/*-sources.jar
+
+  mc1.21.1:
+    needs: changes
+    if: needs.changes.outputs.mc1211 == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: gradle/actions/wrapper-validation@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: 21
+          distribution: temurin
+      - run: chmod +x ./gradlew versions/*/gradlew versions/*/neoforge/gradlew
+      - name: build Fabric 1.21.1 + NeoForge 21.1
+        working-directory: versions/mc1.21.1
+        run: ./gradlew build :neoforge:build --console=plain
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mods-1.21.1
+          path: |
+            versions/mc1.21.1/build/libs/*.jar
+            versions/mc1.21.1/neoforge/build/libs/*.jar
+            !**/*-sources.jar
+
+  mc1.20.1:
+    needs: changes
+    if: needs.changes.outputs.mc1201 == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: gradle/actions/wrapper-validation@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: 17
+          distribution: temurin
+      - run: chmod +x ./gradlew versions/*/gradlew versions/*/neoforge/gradlew
+      - name: build Forge 1.20.1 (Gradle 8.1.1 runs on JDK 17)
+        working-directory: versions/mc1.20.1
+        run: ./gradlew build --console=plain
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mods-1.20.1
+          path: |
+            versions/mc1.20.1/build/libs/*.jar
+            !**/*-sources.jar
+            !**/*-slim.jar
+
+  # 至少一个 Minecraft 版本构建过时，重新打包 CLI 并内嵌它们（放回 versions/*/build/libs 让 cli/build.gradle 扫描到）
+  cli-with-mods:
+    needs: [changes, frontend, mc26.3, mc1.21.1, mc1.20.1]
+    if: >-
+      always() && !cancelled() &&
+      (needs.mc26.3.result == 'success' || needs.mc1.21.1.result == 'success' || needs.mc1.20.1.result == 'success')
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          java-version: 25
+          distribution: temurin
+      - run: chmod +x ./gradlew
+      - uses: actions/download-artifact@v4
+        if: needs.mc26.3.result == 'success'
+        with:
+          name: mods-26.3
+          path: downloaded/26.3
+      - uses: actions/download-artifact@v4
+        if: needs.mc1.21.1.result == 'success'
+        with:
+          name: mods-1.21.1
+          path: downloaded/1.21.1
+      - uses: actions/download-artifact@v4
+        if: needs.mc1.20.1.result == 'success'
+        with:
+          name: mods-1.20.1
+          path: downloaded/1.20.1
+      - name: place mod jars where cli/build.gradle scans
+        run: |
+          set -euo pipefail
+          for v in 26.3 1.21.1; do
+            d="downloaded/$v"; [[ -d "$d" ]] || continue
+            mkdir -p "versions/mc$v/build/libs" "versions/mc$v/neoforge/build/libs"
+            mv "$d"/mcdebug-neoforge-*.jar "versions/mc$v/neoforge/build/libs/"
+            mv "$d"/mcdebug-*.jar "versions/mc$v/build/libs/"
+          done
+          if [[ -d downloaded/1.20.1 ]]; then
+            mkdir -p versions/mc1.20.1/build/libs
+            mv downloaded/1.20.1/mcdebug-forge-*.jar versions/mc1.20.1/build/libs/
+          fi
+          find versions -path '*/build/libs/*.jar' | sort
+      - name: rebuild the CLI with every built mod jar
+        run: |
+          ./gradlew :cli:copyCliJar --console=plain
+          java -jar mcdebug-cli.jar jar --list
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mcdebug-cli
+          path: mcdebug-cli.jar

@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
-"""契约一致性检查（fabric-smoke.sh 使用）。
+"""契约一致性检查（各 Minecraft 版本的 fabric-smoke.sh / neoforge-smoke.sh 使用）。
 
-用法: contract-parity.py <socket 路径> <Methods.kt 路径>
+用法: contract-parity.py <socket 路径> <Methods.kt 路径> [--mc <1.20.1|1.21.1|26.3>]
 
 断言三件事：
   1. Methods.kt 里 SERVER_METHODS 引用到的每个方法名，服务端都已注册（不能是 -32601）；
   2. 客户端平面的 gui.* 在服务端**不存在**（必须 -32601），保证两个平面不串味；
   3. 解析器本身没坏（解析出的服务端方法数 > 0），否则"全部通过"可能是假阳性。
+
+`Methods.kt` 的清单是三个 Minecraft 版本的并集。`--mc` 给出被测服务端的版本时，按
+`MISSING_BY_MC_VERSION` 扣掉该版本尚未提供的方法；不传则按完整并集检查。
 
 必须按 id 匹配响应、跳过通知行：服务端在连接建立时会推一条 server.ready（无 id），
 "一行一响应"的写法会整体错位，把 -32601 归错方法上（曾经因此报出假的 inv.extract 缺失）。
@@ -18,6 +21,17 @@ import socket
 import sys
 
 READ_TIMEOUT = 15.0
+
+
+def parse_missing_by_version(path):
+    """Methods.MISSING_BY_MC_VERSION：{"1.20.1": {"gui.toasts"}, ...}（按文本解析，不执行 Kotlin）。"""
+    block = re.search(r"val MISSING_BY_MC_VERSION[^\n]*=\s*mapOf\((.*?)\n\s*\)", open(path).read(), re.S)
+    if block is None:
+        sys.exit("contract parity: cannot parse MISSING_BY_MC_VERSION out of Methods.kt")
+    missing = {}
+    for match in re.finditer(r'"([\d.]+)"\s+to\s+(?:setOf\(([^)]*)\)|emptySet\(\))', block.group(1)):
+        missing[match.group(1)] = set(re.findall(r'"([^"]+)"', match.group(2) or ""))
+    return missing
 
 
 def parse_server_methods(path):
@@ -41,10 +55,26 @@ def parse_server_methods(path):
 
 
 def main():
-    if len(sys.argv) != 3:
+    args = sys.argv[1:]
+    mc_version = None
+    if "--mc" in args:
+        index = args.index("--mc")
+        if index + 1 >= len(args):
+            sys.exit("contract parity: --mc needs a Minecraft version")
+        mc_version = args[index + 1]
+        del args[index:index + 2]
+    if len(args) != 2:
         sys.exit(__doc__)
-    sock_path, methods_kt = sys.argv[1:3]
+    sock_path, methods_kt = args
     names = parse_server_methods(methods_kt)
+    if mc_version is not None:
+        missing_by_version = parse_missing_by_version(methods_kt)
+        if mc_version not in missing_by_version:
+            sys.exit(f"contract parity: unknown --mc {mc_version} (known: {sorted(missing_by_version)})")
+        before = len(names)
+        names = [name for name in names if name not in missing_by_version[mc_version]]
+        print(f"contract parity: Minecraft {mc_version} subset, {len(names)} server methods "
+              f"({before - len(names)} not provided on this line)")
 
     conn = socket.socket(socket.AF_UNIX)
     conn.settimeout(READ_TIMEOUT)

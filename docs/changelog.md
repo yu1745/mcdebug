@@ -3,6 +3,8 @@
 从 AGENTS.md §11b 外移的已完成变更记录（新条目继续追加在顶部）。
 当前开发规则与不变式看 `AGENTS.md`；完整提交历史看 git log。
 
+- **单仓多版本 + 公共层重构（未发版）**：三个 Minecraft 版本合入同一仓库（`versions/mc26.3`、`versions/mc1.21.1`、`versions/mc1.20.1`，各为独立构建），根 Gradle 去掉 Loom 只管理纯 JVM 模块（`contract` / `sdk` / `testkit` / `cli`，Java 17 字节码）。`Methods.kt` 改为“并集 + 版本子集”（`MISSING_BY_MC_VERSION`，1.20.1 缺 `gui.toasts`），各版本 `RpcContractTest`、客户端自检与 `contract-parity.py --mc` 按子集校验。`mcdebug jar` 新增 `--mc <1.20.1|1.21.1|26.3>`、`--loader <fabric|neoforge|forge>` 与 `--list`，文件名统一为 `mcdebug-<loader>-<mc>-<version>.jar`，CLI 只内嵌 `versions/*/build/libs` 中已构建的 JAR（`-PembedVersions` 限定），不再触发版本构建。`SessionManager` 识别 ForgeGradle 并明确拒绝托管启动。新增 `mod-core/` 源码级共享（零 MC 依赖的 RPC 基础、谓词 DSL、输入状态、渲染调度与截图几何）。同时弃用 JitPack 发布链路（删除 `jitpack.yml`，各版本构建不再带 `maven-publish`）：发布收口到 GitHub Release（五个模组 JAR + 内嵌它们的 CLI）与 GitHub `maven` 分支（`frontend/` 暂存纯 JVM 构件与 `mcdebug-mod-<mc>-<loader>` 预编译模组 JAR，旧坐标 `mcdebug-neoforge` 作为兼容别名保留；`maven.yml` 从 `listPublicationArtifactIds` 读取构件清单做不可变检查）。记录见 `docs/monorepo.md`。
+
 - **默认静默执行调试服务端命令（未发版）**：`server.runCommand` 的反馈只随 RPC 响应的 `output` 返回，`CommandSource.shouldInformAdmins()` 改为由新参数 `showChat`（默认 false）控制；CLI `raw --show-chat server.runCommand ...` 与 SDK `ServerApi.runCommand(command, dim, showChat)` 打开原版管理员聊天提示。旧 CLI 连新模组得到静默行为，旧模组忽略该参数。
 
 - **默认隐藏托管客户端的提示弹窗（未发版）**：新 RPC `gui.toasts`（`{"enabled":bool}`）与 `gui.status.toastsEnabled`；客户端 Mixin 在 26.3 的 `ToastManager.addToast`（1.21.1 为 `ToastComponent`）拦截，关闭时 `clear()` 清理已显示和排队中的弹窗。`session start --show-toasts` 启动时开启，记录字段 `showToasts` 通过环境变量 `MCDEBUG_SHOW_TOASTS` 传给模组；仅带会话令牌的托管启动默认隐藏。

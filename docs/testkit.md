@@ -25,7 +25,7 @@ JVM 模块生成 Java 17 字节码，构建使用现有 JDK 25 工具链。
 
 [yu1745/mcdebug](https://github.com/yu1745/mcdebug/tree/maven) 的公开 `maven` 分支
 是标准 Maven 仓库。Gradle 直接从 GitHub Raw 下载预构建 JAR、POM 和模块元数据。
-消费者无需 GitHub Token 或 mcdebug 源码副本，也不使用 JitPack 或本地 Maven 仓库。
+消费者无需 GitHub Token 或 mcdebug 源码副本，也不使用本地 Maven 仓库；JitPack 发布链路已弃用。
 
 在消费者的 `build.gradle` 中配置：
 
@@ -44,16 +44,27 @@ repositories {
 }
 ```
 
-四个制品统一使用不可覆盖的版本号，当前为 `0.8.0-mc26.3`：
+全部制品统一使用不可覆盖的版本号，当前为 `0.8.0-mc26.3`。纯 JVM 构件：
 
 | 坐标 | 用途 |
 | --- | --- |
 | `com.mcdebug:mcdebug-testkit:0.8.0-mc26.3` | 宿主 JUnit 前端，传递引入 SDK 和协议模块 |
 | `com.mcdebug:mcdebug-sdk:0.8.0-mc26.3` | 供其他前端直接使用的 RPC SDK |
 | `com.mcdebug:mcdebug-contract:0.8.0-mc26.3` | 协议契约 |
-| `com.mcdebug:mcdebug-neoforge:0.8.0-mc26.3` | 自包含的 Minecraft 26.3 游戏端代理，要求 NeoForge 26.3.0.103+ |
 
-版本号包含 Minecraft 版本线，测试前端与游戏端代理必须使用一致版本。
+预编译的游戏端模组 JAR，每个 `<mc, loader>` 一个构件，均自包含（Fabric / NeoForge 版内嵌 Kotlin 标准库；Forge 1.20.1 版需要 KotlinForForge 4.x）：
+
+| 坐标 | 用途 |
+| --- | --- |
+| `com.mcdebug:mcdebug-mod-26.3-neoforge:0.8.0-mc26.3` | Minecraft 26.3 游戏端代理，要求 NeoForge 26.3.0.103+ |
+| `com.mcdebug:mcdebug-mod-26.3-fabric:0.8.0-mc26.3` | Minecraft 26.3 游戏端代理（Fabric） |
+| `com.mcdebug:mcdebug-mod-1.21.1-neoforge:0.8.0-mc26.3` | Minecraft 1.21.1 游戏端代理，要求 NeoForge 21.1.x |
+| `com.mcdebug:mcdebug-mod-1.21.1-fabric:0.8.0-mc26.3` | Minecraft 1.21.1 游戏端代理（Fabric） |
+| `com.mcdebug:mcdebug-mod-1.20.1-forge:0.8.0-mc26.3` | Minecraft 1.20.1 游戏端代理（Forge 47.x） |
+| `com.mcdebug:mcdebug-neoforge:0.8.0-mc26.3` | 旧坐标，内容与 `mcdebug-mod-26.3-neoforge` 相同，仅为既有消费者保留 |
+
+测试前端与游戏端代理必须使用一致的 `maven_version`；代理构件的 Minecraft 版本与加载器由构件 ID 表达，与被测工程一致。
+同一个模组 JAR 也可以从 GitHub Release 直接下载（文件名 `mcdebug-<loader>-<mc>-<version>.jar`）。
 通过**独立配置**解析游戏端代理，将其复制到专用游戏的 `mods/` 目录，
 不要把它放入宿主测试的类路径：
 
@@ -65,7 +76,7 @@ configurations {
         transitive = false
     }
 }
-dependencies { mcdebugAgent 'com.mcdebug:mcdebug-neoforge:0.8.0-mc26.3' }
+dependencies { mcdebugAgent 'com.mcdebug:mcdebug-mod-26.3-neoforge:0.8.0-mc26.3' }   // 换成被测工程的 <mc>-<loader>
 // 消费者自己的准备任务可将 configurations.mcdebugAgent 复制到测试游戏的 mods 目录。
 ```
 
@@ -198,16 +209,26 @@ class TankClientTest {
 
 ## 发布
 
-维护者在根 `gradle.properties` 中设置 `maven_version`。先构建游戏端代理，
-再暂存标准 Maven 仓库，包含 JAR、源码、POM、模块元数据和校验和：
+这是除 GitHub Release 之外唯一的分发通道（JitPack 已弃用）。维护者在根 `gradle.properties` 中设置
+`maven_version`，先构建纯 JVM 模块与**全部五个**预编译模组 JAR（三个 Minecraft 版本各需自己的 JDK，
+见[单仓多版本说明](monorepo.md)），再由 `frontend/` 暂存标准 Maven 仓库，包含 JAR、源码、POM、模块元数据和校验和：
 
 ```sh
-./gradlew build :cli:copyCliJar
+./gradlew build
+(cd versions/mc26.3 && ./gradlew build)                                      # JDK 25
+(cd versions/mc1.21.1 && JAVA_HOME=<JDK 21> ./gradlew build)                  # 连带 :neoforge:build
+(cd versions/mc1.20.1 && JAVA_HOME=<JDK 17> ./gradlew build)                  # 仅 Forge
 ./gradlew -p frontend stageMavenRepository
+./gradlew -p frontend -q listPublicationArtifactIds                          # 本次发布的全部构件 ID
 ```
+
+构件清单只在 `frontend/build.gradle` 维护（`mcdebug-mod-<mc>-<loader>` 与兼容坐标 `mcdebug-neoforge`）。
+缺少某个模组 JAR 时 `stageMavenRepository` 会直接失败并指出先构建哪个版本。
 
 默认暂存目录为 `frontend/build/github-maven`；`-PmavenRepoDir=/path/to/repository`
 可改为已有 Maven 分支的检出目录。暂存更新时保留该分支的旧版本和元数据。
 不得替换已发布版本，每次制品变化都要增加 `maven_version`。
-`publish Maven repository` 工作流会在 `26.3` 分支的版本号变更时构建并发布，
+`publish Maven repository` 工作流会在 `26.3` 分支的 `gradle.properties` / `frontend/` 变更时运行，
+从 `frontend/build.gradle` 读取构件清单做不可变检查（已发布版本直接跳过；同版本缺件视为不完整并失败，
+新增构件也必须提升 `maven_version`），然后构建三个版本并发布，
 并在 `maven` 分支的 `releases/<version>.txt` 中记录源码提交。
