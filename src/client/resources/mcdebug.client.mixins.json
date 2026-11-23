@@ -15,7 +15,8 @@
     "RenderSystemMixin",
     "GuiScreenAccessor",
     "AbstractWidgetAccessor",
-    "GuiTextRenderStateMixin"
+    "GuiTextRenderStateMixin",
+    "ToastManagerMixin"
   ],
   "injectors": {
     "defaultRequire": 1

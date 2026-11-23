@@ -6,6 +6,7 @@ import com.mcdebug.sdk.gson
 
 import com.github.ajalt.clikt.core.CliktCommand
 import com.github.ajalt.clikt.core.UsageError
+import com.github.ajalt.clikt.parameters.arguments.argument
 import com.github.ajalt.clikt.parameters.options.default
 import com.github.ajalt.clikt.parameters.options.flag
 import com.github.ajalt.clikt.parameters.options.option
@@ -72,6 +73,15 @@ Run `mcdebug gui <subcommand> --help` for options, examples and pitfalls of each
     override fun run() = Unit
 }
 
+class GuiToastsCmd : CliktCommand(
+    name = "toasts",
+    help = "show or hide toast notifications for the running client; off clears visible and queued toasts",
+) {
+    private val mode by argument("ON|OFF", help = "on enables future toasts, off hides them immediately").choice("on", "off")
+
+    override fun run() = withGuiApi { api -> printJson(api.gui.toasts(mode == "on")) }
+}
+
 class GuiStatusCmd : CliktCommand(
     name = "status",
     help = "client state: screen, window/gui scale, framebuffer size, endpoint, loaded jar path, contract check",
@@ -79,6 +89,7 @@ class GuiStatusCmd : CliktCommand(
 **Run this first.** It answers: is a client there, which jar did it load, what is on screen.
 
 **Fields that matter**
+- `toastsEnabled` - whether the client accepts toast notifications
 - `ready` - the client plane is answering
 - `inWorld` / `singleplayer` - a world (and an integrated server) is up
 - `screen` / `screenType` - the current Screen; `none` while playing
@@ -524,7 +535,7 @@ class GuiReloadResourcesCmd : CliktCommand(
 }
 
 fun guiSubcommands() = listOf(
-    GuiStatusCmd(), GuiScreenCmd(), GuiScreenshotCmd(), GuiOpenBlockCmd(),
+    GuiStatusCmd(), GuiToastsCmd(), GuiScreenCmd(), GuiScreenshotCmd(), GuiOpenBlockCmd(),
     GuiClickCmd(), GuiCloseCmd(), GuiConnectCmd(), GuiReloadResourcesCmd(),
     GuiKeyCmd(), GuiTypeCmd(), GuiDragCmd(), GuiDisconnectCmd(), GuiCompareCmd(),
     GuiActCmd(), GuiSettleCmd(), GuiReinitCmd(), GuiProblemsCmd(), GuiHotswapCmd(),

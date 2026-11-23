@@ -97,6 +97,12 @@ mcdebug snapshot capture --from 0,64,0 --to 2,66,2 --include block,inventory
 `world.attackEntity` 通过物品堆叠的原生属性遍历为假玩家装配属性，包含数据组件与动态物品属性。
 攻击后会移除最初安装的修饰符，即使攻击使物品堆叠损坏或发生变化也一样。
 
+`server.runCommand` 的命令反馈随 RPC 响应的 `output` 返回，默认**不再**向玩家发送原版管理员聊天提示。
+需要恢复该提示时使用 `mcdebug raw --show-chat server.runCommand '{"command":"/time set day"}'`，
+或直接在 RPC 参数中传入 `"showChat":true`（是否广播仍取决于服务器的 `sendCommandFeedback` 游戏规则）。
+`/say` 等本身就会发送聊天消息的命令不受影响。旧版 CLI 连接新模组时得到的是静默行为；
+旧模组忽略 `showChat`，保持原有聊天行为。
+
 | 命名空间 | 用途 |
 |---|---|
 | `world.*` | 方块、区域、使用、攻击、交互和强制加载 |
@@ -208,6 +214,7 @@ java -jar mcdebug-cli.jar session start ic2 --project ../ic2-fabric-1.21.1 --tas
 | `--world SAVE` | gameDir/saves 下已有的存档目录名；等待单人世界就绪，省略时只等待客户端主菜单就绪 |
 | `--game-dir PATH` / `--task TASK` / `--display DISPLAY` | 显式指定运行目录、完整 runClient 任务名、子进程显示设备 |
 | `--wait-seconds N` | 有限的启动或停止等待时间；启动超时表示错误，不保证进程已停止 |
+| `--show-toasts` | 托管客户端默认隐藏提示弹窗；传入后在启动时显示，也可用 `gui toasts on` 运行时切换 |
 | `session attach NAME --game-dir PATH` | 验证已有本机客户端，**不取得停止权限** |
 | `session list` / `session status NAME` | 报告元数据、PID 身份、端点、状态和错误 |
 | `session logs NAME --lines N` | 返回有限行数的 UTF-8 日志尾部，不持续跟随 |
@@ -219,6 +226,14 @@ java -jar mcdebug-cli.jar session start ic2 --project ../ic2-fabric-1.21.1 --tas
 会话、传输方式或超时时间，会拒绝执行，避免悄悄复用另一个目标；不同会话应分次调用。
 托管启动会禁用两个 TCP 监听器，将 Unix 套接字固定在所选 gameDir 中。
 会话第一版不处理跨机器或多人服务端配对，此时请在 `--session` 之外使用显式传输选项。
+
+托管启动默认隐藏提示弹窗（移动教程、配方解锁、进度，以及走标准弹窗队列的模组通知），
+避免遮挡截图或改变画面。`session start --show-toasts` 在启动时开启；
+`mcdebug --session NAME gui toasts on|off` 在当前客户端进程内切换，关闭时清理已显示和排队中的弹窗，
+重新开启后只显示之后的弹窗。`gui status` 的 `toastsEnabled` 报告当前状态。
+模组通过启动令牌环境变量 `MCDEBUG_SESSION_TOKEN` 识别托管启动；普通启动与 `session attach`
+保持原版行为。旧 CLI 启动的托管客户端同样隐藏弹窗，可用 `raw gui.toasts '{"enabled":true}'` 打开；
+新 CLI 启动旧模组时弹窗照常显示，`gui toasts` 返回方法不存在（退出码 3）。
 
 会话要求当前的 `server.ready` 和 `mcdebug/client.json` 携带进程身份：PID、操作系统进程
 startTime、每个 JVM 的 instanceId、启动令牌与规范化 gameDir。

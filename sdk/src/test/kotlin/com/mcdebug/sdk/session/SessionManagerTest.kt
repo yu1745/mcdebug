@@ -56,6 +56,7 @@ class SessionManagerTest {
         assertEquals(req.project.resolve("gradlew").toRealPath().toString(), spec.command[3])
         assertTrue(spec.command.last().contains("\"New 世界\""))
         assertTrue(spec.command.last().contains("\"${game.toRealPath()}\""))
+        assertEquals("false", spec.environment["MCDEBUG_SHOW_TOASTS"])
         assertEquals("demand", spec.environment["MCDEBUG_CLIENT_RENDER_MODE"])
         assertEquals("0", spec.environment["MCDEBUG_TCP_PORT"])
         assertEquals("false", spec.environment["MCDEBUG_CLIENT_TCP_ENABLED"])

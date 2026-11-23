@@ -3,6 +3,10 @@
 从 AGENTS.md §11b 外移的已完成变更记录（新条目继续追加在顶部）。
 当前开发规则与不变式看 `AGENTS.md`；完整提交历史看 git log。
 
+- **默认静默执行调试服务端命令（未发版）**：`server.runCommand` 的反馈只随 RPC 响应的 `output` 返回，`CommandSource.shouldInformAdmins()` 改为由新参数 `showChat`（默认 false）控制；CLI `raw --show-chat server.runCommand ...` 与 SDK `ServerApi.runCommand(command, dim, showChat)` 打开原版管理员聊天提示。旧 CLI 连新模组得到静默行为，旧模组忽略该参数。
+
+- **默认隐藏托管客户端的提示弹窗（未发版）**：新 RPC `gui.toasts`（`{"enabled":bool}`）与 `gui.status.toastsEnabled`；客户端 Mixin 在 26.3 的 `ToastManager.addToast`（1.21.1 为 `ToastComponent`）拦截，关闭时 `clear()` 清理已显示和排队中的弹窗。`session start --show-toasts` 启动时开启，记录字段 `showToasts` 通过环境变量 `MCDEBUG_SHOW_TOASTS` 传给模组；仅带会话令牌的托管启动默认隐藏。
+
 - **`server.runCommand` 走原版执行上下文（未发版）**：改用 `Commands.performCommand`（结果经 `CommandResultCallback` 取回），1.20.3+ 的 `/function`、`/return`、宏函数不再报 `This function should not run`。语法错误照旧抛 `-32603 command execution threw`；执行失败按 `sendFailure` 的红色消息判定，抛 `-32603 command failed: <消息>`；function 本身无结果回调时返回 `success:false` 加反馈文本。
 
 - **reflect 大值分页（未发版）**：`reflect.get`/`reflect.call`（含 `gui.reflect.*`）新增可选参数 `offset`/`limit`（1..10000，CLI `--offset/--limit`），`ReflectCore.Window` 同时作用于内联纯值数组（默认 200）与 ref 摘要（默认 20），摘要带 `offset`/`truncated`/`returned`；`limit` 显式给出时 map 一律走摘要分页。用途：一次取全部配方 id、某注册表的整张标签表（`--class ...BuiltInRegistries --path ITEM.tags --limit 10000`）。单测 `ReflectCoreTest`。

@@ -104,6 +104,8 @@ object ServerOps : RpcHandlerGroup {
      *
      * Notes:
      *  - The command string should include the leading "/" (e.g. "/time set day").
+     *  - "showChat":true restores the vanilla admin chat notification; by default the
+     *    command stays quiet for players and its feedback only travels in this response.
      *  - The "dim" param only changes the executor's current dimension; commands like
      *    /time set operate globally regardless.
      *  - This is equivalent to running the command at the server console; no player context.
@@ -112,6 +114,7 @@ object ServerOps : RpcHandlerGroup {
         RpcContext.onServer(server) {
             val p = params ?: throw RpcException(RpcErrors.INVALID_PARAMS, "params required")
             val command = p.requireString("command")
+            val showChat = p.getBoolOrFalse("showChat")
             val dim = p.getStringOrNull("dim")?.let {
                 ServerContext.world(server, it)  // validate dim
             }
@@ -135,7 +138,7 @@ object ServerOps : RpcHandlerGroup {
                 }
                 override fun acceptsSuccess(): Boolean = true
                 override fun acceptsFailure(): Boolean = true
-                override fun shouldInformAdmins(): Boolean = true
+                override fun shouldInformAdmins(): Boolean = showChat
             }
             // Vanilla's own entry point (Commands.performCommand) runs the command inside an execution context, which
             // 1.20.3+ needs for /function, /return and macro functions (a bare dispatcher.execute fails them with

@@ -298,8 +298,17 @@ class ServerApi(private val rpc: RpcClient) {
     fun health(): JsonElement = rpc.call("server.health")
 
     fun listDimensions(): JsonElement = rpc.call("server.listDimensions")
+
+    /** 执行服务端命令。输出随 RPC 返回；[showChat] 为 true 时才恢复原版管理员聊天反馈。 */
     fun runCommand(command: String, dim: String? = null): JsonElement =
-        rpc.call("server.runCommand", params { p("command", command); p("dim", dim) })
+        runCommand(command, dim, false)
+
+    fun runCommand(command: String, dim: String? = null, showChat: Boolean): JsonElement =
+        rpc.call("server.runCommand", params {
+            p("command", command)
+            p("dim", dim)
+            if (showChat) p("showChat", true)
+        })
 }
 
 /**
@@ -311,6 +320,10 @@ class ServerApi(private val rpc: RpcClient) {
  */
 class GuiApi(private val rpc: RpcClient) {
     fun status(): JsonElement = rpc.call("gui.status")
+
+    /** 显示或隐藏客户端提示弹窗；隐藏时立即清理已显示和排队中的弹窗。 */
+    fun toasts(enabled: Boolean): JsonElement =
+        rpc.call("gui.toasts", params { p("enabled", enabled) })
 
     fun connect(host: String, name: String? = null, waitTicks: Int? = null): JsonElement =
         rpc.call("gui.connect", params { p("host", host); p("name", name); p("waitTicks", waitTicks) })

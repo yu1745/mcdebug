@@ -61,6 +61,7 @@ object GuiOps : ClientRpcGroup {
 
     override fun methods(): Map<String, ClientRpcHandler> = linkedMapOf(
         "status" to ::status,
+        "toasts" to ::toasts,
         "connect" to ::connect,
         "openBlock" to ::openBlock,
         "screenshot" to ::screenshot,
@@ -69,6 +70,16 @@ object GuiOps : ClientRpcGroup {
         "stop" to ::stop,
         "disconnect" to ::disconnect,
     ) + GuiScreenOps.methods() + GuiClickOps.methods() + GuiPointerOps.methods() + GuiInputOps.methods() + GuiDevOps.methods()
+
+    /** 显示或隐藏提示弹窗；隐藏时清理已显示和排队中的弹窗，重新开启后只显示之后的弹窗。 */
+    private fun toasts(client: Minecraft, params: JsonObject?): CompletableFuture<JsonElement> =
+        ClientTasks.onClient(client) {
+            val enabled = params?.get("enabled")?.takeIf { it.isJsonPrimitive && it.asJsonPrimitive.isBoolean }
+                ?.asBoolean ?: throw RpcException(RpcErrors.INVALID_PARAMS, "enabled must be a boolean")
+            ClientToasts.enabled = enabled
+            if (!enabled) client.gui.toastManager().clear()
+            JsonObject().apply { addProperty("enabled", enabled) }
+        }
 
     // ---------------------------------------------------------------- status
 
@@ -82,6 +93,7 @@ object GuiOps : ClientRpcGroup {
             val gameDir = gameDir()
             JsonObject().apply {
                 addProperty("ready", true)
+                addProperty("toastsEnabled", ClientToasts.enabled)
                 addProperty("gameLoadFinished", client.isGameLoadFinished)
                 addProperty("overlay", client.gui.overlay()?.javaClass?.name ?: "")
                 add("graphics", JsonObject().apply {

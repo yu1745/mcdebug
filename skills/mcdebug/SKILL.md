@@ -66,6 +66,12 @@ CLI 内嵌**两个加载器**的模组 JAR 和本技能，均与 CLI 同版本�
   会话记录仍显示请求尺寸，`gui status` 显示实际窗口。
   托管会话的 `--render` 默认是 **demand**，模组全局默认仍是 continuous。
   任务需要正常连续帧循环时传入 `--render continuous`。
+  托管启动默认**隐藏提示弹窗**（移动教程、配方解锁、进度，以及走标准弹窗队列的模组通知）。
+  `session start --show-toasts` 在启动时开启，`mcdebug --session NAME gui toasts on|off` 在当前进程内切换；
+  关闭时清理已显示和排队中的弹窗，重新开启后只显示之后的弹窗，`gui status` 的 `toastsEnabled` 报告状态。
+  模组通过启动令牌环境变量识别托管启动，普通启动与 `session attach` 保持原版行为。
+  旧 CLI 启动的托管客户端同样隐藏，可用 `raw gui.toasts '{"enabled":true}'` 打开；
+  新 CLI 启动旧模组时弹窗照常显示，`gui toasts` 返回方法不存在（退出码 3）。
 
   状态为 `starting` → `client_ready`（标题界面）→ `world_ready`（需要 `--world`，且必须已进入单人世界），
   随后为 `stopping` / `stopped`；失败状态为 `failed`（检查 `lastError`）和 `dead`。
@@ -109,6 +115,9 @@ mcdebug raw wait.until     '{"predicate":"be[100,64,100].progress >= 100","timeo
   或在容器 GUI 打开时使用 `gui screen`。
   给玩家物品使用 `raw server.runCommand '{"command":"give @p minecraft:diamond 4"}'`；
   清空、传送、设置时间等任意服务端命令也可通过此方式执行。
+  命令反馈随 RPC 响应返回，默认不向玩家发送原版管理员聊天提示；
+  需要时用 `raw --show-chat server.runCommand ...` 或在原始 RPC 参数中传 `"showChat":true`，
+  旧模组忽略该参数并保持原有聊天行为。
 - `storage list` 显示方块暴露的句柄。`storage.*` 是通用物品、流体和能量 API，
   句柄为 `vanilla:inventory`、`fabric:item`、`fabric:fluid`、`teamreborn:energy`，
   两个加载器名称相同，底层分别由 Fabric Transfer API 或 NeoForge 能力实现。

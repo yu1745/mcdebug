@@ -18,6 +18,8 @@ flowchart LR
 CLI 用于交互调试和脚本；JUnit 测试前端由 Gradle 执行，两者共用同一份 RPC SDK。
 服务端平面负责世界、库存和机器状态；客户端平面提供真实界面操作、截图及渲染诊断。
 测试前端通过 [GitHub Maven 仓库](docs/testkit.md#github-maven-依赖)引入预编译依赖。
+`server.runCommand` 默认静默执行（反馈随 RPC 返回，`raw --show-chat` 恢复聊天提示）；
+托管会话默认隐藏提示弹窗（`session start --show-toasts` 或 `gui toasts on|off` 切换）。
 
 ## 快速开始
 

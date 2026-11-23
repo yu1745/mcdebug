@@ -26,6 +26,8 @@ data class ListDimensionsResp(
 data class RunCommandReq(
     val command: String,
     val dim: String? = null,
+    /** 是否恢复原版管理员聊天反馈；默认静默，命令输出仍随 RPC 响应返回。 */
+    val showChat: Boolean = false,
 )
 
 /** server.runCommand 响应。 */

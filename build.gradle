@@ -182,8 +182,10 @@ tasks.register('verifyJarSelfContained') {
 			'com/mcdebug/loader/fabric/FabricLoaderApi.class',
 			'com/mcdebug/loader/fabric/FabricStorageApi.class',
 			'com/mcdebug/client/ClientPlane.class',                 // 两个 loader 共用的客户端平面引导
+			'com/mcdebug/client/ClientToasts.class',               // gui.toasts + 托管客户端默认隐藏弹窗
 			'com/mcdebug/client/loader/ClientLoaderApi.class',
 			'com/mcdebug/client/loader/fabric/FabricClientLoaderApi.class',
+			'com/mcdebug/client/mixin/ToastManagerMixin.class',       // 26.3 的 ToastManager.addToast 过滤
 			'com/mcdebug/client/mixin/GameRendererMixin.class',
 			'com/mcdebug/client/mixin/AbstractContainerScreenAccessor.class',
 			'com/mcdebug/client/input/GuiClickOps.class',                // agent loop (0.7): settle/act/inspection

@@ -259,7 +259,7 @@ class SessionManager(
         return SessionRecord(name = request.name, registryDir = registry.directory.toString(), owned = true,
             sessionToken = token, gameDir = game.toString(), project = project.toString(), task = task,
             world = request.world, render = request.render, display = request.display ?: System.getenv("DISPLAY"),
-            width = request.width, height = request.height, launcher = runtime.currentProcess(),
+            width = request.width, height = request.height, showToasts = request.showToasts, launcher = runtime.currentProcess(),
             logPath = registry.directory.resolve("${request.name}-$token.log").toString())
     }
 
@@ -360,13 +360,15 @@ class SessionManager(
             "MCDEBUG_CLIENT_RENDER_MODE" to record.render!!, "MCDEBUG_TCP_PORT" to "0", "MCDEBUG_TCP_ENABLED" to "false",
             "MCDEBUG_CLIENT_TCP_ENABLED" to "false", "MCDEBUG_SOCKET" to Path.of(record.gameDir).resolve("mcdebug/socket").toString(),
             "MCDEBUG_CLIENT_SOCKET" to Path.of(record.gameDir).resolve("mcdebug/clientSocket").toString())
+        env["MCDEBUG_SHOW_TOASTS"] = record.showToasts.toString()
         record.display?.let { env["DISPLAY"] = it }
         return SessionLaunch(command, project, env, Path.of(record.logPath!!))
     }
 
     private fun sameConfig(a: SessionRecord, b: SessionRecord): Boolean =
         a.project == b.project && a.task == b.task && a.gameDir == b.gameDir && a.world == b.world &&
-            a.render == b.render && a.display == b.display && a.width == b.width && a.height == b.height
+            a.render == b.render && a.display == b.display && a.width == b.width && a.height == b.height &&
+            a.showToasts == b.showToasts
 
     private fun occupied(record: SessionRecord): Boolean =
         record.process?.let(::alive) == true || record.wrapper?.let(runtime::isAlive) == true ||

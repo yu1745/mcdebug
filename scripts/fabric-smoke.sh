@@ -151,7 +151,8 @@ check "wait.until sprint engine off" 'No tick sprint in progress'               
 check "lever support"              '"ok":true'                          raw world.setBlock '{"pos":[4,199,0],"block":"minecraft:stone"}'
 check "place lever"                '"ok":true'                          raw world.setBlock '{"pos":[4,200,0],"block":"minecraft:lever","state":{"face":"floor","facing":"north"}}'
 check "redstone setLever"          '"powered":true'                     raw redstone.setLever '{"pos":[4,200,0],"powered":true}'
-check "runCommand"                 '"success":true'                     raw server.runCommand '{"command":"/time set day"}'
+check "runCommand quiet"           '"output":"Set '                     raw server.runCommand '{"command":"/time set day"}'
+check "runCommand --show-chat"     '"output":"Set '                     raw --show-chat server.runCommand '{"command":"/time set day"}'
 
 # ---- 参数校验：缺参/类型错必须是 -32602 并点名参数，不能是 -32603 ----
 check "missing pos -> -32602"      'error [-32602] missing param: pos'  raw inv.setSlot '{"slot":0,"item":"minecraft:stone"}'
